@@ -227,6 +227,12 @@ class ZayaBar(QWidget):
 
     def load_media(self):
         path = asset_path(self.config, self.mode, self.emotion, self.config_path)
+        if not path or not path.is_file():
+            fallbacks = []
+            if self.mode == 'talking':
+                fallbacks.append(asset_path(self.config, 'talking', 'neutral', self.config_path))
+            fallbacks.append(asset_path(self.config, 'standby', config_path=self.config_path))
+            path = next((candidate for candidate in fallbacks if candidate and candidate.is_file()), path)
         key = (str(path), self.mode, self.emotion, self.size().width(), self.size().height())
         if key == self.loaded_asset:
             return

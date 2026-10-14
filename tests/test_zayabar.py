@@ -71,6 +71,10 @@ with tempfile.TemporaryDirectory() as folder:
     bar.state_changed.emit('SPEAKING')
     app.processEvents()
     assert bar.mode == 'talking'
+    bar.config['assets']['talking']['neutral'] = str(root/'thinking.png')
+    bar.config['assets']['talking']['sad'] = str(root/'missing.png')
+    bar.on_runtime({'event':'avatar.emotion','emotion':'sad'})
+    assert not bar.frame.isNull() and bar.frame.toImage().pixelColor(50,50).blue()==255
     bar.on_runtime({'event':'avatar.emotion','emotion':'happy'})
     assert bar.emotion == 'happy'
     bar.state_changed.emit('LISTENING')
