@@ -141,5 +141,5 @@ class GitRepo:
             from core.site_registry import normalize_git_remote
             from actions.browser_control import browser_control
             url = normalize_git_remote(self.text('remote', 'get-url', remote))
-            return browser_control({'action': 'go_to', 'url': url}, None)
+            return browser_control({'action': 'go_to', 'url': url, 'verify': True}, None)
         raise ValueError(f'Unsupported Git operation: {operation}')

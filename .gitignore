@@ -67,4 +67,3 @@ memory/profile*.json
 memory/*.db-*
 config/hermes*.json
 .hermes/
-

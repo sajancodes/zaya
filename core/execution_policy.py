@@ -44,6 +44,8 @@ def classify(command: str, cwd: str = '') -> Decision:
         return Decision('confirm', 'Compound or interpreted command requires inspection.')
     if re.search(r'(?i)(?:[a-z]:[/\\]windows(?:[/\\]|$)|/etc/|/boot/|/sys/)', command + ' ' + cwd):
         return Decision('confirm', 'Command targets a protected system location.')
+    if head == 'git' and tokens[1:] == ['--version']:
+        return Decision('read', 'Git version inspection.')
     if head == 'git':
         if len(tokens) < 2 or tokens[1].startswith('-'):
             return Decision('confirm', 'Git global options may change execution behavior.')

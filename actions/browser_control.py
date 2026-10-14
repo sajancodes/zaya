@@ -22,20 +22,8 @@ from playwright.async_api import (
 _OS = platform.system()   # "Windows" | "Darwin" | "Linux"
 
 def _normalize_url(url: str) -> str:
-    """
-    Bare words like "instagram" → "https://instagram.com"
-    Domains like "instagram.com" → "https://instagram.com"
-    Full URLs pass through unchanged.
-    """
-    url = url.strip()
-    if not url:
-        return "about:blank"
-    if "://" in url:
-        return url
-    # No dot at all → assume .com  (e.g. "instagram" → "instagram.com")
-    if "." not in url:
-        url = url + ".com"
-    return "https://" + url
+    from core.site_registry import resolve_url
+    return resolve_url(url)
 
 
 def _user_agent() -> str:
@@ -660,9 +648,15 @@ class _BrowserSession:
             except Exception as e:
                 print(f"[Browser] New-tab retry failed: {e}")
 
-        if result_url and result_url not in ("about:blank", "", None):
-            return f"Opened: {result_url}"
-        return f"Could not open: {url}"
+        from core.site_registry import matches, browser_state
+        from core.tool_result import ToolResult
+        verified = matches(url, result_url or "")
+        browser_state.update(browser=self.browser_name, current_url=result_url,
+                             last_exact_navigation=url, verified=verified)
+        return ToolResult("success" if verified else "failed",
+                          "Navigation verified." if verified else "Browser URL does not match requested destination.",
+                          dict(browser_state), [{"expected_url": url, "current_url": result_url}],
+                          side_effect=True)
 
     async def search(self, query: str, engine: str = "google") -> str:
         base = _SEARCH_ENGINES.get(engine.lower(), _SEARCH_ENGINES["google"])
@@ -963,7 +957,7 @@ def browser_control(
     # opens here. The only exception: if an automation flow is already running,
     # navigation continues in that window (so multi-step tasks aren't split).
     if action in ("go_to", "search", "new_tab"):
-        if _registry.has(browser):
+        if params.get("verify") or _registry.has(browser):
             sess = _registry.get(browser)
             try:
                 if action == "search":
@@ -991,7 +985,9 @@ def browser_control(
         if result.startswith("Opened") and nav_url:
             _registry.note_native_url(_normalize_url(nav_url))
         _log(player, result)
-        return result
+        from core.tool_result import ToolResult
+        return ToolResult("partial", str(result), {"requested_url": nav_url, "verified": False},
+                          [{"browser_launch_requested": True}], side_effect=True)
 
     # ── Interactive actions (click/type/read…) ───────────────────────────────
     # These require a physically controllable browser; the automation window
@@ -1067,6 +1063,7 @@ TOOL = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
+            "verify": {"type": "BOOLEAN", "description": "Use an automation session and verify exact destination URL."},
             "action": {
                 "type": "STRING",
                 "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
