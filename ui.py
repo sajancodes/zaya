@@ -1037,7 +1037,7 @@ class LogWidget(QTextEdit):
         self._text    = ""
         self._pos     = 0
         self._tag     = "sys"
-        self._ai_name_lc = "jarvis"   # updated when assistant name changes
+        self._ai_name_lc = "zaya"   # updated when assistant name changes
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._sig.connect(self._enqueue)
@@ -1062,7 +1062,7 @@ class LogWidget(QTextEdit):
         if   tl.startswith("you:"):                              self._tag = "you"
         elif tl.startswith(_ai_pfx) or tl.startswith("jarvis:"): self._tag = "ai"
         elif tl.startswith("file:"):                             self._tag = "file"
-        elif "err" in tl:                                        self._tag = "err"
+        elif tl.startswith(("err:", "error:")):                                        self._tag = "err"
         else:                                                    self._tag = "sys"
         self._tmr.start(6)
 
@@ -1652,7 +1652,8 @@ class CustomizeOverlay(QWidget):
 
         lay.addWidget(_lbl("ASSISTANT NAME", 8, color=C.TEXT_DIM,
                             align=Qt.AlignmentFlag.AlignLeft))
-        self._name_input = QLineEdit(assistant_name)
+        self._name_input = QLineEdit("Zaya")
+        self._name_input.setReadOnly(True)
         self._name_input.setFont(QFont("Courier New", 10))
         self._name_input.setFixedHeight(32)
         self._name_input.setStyleSheet(_fs)
@@ -2940,6 +2941,7 @@ class RemoteKeyOverlay(QWidget):
 
 
 class MainWindow(QMainWindow):
+    _activity_sig   = pyqtSignal(str)
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
@@ -3223,6 +3225,10 @@ class MainWindow(QMainWindow):
         self._metric_tmr.start(2000)
         self._update_metrics()
 
+        self._activity_sig.connect(self._activity_lbl.setText)
+        from core.event_bus import bus
+        self._unsubscribe_runtime = bus.subscribe('*', self._runtime_event)
+        self.destroyed.connect(lambda *_: self._unsubscribe_runtime())
         self._log_sig.connect(self._log.append_log)
         self._state_sig.connect(self._apply_state)
         self._content_sig.connect(self._show_content)
@@ -3988,14 +3994,17 @@ class MainWindow(QMainWindow):
         self._title_lbl.setFont(QFont("Courier New", 17, QFont.Weight.Bold))
         self._title_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         mid.addWidget(self._title_lbl)
-        _sub_text = ("A Friendly Assistant"
-                     if _disp in ("Zaya", "J.A.R.V.I.S")
-                     else "Personal AI Assistant")
+        _sub_text = "Built by Sajan Rai"
         self._sub_lbl = QLabel(_sub_text)
         self._sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._sub_lbl.setFont(QFont("Courier New", 7))
         self._sub_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         mid.addWidget(self._sub_lbl)
+        self._activity_lbl = QLabel("Ready · Nika")
+        self._activity_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._activity_lbl.setFont(QFont("Courier New", 7))
+        self._activity_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        mid.addWidget(self._activity_lbl)
         lay.addLayout(mid)
         lay.addStretch()
 
@@ -5324,6 +5333,18 @@ class MainWindow(QMainWindow):
         ov.show()
         self._customize_overlay = ov
 
+    def _runtime_event(self, event: dict) -> None:
+        from core.hud_state import label
+        status = label(event)
+        if status:
+            self._activity_sig.emit(status[:85])
+        name = event["event"]
+        if name in {"tool.started", "tool.completed", "tool.failed"}:
+            category = "ERROR" if name == "tool.failed" else "TOOL"
+            self._log_sig.emit(f"{category}: {event.get('tool', 'Task')} · {event.get('status', 'working')}")
+        elif name == "whatsapp.message.received":
+            self._log_sig.emit("WHATSAPP: New message observed in the local inbox.")
+
     def _preview_ui_color(self, hex_color: str):
         """Live preview — paints the whole interface the new colour (does NOT write to config)."""
         old = current_palette()
@@ -5333,14 +5354,11 @@ class MainWindow(QMainWindow):
     def _apply_name_update(self, name: str, user_name: str, ui_color: str = "",
                            voice: str = ""):
         """Update all name/theme-dependent UI elements and persist to config."""
-        self._assistant_name = name.strip() or "Zaya"
+        self._assistant_name = "Zaya"
         display = self._assistant_name.upper()
         self.setWindowTitle(f"{display} — {APP_VERSION}")
         self._title_lbl.setText(display)
-        if display in ("Zaya", "J.A.R.V.I.S"):
-            self._sub_lbl.setText("Just A Rather Very Intelligent System")
-        else:
-            self._sub_lbl.setText("Personal AI Assistant")
+        self._sub_lbl.setText("Built by Sajan Rai")
         self._log._ai_name_lc = self._assistant_name.lower()
         self.hud._assistant_name = display
 
@@ -5583,7 +5601,7 @@ class MainWindow(QMainWindow):
             self._overlay.hide()
             self._overlay = None
         self._apply_state("LISTENING")
-        self._assistant_name = _read_full_config().get("assistant_name", "Zaya") or "Zaya"
+        self._assistant_name = "Zaya"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")
 
 

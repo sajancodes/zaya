@@ -308,7 +308,7 @@ def reminder(
 
     os_name    = _get_os()
     safe_msg   = _sanitise(message)
-    task_name  = f"JARVISReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}"
+    task_name  = f"ZayaReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}"
 
     try:
         script_path = _write_notify_script(task_name, safe_msg, os_name)

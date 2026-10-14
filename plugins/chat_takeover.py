@@ -481,7 +481,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
         for them, mine in _state["exchanges"][-_PANEL_EXCHANGES:]:
             if them:
                 lines.append(f"→ Them: {them}")
-            lines.append(f"← JARVIS: {mine}")
+            lines.append(f"← Zaya: {mine}")
             lines.append("")
         try:
             player.show_content("💬 CHAT TAKEOVER", "\n".join(lines).strip())
@@ -510,7 +510,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
             engine = _LiveEngine(api_key, system)
             _state["engine"] = "live"
 
-        _log(f"JARVIS: Chat takeover armed ({_state['engine']} engine) — "
+        _log(f"Zaya: Chat takeover armed ({_state['engine']} engine) — "
              f"pasting into the focused input box (no clicking); the focus "
              f"guard locks onto the chat window at the first reply. Watching "
              f"the screen every {_POLL_SECONDS}s.")
@@ -604,7 +604,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                         recent_replies.append(" / ".join(sent))
                         del recent_replies[:-3]   # remember the last 3 bursts
                         prev_raw = None   # our messages change the screen
-                        _log(f"JARVIS: Auto-replied ({len(sent)} message"
+                        _log(f"Zaya: Auto-replied ({len(sent)} message"
                              f"{'s' if len(sent) > 1 else ''}) — "
                              f"“{' | '.join(sent)[:120]}”")
                         _panel()
@@ -615,7 +615,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                 break
             except Exception as e:
                 errors += 1
-                _log(f"JARVIS: Chat takeover hiccup ({errors}/{_MAX_ERRORS}): {e}")
+                _log(f"Zaya: Chat takeover hiccup ({errors}/{_MAX_ERRORS}): {e}")
                 if errors >= _MAX_ERRORS:
                     if _state["engine"] == "live":
                         # Live keeps failing — degrade to REST, keep going
@@ -645,7 +645,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
             except Exception:
                 pass
         _state["ended"] = ended
-        _log(f"JARVIS: Chat takeover over ({ended}) — "
+        _log(f"Zaya: Chat takeover over ({ended}) — "
              f"{len(_state['exchanges'])} replies sent this run.")
 
 

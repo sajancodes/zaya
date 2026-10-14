@@ -202,7 +202,7 @@ def _worker(player, stop: threading.Event) -> None:
         while not stop.is_set():
             wmin = _state["work_min"]
             task = _state["task"]
-            _log(player, f"JARVIS: Focus block started — {wmin} min.")
+            _log(player, f"Zaya: Focus block started — {wmin} min.")
             if not _run_phase(player, stop, "work", wmin, task):
                 break  # stopped mid-focus → not counted
 

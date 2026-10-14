@@ -170,7 +170,7 @@ def _worker(player, stop: threading.Event) -> None:
                  f"Remind the user to drink a glass of water now. Mention they've "
                  f"had {ml} of {goal} millilitres today, {remaining} to go. "
                  f"Keep it to one short, friendly sentence.")
-            _log(player, f"JARVIS: Hydration reminder — {ml}/{goal} ml so far.")
+            _log(player, f"Zaya: Hydration reminder — {ml}/{goal} ml so far.")
     finally:
         with _lock:
             _state["running"] = False

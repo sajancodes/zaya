@@ -247,7 +247,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 player.show_content("🍽 NUTRITION SCAN", panel)
             except Exception:
                 pass
-        _log(f"JARVIS: Nutrition scan complete — {data.get('food')}"
+        _log(f"Zaya: Nutrition scan complete — {data.get('food')}"
              f" ≈ {data.get('calories_kcal')} kcal.")
 
     return spoken or "The scan finished, but I couldn't read the result."

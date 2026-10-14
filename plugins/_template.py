@@ -39,7 +39,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         return f"Sir, my_plugin failed: {e}"
     if player:
         try:
-            player.write_log(f"JARVIS: {result_text}")
+            player.write_log(f"Zaya: {result_text}")
         except Exception:
             pass
     return result_text
