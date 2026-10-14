@@ -53,6 +53,7 @@ class _Pending:
     detail:  str
     run:     Callable[[], str]
     at:      float
+    on_cancel: Optional[Callable[[str], None]] = None
 
 
 _pending: Optional[_Pending] = None
@@ -79,7 +80,8 @@ def _log(msg: str) -> None:
             pass
 
 
-def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
+def request(key: str, title: str, detail: str, run: Callable[[], str],
+            on_cancel: Optional[Callable[[str], None]] = None) -> str:
     """Park an irreversible action behind the on-screen gate.
 
     Returns the sentence the tool should hand back to the model — phrased as an
@@ -94,8 +96,12 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
                 f"not available, so I have not done it.")
 
     with _lock:
+        old = _pending
         _pending = _Pending(key=key, title=title, detail=detail,
-                            run=run, at=time.monotonic())
+                            run=run, at=time.monotonic(), on_cancel=on_cancel)
+        current = _pending
+    if old and old.on_cancel:
+        old.on_cancel('Superseded by another confirmation.')
 
     try:
         _show_cb(title, detail)
@@ -105,6 +111,14 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
         return f"Could not ask for confirmation: {e}. Nothing was done."
 
     _log(f"SYS: Awaiting confirmation — {title}")
+    def expire():
+        with _lock:
+            matches = _pending is current
+        if matches:
+            resolve(False)
+    timer = threading.Timer(TIMEOUT_SECONDS + 0.05, expire)
+    timer.daemon = True
+    timer.start()
     return (
         f"[CONFIRMATION_PENDING] I have put a confirmation on screen for: {title}. "
         f"Say ONE short sentence in the user's own language telling them you need "
@@ -134,10 +148,14 @@ def resolve(accepted: bool) -> None:
 
     if time.monotonic() - p.at > TIMEOUT_SECONDS:
         _log(f"SYS: Confirmation expired — {p.title}")
+        if p.on_cancel:
+            p.on_cancel('Confirmation expired.')
         return
 
     if not accepted:
         _log(f"SYS: Cancelled — {p.title}")
+        if p.on_cancel:
+            p.on_cancel('Owner cancelled the action.')
         return
 
     def _worker():

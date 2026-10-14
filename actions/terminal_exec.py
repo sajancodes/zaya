@@ -30,18 +30,27 @@ def terminal_exec(parameters: dict, **_kwargs) -> ToolResult:
     if decision.level == 'deny':
         return ToolResult('failed', decision.reason)
     if decision.level == 'confirm':
+        from core.operator import current_task, current_request
+        originating_task = current_task.get()
+        originating_request = current_request.get()
         def approved():
             from core.task_runtime import get_runtime
             from core.event_bus import bus
             runtime = get_runtime()
-            task = runtime.create('Approved terminal command')
-            runtime.attempt(task.id, 'terminal_exec')
+            task = runtime.get(originating_task) if originating_task else runtime.create('Approved terminal command')
+            runtime.transition(task.id, 'executing', active_step='terminal_exec')
             result = execute()
             runtime.finish(task.id, result)
+            if originating_request and result.status == 'success':
+                runtime.remember(originating_request, result)
             bus.publish('tool.completed', tool='terminal_exec', result=result.to_dict())
             return str(result)
+        def cancelled(reason):
+            if originating_task:
+                from core.task_runtime import get_runtime
+                get_runtime().transition(originating_task, 'cancelled', error=reason)
         return normalize(confirm.request('terminal', 'Run terminal command',
-                         f'{command}\nWorking directory: {directory}\n{decision.reason}', approved))
+                         f'{command}\nWorking directory: {directory}\n{decision.reason}', approved, on_cancel=cancelled))
     return execute()
 
 
