@@ -1124,6 +1124,33 @@ class JarvisLive:
         return out
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
+        from core.task_runtime import get_runtime
+        from core.tool_result import normalize, ToolResult
+        from core.audit import write
+        runtime = get_runtime()
+        request_id = str(fc.id or "")
+        cached = runtime.cached(request_id) if request_id else None
+        if cached is not None:
+            return types.FunctionResponse(id=fc.id, name=fc.name, response={"result": cached.to_dict()})
+        task = runtime.create(str(fc.name), source="local_ui")
+        runtime.attempt(task.id, str(fc.name))
+        self.ui.write_log(f"TASK: {fc.name} · executing")
+        try:
+            response = await self._execute_tool_impl(fc)
+            result = normalize(response.response.get("result"))
+            response.response["result"] = result.to_dict()
+        except Exception as error:
+            result = ToolResult("failed", f"{fc.name} failed: {error}")
+            response = types.FunctionResponse(id=fc.id, name=fc.name, response={"result": result.to_dict()})
+        runtime.finish(task.id, result)
+        if request_id and result.status == "success":
+            runtime.remember(request_id, result)
+        write({"task_id": task.id, "tool": fc.name, "status": result.status,
+               "evidence": result.evidence})
+        self.ui.write_log(f"TASK: {fc.name} · {result.status}")
+        return response
+
+    async def _execute_tool_impl(self, fc) -> types.FunctionResponse:
         name = fc.name
         args = dict(fc.args or {})
 
@@ -1287,7 +1314,7 @@ class JarvisLive:
         _extra = {"scheduling": _sched} if _sched else {}
         return types.FunctionResponse(
             id=fc.id, name=name,
-            response={"result": result},
+            response={"result": __import__("core.tool_result", fromlist=["normalize"]).normalize(result).to_dict()},
             **_extra
         )
 

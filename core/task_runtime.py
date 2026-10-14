@@ -1,0 +1,127 @@
+"""Durable task state and bounded, evidence-based execution bookkeeping."""
+from __future__ import annotations
+import json
+import sqlite3
+import threading
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from core import audit
+from core.event_bus import bus
+from core.tool_result import ToolResult
+
+STATES = {'created', 'inspecting', 'planning', 'executing', 'verifying',
+          'waiting_confirmation', 'waiting_external', 'completed', 'failed', 'cancelled', 'paused'}
+TERMINAL = {'completed', 'failed', 'cancelled'}
+
+
+@dataclass
+class Task:
+    id: str
+    goal: str
+    source: str = 'local_ui'
+    trust_level: str = 'local_owner'
+    state: str = 'created'
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    active_step: str | None = None
+    attempts: int = 0
+    max_attempts: int = 3
+    evidence: list[dict] = field(default_factory=list)
+    side_effects: list[dict] = field(default_factory=list)
+    error: str | None = None
+    parent_id: str | None = None
+
+
+class TaskRuntime:
+    def __init__(self, path: Path | str = ':memory:') -> None:
+        if str(path) != ':memory:':
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.db.execute('PRAGMA journal_mode=WAL')
+        self.db.execute('CREATE TABLE IF NOT EXISTS runtime_tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS tool_results (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        # A process restart cannot prove an in-flight side effect failed. Do not replay it.
+        for task in self.list():
+            if task.state not in TERMINAL:
+                self.transition(task.id, 'paused', error='Application restarted; inspect evidence before resuming.')
+
+    def create(self, goal: str, **kwargs) -> Task:
+        task = Task(id=uuid.uuid4().hex, goal=goal, **kwargs)
+        self._save(task, 'task.created')
+        return task
+
+    def _save(self, task: Task, event: str = 'task.updated') -> Task:
+        task.updated_at = time.time()
+        payload = audit.redact(asdict(task))
+        with self._lock, self.db:
+            self.db.execute('INSERT OR REPLACE INTO runtime_tasks VALUES (?,?)', (task.id, json.dumps(payload)))
+        bus.publish(event, task=payload)
+        return task
+
+    def get(self, task_id: str) -> Task:
+        with self._lock:
+            row = self.db.execute('SELECT payload FROM runtime_tasks WHERE id=?', (task_id,)).fetchone()
+        if not row:
+            raise KeyError(task_id)
+        return Task(**json.loads(row[0]))
+
+    def list(self, limit: int = 200) -> list[Task]:
+        with self._lock:
+            rows = self.db.execute('SELECT payload FROM runtime_tasks ORDER BY rowid DESC LIMIT ?', (min(limit, 1000),)).fetchall()
+        return [Task(**json.loads(row[0])) for row in rows]
+
+    def transition(self, task_id: str, state: str, **updates) -> Task:
+        with self._lock:
+            task = self.get(task_id)
+            if state not in STATES or (task.state in TERMINAL and state != task.state):
+                raise ValueError(f'Invalid task transition: {task.state} -> {state}')
+            for key, value in updates.items():
+                if key not in {'active_step', 'error', 'evidence', 'side_effects'}:
+                    raise ValueError(f'Unsupported task field: {key}')
+                setattr(task, key, value)
+            task.state = state
+            return self._save(task, f'task.{state}' if state in TERMINAL else 'task.updated')
+
+    def attempt(self, task_id: str, step: str) -> Task:
+        with self._lock:
+            task = self.get(task_id)
+            if task.state in TERMINAL or task.attempts >= task.max_attempts or task.side_effects:
+                raise ValueError('Retry budget exhausted, terminal task, or successful side effect already recorded.')
+            task.attempts += 1
+            task.state, task.active_step = 'executing', step
+            return self._save(task)
+
+    def finish(self, task_id: str, result: ToolResult) -> Task:
+        task = self.get(task_id)
+        task.evidence.extend(result.evidence)
+        if result.side_effect and result.status == 'success':
+            task.side_effects.append({'step': task.active_step, 'summary': result.summary})
+        state = {'success': 'completed', 'failed': 'failed', 'partial': 'waiting_external',
+                 'waiting_confirmation': 'waiting_confirmation'}[result.status]
+        return self.transition(task_id, state, evidence=task.evidence, side_effects=task.side_effects,
+                               error=result.summary if result.status == 'failed' else None)
+
+    def cached(self, request_id: str) -> ToolResult | None:
+        with self._lock:
+            row = self.db.execute('SELECT payload FROM tool_results WHERE request_id=?', (request_id,)).fetchone()
+        return ToolResult(**json.loads(row[0])) if row else None
+
+    def remember(self, request_id: str, result: ToolResult) -> None:
+        with self._lock, self.db:
+            self.db.execute('INSERT OR IGNORE INTO tool_results VALUES (?,?)',
+                            (request_id, json.dumps(audit.redact(result.to_dict()), default=str)))
+
+
+_runtime: TaskRuntime | None = None
+_runtime_lock = threading.Lock()
+
+
+def get_runtime() -> TaskRuntime:
+    global _runtime
+    with _runtime_lock:
+        if _runtime is None:
+            _runtime = TaskRuntime(Path(__file__).resolve().parent.parent / 'memory' / 'zaya_runtime.db')
+    return _runtime
