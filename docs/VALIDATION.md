@@ -32,6 +32,8 @@ Do not reset the working tree or delete local config, memory or Hermes pairing.
 - The updated application started, connected to Gemini and opened its mic/
   speaker streams. The saved Hermes linked-device session reported connected.
   Existing chats were left in observation mode, with zero auto-enabled chats.
+  All eight previously pending incoming messages were queued to the real Nika
+  announcer and recorded as notified, without sending contact replies.
 
 The live auto-reply path is tested with controlled transport fixtures; no new
 real-contact auto-reply canary was sent during this repair. Historical inbox

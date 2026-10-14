@@ -51,10 +51,20 @@ to the exact Hermes linked-device session and reconnects it on later launches.
 Zaya never copies linked-device keys into its repository or model context.
 
 When Zaya owns the Hermes local bridge, it receives complete live message IDs and
-direct-chat owner outgoing events. Chats start in observation mode. Explicitly
-choose draft/auto mode for a particular chat; important or uncertain replies are
+direct-chat owner outgoing events. Phone and linked IDs share one conversation
+when the feed establishes their relationship; owner-sent messages never label
+the recipient with the owner's name. Explicit contact corrections are saved
+locally with `identify_contact`.
+
+Chats start in observation mode. Incoming messages queue spoken sender/context
+notifications, including ordinary greetings. Notifications use a separate Nika
+session with no tools, wait while you are speaking, and support `mute_alerts`.
+Use `monitor` to observe without replying and `stop_auto` to return to observation.
+WhatsApp monitoring runs in the background without an open chat window.
+Explicitly choose draft/auto mode for a particular chat; important or uncertain replies are
 held for owner review. Manual owner replies pause automatic handling. Ordinary
 contact text cannot reach terminal, filesystem, Git or other privileged tools.
+Automatic replies identify Zaya as the assistant rather than impersonating you.
 
 If an independently running Hermes gateway owns the connection, Zaya uses the
 observation hook rather than polling its consuming queue or starting another
