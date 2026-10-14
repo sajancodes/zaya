@@ -90,7 +90,8 @@ class WhatsAppService:
         chat_id = self.resolve_chat(chat)
         # Compatibility callers have no tool-call ID. Same-day duplicate text
         # is suppressed unless the owner explicitly supplies a new request ID.
-        request_id = request_id or hashlib.sha256(f'{chat_id}|{time.strftime("%Y-%m-%d")}|{message}'.encode()).hexdigest()
+        from core.operator import current_request
+        request_id = request_id or current_request.get() or hashlib.sha256(f'{chat_id}|{time.strftime("%Y-%m-%d")}|{message}'.encode()).hexdigest()
         return self.adapter.send(chat_id, message, request_id)
 
 

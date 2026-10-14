@@ -85,6 +85,8 @@ class PluginRegistry:
 
     # -- called by main.py from _execute_tool's else branch --
     def run(self, name: str, parameters: dict, player=None, session_memory=None) -> str:
+        from core.execution_policy import require_owner
+        require_owner()
         rec = self._plugins.get(name)
         if rec is None or not rec.valid:
             return f"Plugin '{name}' is not available."

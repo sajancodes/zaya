@@ -97,6 +97,8 @@ class ActionRegistry:
 
     # -- called by main.py from _execute_tool --
     def run(self, name: str, parameters: dict, ctx: dict | None = None) -> str:
+        from core.execution_policy import require_owner
+        require_owner()
         rec = self._actions.get(name)
         if rec is None or not rec.valid:
             return f"Action '{name}' is not available."

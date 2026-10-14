@@ -1126,30 +1126,21 @@ class JarvisLive:
         return out
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
+        from core.operator import Operator
         from core.task_runtime import get_runtime
-        from core.tool_result import normalize, ToolResult
-        from core.audit import write
-        runtime = get_runtime()
-        request_id = str(fc.id or "")
-        cached = runtime.cached(request_id) if request_id else None
-        if cached is not None:
-            return types.FunctionResponse(id=fc.id, name=fc.name, response={"result": cached.to_dict()})
-        task = runtime.create(str(fc.name), source="local_ui")
-        runtime.attempt(task.id, str(fc.name))
-        self.ui.write_log(f"TASK: {fc.name} · executing")
-        try:
+        from core.tool_result import normalize
+        import hashlib
+        response = None
+        async def invoke():
+            nonlocal response
             response = await self._execute_tool_impl(fc)
-            result = normalize(response.response.get("result"))
-            response.response["result"] = result.to_dict()
-        except Exception as error:
-            result = ToolResult("failed", f"{fc.name} failed: {error}")
-            response = types.FunctionResponse(id=fc.id, name=fc.name, response={"result": result.to_dict()})
-        runtime.finish(task.id, result)
-        if request_id and result.status == "success":
-            runtime.remember(request_id, result)
-        write({"task_id": task.id, "tool": fc.name, "status": result.status,
-               "evidence": result.evidence})
-        self.ui.write_log(f"TASK: {fc.name} · {result.status}")
+            return normalize(response.response.get("result"))
+        signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
+        request_id = f"{fc.id}:{fc.name}:{signature}" if fc.id else ""
+        result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id)
+        if response is None:
+            response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
+        response.response["result"] = result.to_dict()
         return response
 
     async def _execute_tool_impl(self, fc) -> types.FunctionResponse:
@@ -1166,12 +1157,12 @@ class JarvisLive:
             value    = args.get("value", "")
             if key and value:
                 update_memory({category: {key: {"value": value}}})
-                print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+                print(f"[Memory] Fact saved in category: {category}")
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
                 id=fc.id, name=name,
-                response={"result": "ok", "silent": True}
+                response={"result": {"status": "success", "summary": "Memory saved.", "evidence": [{"memory_key": key}], "side_effect": True}, "silent": True}
             )
 
         loop   = asyncio.get_event_loop()
@@ -1274,7 +1265,7 @@ class JarvisLive:
                     args["file_path"] = self.ui.current_file
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
+                r = await asyncio.to_thread(self._action_registry.run, name, args, _ctx)
                 result = r or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
@@ -1287,10 +1278,7 @@ class JarvisLive:
 
             else:
                 if self._plugin_registry.has(name):
-                    r = await loop.run_in_executor(
-                        None,
-                        lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
-                    )
+                    r = await asyncio.to_thread(self._plugin_registry.run, name, args, player=self.ui, session_memory=None)
                     result = r or "Done."
                 else:
                     result = f"Unknown tool: {name}"
