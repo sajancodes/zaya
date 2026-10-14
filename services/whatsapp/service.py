@@ -21,8 +21,13 @@ class WhatsAppService:
         self.worker = None
         self.native_bridge = None
         self.bridge_error = None
+        self.lifecycle_lock = threading.RLock()
 
     def start(self) -> None:
+        with self.lifecycle_lock:
+            self._start()
+
+    def _start(self) -> None:
         if self.receiver is None:
             from services.whatsapp.bridge import HookReceiver
             from services.whatsapp.handler import ReplyWorker
@@ -32,6 +37,10 @@ class WhatsAppService:
             self.connect_live()
 
     def connect_live(self) -> None:
+        with self.lifecycle_lock:
+            self._connect_live()
+
+    def _connect_live(self) -> None:
         if self.native_bridge and self.native_bridge.process and self.native_bridge.process.poll() is None:
             return
         try:

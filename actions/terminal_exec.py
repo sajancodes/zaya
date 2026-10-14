@@ -51,7 +51,9 @@ def terminal_exec(parameters: dict, **_kwargs) -> ToolResult:
                 get_runtime().transition(originating_task, 'cancelled', error=reason)
         return normalize(confirm.request('terminal', 'Run terminal command',
                          f'{command}\nWorking directory: {directory}\n{decision.reason}', approved, on_cancel=cancelled))
-    return execute()
+    result = execute()
+    result.side_effect = decision.level != 'read'
+    return result
 
 
 TOOL = {'name': 'terminal_exec', 'description': 'Execute real owner-requested shell commands with cwd, timeout, output and exit evidence. Use instead of GUI typing. Destructive or opaque commands require HUD approval.',

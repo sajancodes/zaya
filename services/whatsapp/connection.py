@@ -1,7 +1,6 @@
 """Private pointer to the exact Hermes linked-device session; never copy keys."""
 import json
 from pathlib import Path
-import re
 
 CONNECTION_PATH = Path(__file__).resolve().parents[2] / 'config' / 'hermes_connection.json'
 

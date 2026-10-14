@@ -544,6 +544,9 @@ class JarvisLive:
         self.out_queue            = None
         self._loop                     = None
         self._is_speaking         = False
+        import uuid
+        self._operator_scope = uuid.uuid4().hex
+        self._operator_goal = ""
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -845,7 +848,8 @@ class JarvisLive:
         # asleep either (the sleep gate is not just for the mic). Wake first with
         # "Hey Jarvis" or the WAKE NOW button.
         if self._wake_enabled and not self._awake:
-            self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
+            self._begin_owner_goal(text)
+        self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
             return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -1125,6 +1129,12 @@ class JarvisLive:
 
         return out
 
+    def _begin_owner_goal(self, text: str) -> None:
+        import uuid
+        from core.audit import redact
+        self._operator_scope = uuid.uuid4().hex
+        self._operator_goal = str(redact(text))[:300]
+
     async def _execute_tool(self, fc) -> types.FunctionResponse:
         from core.operator import Operator
         from core.task_runtime import get_runtime
@@ -1136,8 +1146,10 @@ class JarvisLive:
             response = await self._execute_tool_impl(fc)
             return normalize(response.response.get("result"))
         signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
-        request_id = f"{fc.id}:{fc.name}:{signature}" if fc.id else ""
-        result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id)
+        scope = getattr(self, "_operator_scope", fc.id or "")
+        request_id = f"{scope}:{fc.name}:{signature}" if scope else ""
+        result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
+                                                                       goal=getattr(self, "_operator_goal", "") or fc.name)
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
@@ -1574,6 +1586,7 @@ class JarvisLive:
                             txt = _clean_transcript(sc.input_transcription.text)
                             if txt:
                                 in_buf.append(txt)
+                                self._begin_owner_goal(" ".join(in_buf))
                                 self._last_user_speech = time.monotonic()
 
                         if sc.turn_complete:

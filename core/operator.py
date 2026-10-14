@@ -42,7 +42,7 @@ class Operator:
                     continue
                 if self.runtime.get(task.id).state not in {'completed', 'failed', 'cancelled'}:
                     self.runtime.finish(task.id, result)
-                if request_id and result.status == 'success':
+                if request_id and result.status == 'success' and result.side_effect:
                     self.runtime.remember(request_id, result)
                 bus.publish('tool.failed' if result.status == 'failed' else 'tool.completed',
                             tool=name, task_id=task.id, status=result.status)

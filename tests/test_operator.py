@@ -38,3 +38,9 @@ class OperatorTests(unittest.IsolatedAsyncioTestCase):
             invoke.assert_not_awaited()
         finally:
             trust_context.reset(token)
+
+    async def test_readonly_queries_are_refreshed(self):
+        invoke = AsyncMock(return_value=ToolResult('success', 'current state'))
+        await self.operator.execute('status', invoke, request_id='read')
+        await self.operator.execute('status', invoke, request_id='read')
+        self.assertEqual(invoke.await_count, 2)

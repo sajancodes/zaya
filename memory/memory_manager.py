@@ -133,7 +133,7 @@ def _truncate_value(val: str) -> str:
     return val
 
 
-def _recursive_update(target: dict, updates: dict) -> bool:
+def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
     changed = False
     for key, value in updates.items():
         if value is None:
@@ -144,7 +144,7 @@ def _recursive_update(target: dict, updates: dict) -> bool:
             if key not in target or not isinstance(target[key], dict):
                 target[key] = {}
                 changed = True
-            if _recursive_update(target[key], value):
+            if _recursive_update(target[key], value, category or key):
                 changed = True
         else:
             new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value))
@@ -155,7 +155,7 @@ def _recursive_update(target: dict, updates: dict) -> bool:
             if confidence < 0.7:
                 continue
             now = datetime.now(timezone.utc).isoformat()
-            entry = {"value": new_val, "updated": now[:10], "category": metadata.get("category", ""),
+            entry = {"value": new_val, "updated": now[:10], "category": category,
                      "source": metadata.get("source", "user"), "confidence": min(1.0, confidence),
                      "created_at": previous.get("created_at", now), "updated_at": now,
                      "last_used_at": previous.get("last_used_at"), "expires_at": metadata.get("expires_at")}
