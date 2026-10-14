@@ -66,8 +66,10 @@ Double-click randomly selects a `poke_reactions` entry. Each entry pairs a
 preloaded local WAV with its own bubble text. All poke reactions use the same
 picture from `assets.poked`, normally `assets/poked.png`. Playback is local and instant: no
 Gemini request, internet connection, or live AI session is required. A cooldown
-avoids repeated interruptions. Reactions stay silent while muted or while Zaya
-is already speaking, and microphone echo is suppressed during local playback.
+avoids repeated interruptions. Microphone mute does not mute these local clips.
+Set `poke_audio_enabled` to `false` to disable poke sound separately. If Zaya is
+already speaking, the selected clip waits until that speech finishes rather than
+being silently discarded. Microphone echo is suppressed during local playback.
 
 The supplied Nika clips use these lines with the shared poked picture:
 

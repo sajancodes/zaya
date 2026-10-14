@@ -83,7 +83,15 @@ with tempfile.TemporaryDirectory() as folder:
         assert bar.bubble.text=='gentle'
         window._muted=True
         bar.play_reaction(1)
-        assert bar.sounds[1].played==1
+        assert bar.sounds[1].played==2
+        bar.set_state('SPEAKING')
+        bar.play_reaction(1)
+        assert bar.sounds[1].played==2 and bar.pending_reaction==1
+        bar.set_state('MUTED')
+        assert bar.sounds[1].played==3 and bar.pending_reaction is None
+        bar.config['poke_audio_enabled']=False
+        bar.play_reaction(1)
+        assert bar.sounds[1].played==3
         assert activity and activity[0] is True
         synth.assert_not_called()
         bar.shutdown()

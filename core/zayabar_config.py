@@ -18,7 +18,7 @@ def load_config(path=CONFIG_PATH):
     data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
     if not isinstance(data, dict):
         raise ValueError('zayabar.json must contain a JSON object.')
-    for key in ('enabled', 'show_main_window_on_start', 'fit_legs_to_taskbar'):
+    for key in ('enabled', 'show_main_window_on_start', 'fit_legs_to_taskbar', 'poke_audio_enabled'):
         if key in data and not isinstance(data[key], bool):
             raise ValueError(f'{key} must be true or false.')
     for key, minimum, maximum, default in [('width', 64, 600, 240), ('height', 64, 600, 240),
@@ -50,6 +50,7 @@ def load_config(path=CONFIG_PATH):
         if item.get('audio') and Path(item['audio']).suffix.lower() != '.wav':
             raise ValueError('Use a local WAV file for instant poke playback.')
     data['poke_reactions'] = reactions
+    data.setdefault('poke_audio_enabled', True)
     tones = data.get('emotion_tones', {})
     if not isinstance(tones, dict) or any(k not in EMOTIONS or not isinstance(v, str) or not v.strip() or len(v) > 500 for k, v in tones.items()):
         raise ValueError('emotion_tones must map known emotions to short voice descriptions.')

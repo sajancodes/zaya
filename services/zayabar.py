@@ -39,6 +39,7 @@ class ZayaBar(QWidget):
         self.last_poke, self.poked_until, self.drag_origin = -1000.0, 0.0, None
         self.active_tasks = set()
         self.selected_reaction = None
+        self.pending_reaction = None
         self.sounds = {}
         self.reaction_durations = {}
         self.error = ''
@@ -111,10 +112,13 @@ class ZayaBar(QWidget):
 
     def set_state(self, state):
         self.base_state = state
-        if state in {'SPEAKING', 'MUTED'}:
+        if state == 'SPEAKING':
             for sound in self.sounds.values():
                 sound.stop()
         self.refresh_mode()
+        if state != 'SPEAKING' and self.pending_reaction is not None:
+            index, self.pending_reaction = self.pending_reaction, None
+            self.play_reaction(index)
 
     def preload_reactions(self):
         for sound in self.sounds.values():
@@ -152,7 +156,10 @@ class ZayaBar(QWidget):
         self.refresh_mode()
         self.load_media()
         self.show_bubble(reaction['text'], 'poke')
-        if not getattr(self.main_window, '_muted', False) and self.base_state != 'SPEAKING':
+        if self.config['poke_audio_enabled'] and self.base_state == 'SPEAKING':
+            self.pending_reaction = index
+            self.main_window._log_sig.emit('SYS: Poke voice queued until the current speech finishes.')
+        elif self.config['poke_audio_enabled']:
             sound = self.sounds.get(index)
             if sound and sound.status() == QSoundEffect.Status.Ready:
                 for previous in self.sounds.values():
@@ -163,7 +170,7 @@ class ZayaBar(QWidget):
             elif not reaction.get('audio'):
                 self.reaction_requested.emit(reaction['text'])
             else:
-                self.main_window._log_sig.emit('SYS: Poke audio is missing or not loaded; no AI voice request was made.')
+                self.main_window._log_sig.emit('SYS: Poke audio is missing or not loaded; check the local WAV path and speaker output.')
 
     def on_runtime(self, event):
         if event['event'] == 'avatar.caption':

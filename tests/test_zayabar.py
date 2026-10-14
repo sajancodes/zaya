@@ -113,6 +113,12 @@ assert ui._bar is not None and ui._bar.isVisible()
 ui.set_state('SPEAKING')
 app.processEvents()
 assert ui._bar.mode == 'talking'
+ui._win._set_muted(True)
+app.processEvents()
+assert ui._bar.base_state == 'MUTED'
+ui._win._set_muted(False)
+app.processEvents()
+assert ui._bar.base_state == 'LISTENING'
 ui._bar.open_main_window()
 assert ui._win.isVisible()
 assert ui._win._title_lbl.text() == 'ZAYA'

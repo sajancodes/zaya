@@ -2946,6 +2946,7 @@ class MainWindow(QMainWindow):
     _activity_sig   = pyqtSignal(str)
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
+    _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
@@ -5585,6 +5586,7 @@ class MainWindow(QMainWindow):
     def _apply_state(self, state: str):
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
+        self._applied_state_sig.emit(state)
 
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
@@ -5647,7 +5649,7 @@ class JarvisUI:
                 from services.zayabar import ZayaBar
                 self._bar = ZayaBar(self._win)
                 self._app.setQuitOnLastWindowClosed(False)
-                self._win._state_sig.connect(self._bar.state_changed.emit)
+                self._win._applied_state_sig.connect(self._bar.state_changed.emit)
                 self._bar.reaction_requested.connect(self._bar_reaction)
                 self._bar.reaction_audio_active.connect(self._bar_audio_activity)
                 self._win._log_sig.connect(self._bar.observe_log)
