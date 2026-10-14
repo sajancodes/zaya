@@ -59,3 +59,12 @@ screenshots/
 .pytest_cache/
 .ruff_cache/
 .benchmarks/
+
+# Private operator state
+memory/projects.json
+memory/projects.tmp
+memory/profile*.json
+memory/*.db-*
+config/hermes*.json
+.hermes/
+
