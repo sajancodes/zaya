@@ -26,6 +26,7 @@ class Message:
     reply_to_id: str | None = None
     transport_status: str = 'received'
     complete: bool = True
+    chat_aliases: tuple[str, ...] = ()
 
     def __post_init__(self):
         validate_chat_id(self.chat_id)

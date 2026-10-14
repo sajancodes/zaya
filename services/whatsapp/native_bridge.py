@@ -17,16 +17,23 @@ from services.whatsapp.connection import load_connection
 from services.whatsapp.models import Message, validate_chat_id
 
 
-def normalize_event(event: dict) -> Message:
+def normalize_event(event: dict, owner_id: str = '') -> Message:
     chat = validate_chat_id(str(event['chatId']))
     timestamp = event.get('timestamp', time.time())
     if isinstance(timestamp, dict):
         timestamp = timestamp.get('low', time.time())
     owner = bool(event.get('fromOwner') or event.get('readReceiptKey', {}).get('fromMe'))
-    return Message(str(event['messageId']), chat, str(event.get('senderId', chat)),
+    peer = str(event.get('senderId', chat))
+    aliases = ()
+    if chat.endswith('@lid') and peer.endswith('@s.whatsapp.net') and peer != owner_id:
+        aliases, chat = (chat,), validate_chat_id(peer)
+    sender = owner_id if owner and owner_id else peer
+    # Outgoing pushName belongs to the account owner, never the recipient.
+    name = '' if owner else str(event.get('senderName') or event.get('chatName') or '')
+    return Message(str(event['messageId']), chat, sender,
                    str(event.get('body', '')), float(timestamp), 'outgoing' if owner else 'incoming',
-                   'native_bridge', str(event.get('chatName') or event.get('senderName') or chat),
-                   ai_generated=False, reply_to_id=event.get('quotedMessageId'), complete=True)
+                   'native_bridge', name,
+                   ai_generated=False, reply_to_id=event.get('quotedMessageId'), complete=True, chat_aliases=aliases)
 
 
 class NativeBridge:
@@ -102,7 +109,7 @@ class NativeBridge:
                     raise ValueError('Bridge returned an invalid message batch.')
                 for event in events:
                     try:
-                        message = normalize_event(event)
+                        message = normalize_event(event, self.connection.get('account_id', '').split(':')[0].split('@')[0] + '@s.whatsapp.net')
                         self.callback(message)
                         self.last_event_at = time.time()
                     except (ValueError, KeyError, TypeError):

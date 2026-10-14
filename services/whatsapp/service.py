@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import threading
 import time
+from dataclasses import replace
 from core.event_bus import bus
 from core.tool_result import ToolResult
 from services.whatsapp.models import normalize_hook, validate_chat_id
@@ -80,6 +81,7 @@ class WhatsAppService:
     def ingest(self, message) -> bool:
         if not self.store.ingest(message):
             return False
+        message = replace(message, chat_id=self.store.canonical_chat(message.chat_id))
         bus.publish('whatsapp.message.received' if message.direction == 'incoming' else 'whatsapp.message.sent',
                     chat_id=message.chat_id, message_id=message.message_id, direction=message.direction)
         if self.worker and message.direction == 'incoming':
@@ -88,7 +90,7 @@ class WhatsAppService:
 
     def resolve_chat(self, value: str) -> str:
         if '@' in value:
-            return validate_chat_id(value)
+            return self.store.canonical_chat(validate_chat_id(value))
         matches = self.store.rows('SELECT chat_id FROM wa_chats WHERE title=? COLLATE NOCASE', (value,))
         if len(matches) != 1:
             raise ValueError('Contact name is unknown or ambiguous. Select an exact chat ID from recent conversations.')

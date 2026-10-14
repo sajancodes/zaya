@@ -62,6 +62,7 @@ screenshots/
 
 # Private operator state
 memory/projects.json
+memory/backups/
 memory/projects.tmp
 memory/profile*.json
 memory/*.db-*

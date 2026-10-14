@@ -1,6 +1,6 @@
 """Transactional inbox, unread counts, alerts and transport idempotency."""
 from __future__ import annotations
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import sqlite3
 import threading
 import time
@@ -40,30 +40,84 @@ class WhatsAppStore:
           request_id TEXT PRIMARY KEY, chat_id TEXT, text TEXT, status TEXT,
           message_id TEXT, detail TEXT, created_at REAL);
         CREATE TABLE IF NOT EXISTS wa_settings (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS wa_chat_aliases (alias TEXT PRIMARY KEY, chat_id TEXT NOT NULL);
         ''')
+        for table, column, declaration in [('wa_contacts', 'name_verified', 'INTEGER DEFAULT 0'),
+                                            ('wa_messages', 'notified_at', 'REAL')]:
+            if column not in {row[1] for row in self.db.execute(f'PRAGMA table_info({table})')}:
+                self.db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {declaration}')
         self.db.commit()
+
+    def canonical_chat(self, chat_id: str) -> str:
+        validate_chat_id(chat_id)
+        rows = self.rows('SELECT chat_id FROM wa_chat_aliases WHERE alias=?', (chat_id,))
+        return rows[0]['chat_id'] if rows else chat_id
+
+    def link_alias(self, alias: str, chat_id: str) -> None:
+        """Unify only identities established by the native WhatsApp event."""
+        validate_chat_id(alias)
+        chat_id = self.canonical_chat(chat_id)
+        if alias == chat_id:
+            return
+        with self.lock, self.db:
+            old = self.db.execute('SELECT * FROM wa_chats WHERE chat_id=?', (alias,)).fetchone()
+            target = self.db.execute('SELECT * FROM wa_chats WHERE chat_id=?', (chat_id,)).fetchone()
+            if old:
+                if not target:
+                    self.db.execute('UPDATE wa_chats SET chat_id=? WHERE chat_id=?', (chat_id, alias))
+                else:
+                    self.db.execute('UPDATE wa_chats SET unread_count=unread_count+?,last_message_at=MAX(COALESCE(last_message_at,0),?),last_manual_owner_message_at=MAX(COALESCE(last_manual_owner_message_at,0),?) WHERE chat_id=?',
+                                    (old['unread_count'], old['last_message_at'] or 0, old['last_manual_owner_message_at'] or 0, chat_id))
+                    # An owner takeover on either identity must still stop auto mode.
+                    if old['mode'] in {'manual', 'paused'}:
+                        self.db.execute('UPDATE wa_chats SET mode=?,ai_active=0 WHERE chat_id=?', (old['mode'], chat_id))
+                    self.db.execute('DELETE FROM wa_chats WHERE chat_id=?', (alias,))
+            for table in ('wa_messages', 'wa_alerts', 'wa_send_intents'):
+                self.db.execute(f'UPDATE {table} SET chat_id=? WHERE chat_id=?', (chat_id, alias))
+            self.db.execute('UPDATE wa_chat_aliases SET chat_id=? WHERE chat_id=?', (chat_id, alias))
+            self.db.execute('INSERT OR REPLACE INTO wa_chat_aliases VALUES(?,?)', (alias, chat_id))
+
+    def identify_contact(self, chat_id: str, name: str) -> dict:
+        chat_id = self.canonical_chat(chat_id)
+        self.chat(chat_id)
+        name = name.strip()
+        if not name or len(name) > 100:
+            raise ValueError('Supply a contact name of 1 to 100 characters.')
+        with self.lock, self.db:
+            self.db.execute('INSERT INTO wa_contacts(contact_id,display_name,name_verified) VALUES(?,?,1) ON CONFLICT(contact_id) DO UPDATE SET display_name=excluded.display_name,name_verified=1', (chat_id, name))
+            self.db.execute('UPDATE wa_chats SET title=? WHERE chat_id=?', (name, chat_id))
+        return self.chat(chat_id)
 
     def rows(self, query: str, values: tuple = ()) -> list[dict]:
         with self.lock:
             return [dict(row) for row in self.db.execute(query, values).fetchall()]
 
     def chat(self, chat_id: str) -> dict:
-        validate_chat_id(chat_id)
+        chat_id = self.canonical_chat(chat_id)
         rows = self.rows('SELECT * FROM wa_chats WHERE chat_id=?', (chat_id,))
         if not rows:
             raise ValueError('Chat has not been observed. Supply an exact observed chat ID.')
         return rows[0]
 
     def ingest(self, message: Message) -> bool:
+        for alias in message.chat_aliases:
+            self.link_alias(alias, message.chat_id)
+        message = replace(message, chat_id=self.canonical_chat(message.chat_id))
         m = asdict(message)
         with self.lock, self.db:
             if self.db.execute('SELECT 1 FROM wa_messages WHERE message_id=?', (message.message_id,)).fetchone():
                 return False
             self.db.execute('INSERT OR IGNORE INTO wa_contacts(contact_id,display_name,first_seen_at,last_seen_at) VALUES(?,?,?,?)',
-                            (message.sender_id, message.display_name or message.sender_id, message.timestamp, message.timestamp))
+                            (message.sender_id, message.display_name if message.direction == 'incoming' else message.sender_id, message.timestamp, message.timestamp))
             self.db.execute('UPDATE wa_contacts SET last_seen_at=? WHERE contact_id=?', (message.timestamp, message.sender_id))
             self.db.execute('INSERT OR IGNORE INTO wa_chats(chat_id,title,chat_type) VALUES(?,?,?)',
-                            (message.chat_id, message.display_name or message.chat_id, 'group' if message.chat_id.endswith('@g.us') else 'dm'))
+                            (message.chat_id, (message.display_name if message.direction == 'incoming' else '') or message.chat_id, 'group' if message.chat_id.endswith('@g.us') else 'dm'))
+            if message.direction == 'incoming' and message.display_name:
+                contact = self.db.execute('SELECT display_name,name_verified FROM wa_contacts WHERE contact_id=?', (message.chat_id,)).fetchone()
+                title = contact['display_name'] if contact and contact['name_verified'] else message.display_name
+                if not message.chat_id.endswith('@g.us'):
+                    self.db.execute('UPDATE wa_chats SET title=? WHERE chat_id=?', (title, message.chat_id))
+                self.db.execute('UPDATE wa_contacts SET display_name=? WHERE contact_id=? AND name_verified=0', (message.display_name, message.sender_id))
             fields = ['message_id', 'chat_id', 'sender_id', 'direction', 'source', 'text', 'timestamp', 'reply_to_id', 'ai_generated', 'transport_status', 'complete']
             self.db.execute(f'INSERT INTO wa_messages ({",".join(fields)},received_at) VALUES ({",".join("?" for _ in fields)},?)',
                             (*[m[k] for k in fields], time.time()))
@@ -77,6 +131,7 @@ class WhatsAppStore:
             return True
 
     def set_mode(self, chat_id: str, mode: str) -> dict:
+        chat_id = self.canonical_chat(chat_id)
         if mode not in MODES:
             raise ValueError('Invalid chat mode.')
         self.chat(chat_id)
@@ -87,10 +142,11 @@ class WhatsAppStore:
         return self.chat(chat_id)
 
     def conversation(self, chat_id: str, limit: int = 20) -> list[dict]:
-        validate_chat_id(chat_id)
+        chat_id = self.canonical_chat(chat_id)
         return self.rows('SELECT * FROM wa_messages WHERE chat_id=? ORDER BY timestamp DESC LIMIT ?', (chat_id, max(1, min(limit, 100))))
 
     def mark_read(self, chat_id: str) -> None:
+        chat_id = self.canonical_chat(chat_id)
         self.chat(chat_id)
         with self.lock, self.db:
             self.db.execute('UPDATE wa_chats SET unread_count=0 WHERE chat_id=?', (chat_id,))
