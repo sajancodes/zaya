@@ -6,6 +6,9 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: zaya-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-latest
