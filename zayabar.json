@@ -42,5 +42,12 @@
       "image": "assets/poke/hurts.png",
       "audio": "assets/poke/hurts.wav"
     }
-  ]
+  ],
+  "emotion_tones": {
+    "neutral": "Warm, relaxed and conversational. Clear natural pacing, not a formal robotic announcer.",
+    "happy": "Cheerful and smiling, with bright melodic intonation and a little more energy. Keep it natural.",
+    "sad": "Soft, caring and empathetic. Gentle lower energy and slightly slower pacing, without melodrama.",
+    "angry": "Playfully annoyed or calmly firm. Shorter phrases and emphatic intonation; never shout or insult.",
+    "surprised": "Briefly lift the pitch and energy in genuine-sounding surprise, then settle into clear speech."
+  }
 }

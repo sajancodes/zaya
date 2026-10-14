@@ -11,7 +11,7 @@ from core.zayabar_config import CONFIG_PATH, load_config, asset_path
 class BarConfigTests(unittest.TestCase):
     def test_paths_defaults_and_emotion_fallback(self):
         config = load_config()
-        config['assets']['standby'] = ''
+        config['assets'] = {'standby': '', 'thinking': '', 'poked': '', 'talking': {}}
         self.assertTrue(config['enabled'])
         self.assertIsNone(asset_path(config, 'standby'))
         config['assets']['standby'] = 'images/rest.gif'

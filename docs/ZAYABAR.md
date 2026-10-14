@@ -45,7 +45,23 @@ and **Reload zayabar.json** so images can be changed without restarting the AI.
 Invalid configuration edits retain the currently loaded character.
 
 Speaking and thinking states follow the existing assistant/runtime signals.
-The assistant can select a response expression through `avatar_expression`.
+The assistant selects a response emotion through `avatar_expression`. The same
+selection drives both the talking picture and the Nika delivery instruction:
+
+| Emotion | Face path | Voice style |
+| --- | --- | --- |
+| neutral | `assets.talking.neutral` | Warm, calm conversation |
+| happy | `assets.talking.happy` | Cheerful, smiling, energetic |
+| sad | `assets.talking.sad` | Soft, caring, empathetic |
+| angry | `assets.talking.angry` | Playfully annoyed or calmly firm |
+| surprised | `assets.talking.surprised` | Brighter pitch and brief surprise |
+
+Customize the style descriptions in `emotion_tones` in `zayabar.json`. These
+are spoken-delivery instructions to Gemini Live, rather than fixed DSP pitch
+settings. Nika stays the voice identity. Restart Zaya after changing voice-style
+instructions, so its Live session picks them up. Expressions remain static
+pictures. Zaya's conversational personality is warm and expressive; it avoids
+routine detached disclaimers while retaining truthful capability reporting.
 Double-click randomly selects a `poke_reactions` entry. Each entry pairs a
 preloaded local WAV with its own picture. Playback is local and instant: no
 Gemini request, internet connection, or live AI session is required. A cooldown

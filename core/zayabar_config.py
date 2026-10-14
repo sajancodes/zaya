@@ -5,6 +5,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'zayabar.json'
 EMOTIONS = ('neutral', 'happy', 'sad', 'angry', 'surprised')
+DEFAULT_TONES = {
+    'neutral': 'Warm, relaxed and conversational. Clear natural pacing, not a formal robotic announcer.',
+    'happy': 'Cheerful and smiling, with bright melodic intonation and a little more energy. Keep it natural.',
+    'sad': 'Soft, caring and empathetic. Gentle lower energy and slightly slower pacing, without melodrama.',
+    'angry': 'Playfully annoyed or calmly firm. Shorter phrases and emphatic intonation; never shout or insult.',
+    'surprised': 'Briefly lift the pitch and energy in genuine-sounding surprise, then settle into clear speech.'
+}
 
 
 def load_config(path=CONFIG_PATH):
@@ -43,7 +50,18 @@ def load_config(path=CONFIG_PATH):
         if item.get('audio') and Path(item['audio']).suffix.lower() != '.wav':
             raise ValueError('Use a local WAV file for instant poke playback.')
     data['poke_reactions'] = reactions
+    tones = data.get('emotion_tones', {})
+    if not isinstance(tones, dict) or any(k not in EMOTIONS or not isinstance(v, str) or not v.strip() or len(v) > 500 for k, v in tones.items()):
+        raise ValueError('emotion_tones must map known emotions to short voice descriptions.')
+    data['emotion_tones'] = {**DEFAULT_TONES, **tones}
     return data
+
+
+def emotion_tones(path=CONFIG_PATH):
+    try:
+        return load_config(path)['emotion_tones']
+    except (ValueError, OSError):
+        return dict(DEFAULT_TONES)
 
 
 def local_path(value, config_path=CONFIG_PATH):

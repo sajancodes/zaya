@@ -1031,6 +1031,9 @@ class JarvisLive:
         })
 
         parts = [time_ctx, identity_ctx]
+        from core.zayabar_config import emotion_tones
+        parts.append('[VOICE AND FACE DELIVERY]\nUse the same selected emotion for your face and your Nika voice.\n' +
+                     '\n'.join(f'{emotion}: {tone}' for emotion, tone in emotion_tones().items()))
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
