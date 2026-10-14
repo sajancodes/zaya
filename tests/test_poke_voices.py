@@ -75,8 +75,8 @@ with tempfile.TemporaryDirectory() as folder:
         activity=[];bar.reaction_audio_active.connect(activity.append)
         bar.play_reaction(0)
         assert bar.sounds[0].played==1 and bar.frame.toImage().pixelColor(50,50).red()==255
-        bar.sounds[0].stop()
         bar.play_reaction(1)
+        assert not bar.sounds[0].isPlaying()
         assert bar.sounds[1].played==1 and bar.frame.toImage().pixelColor(50,50).blue()==255
         window._muted=True
         bar.play_reaction(1)

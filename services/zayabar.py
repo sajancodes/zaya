@@ -39,6 +39,7 @@ class ZayaBar(QWidget):
         self.active_tasks = set()
         self.selected_reaction = None
         self.sounds = {}
+        self.reaction_durations = {}
         self.error = ''
         self.state_changed.connect(self.set_state)
         self.runtime_event.connect(self.on_runtime)
@@ -113,12 +114,18 @@ class ZayaBar(QWidget):
             sound.stop()
             sound.deleteLater()
         self.sounds = {}
+        self.reaction_durations = {}
         self.reactions = self.config['poke_reactions'] or [
             {'text': line, 'image': self.config['assets'].get('poked', ''), 'audio': ''}
             for line in self.config['reaction_lines']]
         for index, reaction in enumerate(self.reactions):
             path = local_path(reaction.get('audio', ''), self.config_path)
             if path and path.is_file():
+                try:
+                    with wave.open(str(path), 'rb') as stream:
+                        self.reaction_durations[index] = int(1000 * stream.getnframes() / stream.getframerate()) + 150
+                except (OSError, wave.Error):
+                    pass
                 sound = QSoundEffect(self)
                 sound.setLoopCount(1)
                 sound.setVolume(.8)
@@ -132,14 +139,7 @@ class ZayaBar(QWidget):
     def play_reaction(self, index):
         reaction = self.reactions[index]
         self.selected_reaction = reaction
-        duration = self.config['reaction_duration_ms']
-        path = local_path(reaction.get('audio', ''), self.config_path)
-        try:
-            if path:
-                with wave.open(str(path), 'rb') as stream:
-                    duration = max(duration, int(1000 * stream.getnframes() / stream.getframerate()) + 150)
-        except (OSError, wave.Error):
-            pass
+        duration = max(self.config['reaction_duration_ms'], self.reaction_durations.get(index, 0))
         self.poked_until = time.monotonic() + duration / 1000
         self.restore_timer.start(int(duration))
         self.refresh_mode()
@@ -147,6 +147,9 @@ class ZayaBar(QWidget):
         if not getattr(self.main_window, '_muted', False) and self.base_state != 'SPEAKING':
             sound = self.sounds.get(index)
             if sound and sound.status() == QSoundEffect.Status.Ready:
+                for previous in self.sounds.values():
+                    if previous.isPlaying():
+                        previous.stop()
                 sound.play()
                 self.reaction_requested.emit(reaction['text'])
             elif not reaction.get('audio'):
