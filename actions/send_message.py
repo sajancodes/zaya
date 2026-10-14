@@ -149,50 +149,11 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     time.sleep(0.3)
     return f"Message sent to {receiver} via {app_name}."
 
-def _send_whatsapp(receiver: str, message: str) -> str:
-    """WhatsApp goes through the verified driver when there is one.
+def _send_whatsapp(receiver: str, message: str):
+    """Hermes is authoritative; never fall back to blind WhatsApp typing."""
+    from services.whatsapp.service import get_service
+    return get_service().send(receiver, message)
 
-    _desktop_send below is a sequence of keystrokes with sleeps between them:
-    it presses Win, types the app name, presses Ctrl+F, types the contact,
-    presses Enter twice and reports success — without ever reading back which
-    window received any of that. When the machine is a second slower than the
-    sleeps assume, the whole sequence lands somewhere else and the user is
-    still told the message was sent.
-
-    plugins/_whatsapp_core.py already drives WhatsApp properly for the calling
-    plugins: it finds the real window, opens the conversation, checks the
-    conversation is the right person's, types, and confirms the box emptied
-    before it says "sent". Using it here costs nothing and removes the one
-    failure that matters — a message reported as delivered that never left.
-
-    The blind path stays as the fallback for a machine where the driver cannot
-    run at all (the plugin file removed, a missing dependency, no WhatsApp).
-    But once the driver HAS run, its answer stands: falling back after it
-    refused to send is how a message ends up typed into the wrong
-    conversation, which is worse than not sending it.
-    """
-    try:
-        from plugins import _whatsapp_core as wa
-    except Exception as e:
-        print(f"[SendMessage] WhatsApp driver unavailable ({e}) — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
-
-    try:
-        transport, why = wa.get()
-    except Exception as e:
-        print(f"[SendMessage] WhatsApp driver failed to start ({e}) — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
-
-    if transport is None:
-        print(f"[SendMessage] {why} — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
-
-    sent, failure = transport.send_message_to(receiver, message)
-    if sent:
-        return f"Message sent to {receiver} via WhatsApp."
-    return (f"The message to {receiver} was NOT sent on WhatsApp: {failure}. "
-            f"Tell the user plainly that it was not sent, and why - do not "
-            f"say it was sent.")
 
 def _send_telegram(receiver: str, message: str) -> str:
     return _desktop_send("Telegram", receiver, message)
@@ -287,6 +248,12 @@ def send_message(
         return "Please specify a recipient."
     if not message_text:
         return "Please specify the message content."
+    if platform.lower() in {"whatsapp", "whats app", "wa"}:
+        try:
+            return _send_whatsapp(receiver, message_text)
+        except (ValueError, OSError) as error:
+            from core.tool_result import ToolResult
+            return ToolResult("failed", str(error))
     if not _PYAUTOGUI:
         return "PyAutoGUI is not installed — cannot control the desktop."
 
