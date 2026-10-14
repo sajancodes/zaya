@@ -14,5 +14,7 @@ def label(event: dict) -> str | None:
         return f"{TOOLS.get(name, name.replace('_', ' ').capitalize())} · {STATES.get(task.get('state'), task.get('state', 'working'))}"
     if event['event'] == 'whatsapp.mode.changed':
         mode = event.get('mode', 'observe')
-        return 'WhatsApp auto · awaiting complete feed' if mode == 'auto' else f'WhatsApp · {mode}'
+        if mode == 'auto':
+            return 'WhatsApp auto · listening' if event.get('feed_ready') else 'WhatsApp auto · awaiting complete feed'
+        return f'WhatsApp · {mode}'
     return None
