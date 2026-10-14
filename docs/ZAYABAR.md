@@ -63,31 +63,31 @@ instructions, so its Live session picks them up. Expressions remain static
 pictures. Zaya's conversational personality is warm and expressive; it avoids
 routine detached disclaimers while retaining truthful capability reporting.
 Double-click randomly selects a `poke_reactions` entry. Each entry pairs a
-preloaded local WAV with its own picture. Playback is local and instant: no
+preloaded local WAV with its own bubble text. All poke reactions use the same
+picture from `assets.poked`, normally `assets/poked.png`. Playback is local and instant: no
 Gemini request, internet connection, or live AI session is required. A cooldown
 avoids repeated interruptions. Reactions stay silent while muted or while Zaya
 is already speaking, and microphone echo is suppressed during local playback.
 
-The supplied Nika clips are paired as follows. Generate your corresponding
-images at these paths, or replace each `image` path with your exact filename:
+The supplied Nika clips use these lines with the shared poked picture:
 
-| Picture | Saved voice | Line |
-| --- | --- | --- |
-| `assets/poke/ouch.png` | `assets/poke/ouch.wav` | Ouch! Stop poking me! |
-| `assets/poke/gentle.png` | `assets/poke/gentle.wav` | Be gentle with me! |
-| `assets/poke/hurts.png` | `assets/poke/hurts.wav` | Hey, that hurts! |
+| Saved voice | Bubble text |
+| --- | --- |
+| `assets/poke/ouch.wav` | Ouch! Stop poking me! |
+| `assets/poke/gentle.wav` | Be gentle with me! |
+| `assets/poke/hurts.wav` | Hey, that hurts! |
 
 ```json
 "poke_reactions": [
-  {"text": "Ouch! Stop poking me!", "image": "assets/poke/ouch.png", "audio": "assets/poke/ouch.wav"},
-  {"text": "Be gentle with me!", "image": "assets/poke/gentle.png", "audio": "assets/poke/gentle.wav"},
-  {"text": "Hey, that hurts!", "image": "assets/poke/hurts.png", "audio": "assets/poke/hurts.wav"}
+  {"text": "Ouch! Stop poking me!", "audio": "assets/poke/ouch.wav"},
+  {"text": "Be gentle with me!", "audio": "assets/poke/gentle.wav"},
+  {"text": "Hey, that hurts!", "audio": "assets/poke/hurts.wav"}
 ]
 ```
 
 Add more entries to add more reactions. WAV audio is preloaded when the bar
-starts or configuration is reloaded. Missing reaction images use the normal
-poked/standby fallback. Missing audio never triggers an AI voice call.
+starts or configuration is reloaded. A missing poked image uses the standby
+fallback. Older per-reaction image fields are ignored. Missing audio never triggers an AI voice call.
 The older `reaction_lines` list is retained for configuration compatibility but
 does not generate speech on click.
 
@@ -95,6 +95,15 @@ To generate new configured audio once, use
 `python -m tools.generate_poke_voices`. Existing files are kept. To regenerate
 clips after editing their text, add `--overwrite`. Only this generation step
 requires the configured Gemini API key and network access.
+
+All Zaya replies also appear in a cloud-shaped bubble above the character,
+including streamed speech, WhatsApp announcements and poke text. Long text is
+shortened with `........`; the complete reply remains in the original window.
+Raw tool logs are kept in that window rather than painted over your desktop.
+An active task shows a `Thinking...` cloud. The bubble does not capture clicks
+or keyboard focus. Configure `bubble_max_characters` (default 140),
+`bubble_duration_ms` (6500), and `bubble_max_width` (300) in `zayabar.json`.
+
 The app's existing proactive behavior and controls remain available in its
 original window.
 

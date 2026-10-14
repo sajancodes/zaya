@@ -54,6 +54,13 @@ def load_config(path=CONFIG_PATH):
     if not isinstance(tones, dict) or any(k not in EMOTIONS or not isinstance(v, str) or not v.strip() or len(v) > 500 for k, v in tones.items()):
         raise ValueError('emotion_tones must map known emotions to short voice descriptions.')
     data['emotion_tones'] = {**DEFAULT_TONES, **tones}
+    for key, default, minimum, maximum in [('bubble_max_characters', 140, 32, 1000),
+                                          ('bubble_duration_ms', 6500, 1000, 30000),
+                                          ('bubble_max_width', 300, 140, 600)]:
+        value = data.get(key, default)
+        if not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError(f'{key} must be an integer from {minimum} to {maximum}.')
+        data[key] = value
     return data
 
 

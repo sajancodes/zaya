@@ -5650,6 +5650,7 @@ class JarvisUI:
                 self._win._state_sig.connect(self._bar.state_changed.emit)
                 self._bar.reaction_requested.connect(self._bar_reaction)
                 self._bar.reaction_audio_active.connect(self._bar_audio_activity)
+                self._win._log_sig.connect(self._bar.observe_log)
                 self._app.aboutToQuit.connect(self._bar.shutdown)
                 self._bar.show()
             if not self._bar or bar_config.get('show_main_window_on_start', False) or not self._win._ready:

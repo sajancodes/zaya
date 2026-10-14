@@ -1602,6 +1602,8 @@ class JarvisLive:
                             # twice AND made the avatar mouth it twice.
                             if txt and not _is_repeat_chunk(txt, out_buf):
                                 out_buf.append(txt)
+                                from core.event_bus import bus
+                                bus.publish('avatar.caption', text=' '.join(out_buf))
                                 # Hand the words to the mouth as they arrive, so
                                 # the avatar can form the consonants the audio
                                 # alone cannot show. Pure string work — it adds

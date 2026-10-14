@@ -11,6 +11,7 @@ from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtWidgets import QWidget, QApplication, QMenu, QSystemTrayIcon, QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel
 from core.event_bus import bus
 from core.zayabar_config import CONFIG_PATH, EMOTIONS, load_config, asset_path, local_path
+from services.companion_bubble import CompanionBubble
 
 
 class ZayaBar(QWidget):
@@ -47,6 +48,11 @@ class ZayaBar(QWidget):
         self.restore_timer = QTimer(self)
         self.restore_timer.setSingleShot(True)
         self.restore_timer.timeout.connect(self.refresh_mode)
+        self.bubble = CompanionBubble(self)
+        self.bubble_kind = None
+        self.bubble_timer = QTimer(self)
+        self.bubble_timer.setSingleShot(True)
+        self.bubble_timer.timeout.connect(self.bubble.hide)
         self.position_timer = QTimer(self)
         self.position_timer.timeout.connect(self.position_on_taskbar)
         self.position_timer.start(1500)
@@ -99,6 +105,7 @@ class ZayaBar(QWidget):
         x = full.left() + int((full.width() - width) * self.config['horizontal_position'])
         y = min(floor - height - 2, edge - int(height * self.config['seat_fraction']))
         self.move(x, max(full.top(), y))
+        self.position_bubble()
         if self.movie and old_size != self.size():
             self.movie.setScaledSize(self.size())
 
@@ -144,6 +151,7 @@ class ZayaBar(QWidget):
         self.restore_timer.start(int(duration))
         self.refresh_mode()
         self.load_media()
+        self.show_bubble(reaction['text'], 'poke')
         if not getattr(self.main_window, '_muted', False) and self.base_state != 'SPEAKING':
             sound = self.sounds.get(index)
             if sound and sound.status() == QSoundEffect.Status.Ready:
@@ -158,7 +166,9 @@ class ZayaBar(QWidget):
                 self.main_window._log_sig.emit('SYS: Poke audio is missing or not loaded; no AI voice request was made.')
 
     def on_runtime(self, event):
-        if event['event'] == 'avatar.reaction.playing':
+        if event['event'] == 'avatar.caption':
+            self.show_bubble(event.get('text', ''), 'reply')
+        elif event['event'] == 'avatar.reaction.playing':
             duration = min(10000, max(self.config['reaction_duration_ms'], event.get('duration_ms', 0)))
             self.poked_until = time.monotonic() + duration / 1000
             self.restore_timer.start(int(duration))
@@ -183,13 +193,40 @@ class ZayaBar(QWidget):
         if mode != self.mode:
             self.mode = mode
             self.load_media()
+            if mode == 'thinking':
+                self.show_bubble('Thinking...', 'thinking')
+            elif self.bubble_kind == 'thinking':
+                self.bubble.hide()
+                self.bubble_kind = None
+
+    def observe_log(self, text):
+        if text.startswith('Zaya:'):
+            self.show_bubble(text.split(':', 1)[1].strip(), 'reply')
+
+    def show_bubble(self, text, kind='reply'):
+        if not str(text).strip() or not self.config.get('enabled', True):
+            return
+        self.bubble_kind = kind
+        self.bubble.set_text(text, self.config['bubble_max_characters'], self.config['bubble_max_width'])
+        self.position_bubble()
+        self.bubble.show()
+        self.bubble.raise_()
+        if kind == 'thinking':
+            self.bubble_timer.stop()
+        else:
+            self.bubble_timer.start(self.config['bubble_duration_ms'])
+
+    def position_bubble(self):
+        if not hasattr(self, 'bubble'):
+            return
+        screen = self.screen().availableGeometry()
+        x = self.x() + self.width() // 2 - int(self.bubble.width() * .78)
+        y = self.y() - self.bubble.height() + 14
+        x = max(screen.left() + 4, min(x, screen.right() - self.bubble.width() - 4))
+        self.bubble.move(x, max(screen.top() + 4, y))
 
     def load_media(self):
         path = asset_path(self.config, self.mode, self.emotion, self.config_path)
-        if self.mode == 'poked' and self.selected_reaction:
-            selected = local_path(self.selected_reaction.get('image', ''), self.config_path)
-            if selected and selected.is_file():
-                path = selected
         key = (str(path), self.mode, self.emotion, self.size().width(), self.size().height())
         if key == self.loaded_asset:
             return
@@ -257,6 +294,7 @@ class ZayaBar(QWidget):
             screen = self.screen().geometry()
             self.config['horizontal_position'] = max(0, min(1, (x - screen.left()) / max(1, screen.width() - self.width())))
             self.move(x, self.y())
+            self.position_bubble()
 
     def mouseReleaseEvent(self, _event):
         self.drag_origin = None
@@ -315,6 +353,8 @@ class ZayaBar(QWidget):
         self.config_dialog = dialog
 
     def shutdown(self):
+        self.bubble_timer.stop()
+        self.bubble.close()
         for sound in self.sounds.values():
             sound.stop()
         self.unsubscribe()

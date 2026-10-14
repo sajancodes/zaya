@@ -33,7 +33,7 @@ class PokeVoiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_config(path)
 
-    def test_preloaded_playback_selects_its_matching_image_without_ai(self):
+    def test_preloaded_playback_uses_shared_poked_image_and_distinct_bubbles(self):
         script = r'''
 import json,tempfile,wave
 from pathlib import Path
@@ -68,16 +68,19 @@ with tempfile.TemporaryDirectory() as folder:
         with wave.open(str(root/(name+'.wav')),'wb') as audio:
             audio.setnchannels(1);audio.setsampwidth(2);audio.setframerate(24000);audio.writeframes(b'\0\0'*2400)
     config=load_config()
-    config['poke_reactions']=[{'text':name,'image':name+'.png','audio':name+'.wav'} for name in ['ouch','gentle']]
+    config['assets']['poked']=str(root/'ouch.png')
+    config['poke_reactions']=[{'text':name,'audio':name+'.wav'} for name in ['ouch','gentle']]
     path=root/'zayabar.json';path.write_text(json.dumps(config))
     with patch('services.zayabar.QSoundEffect',Sound),patch('core.notification_voice.synthesize_notice') as synth:
         window=Window();bar=ZayaBar(window,path)
         activity=[];bar.reaction_audio_active.connect(activity.append)
         bar.play_reaction(0)
         assert bar.sounds[0].played==1 and bar.frame.toImage().pixelColor(50,50).red()==255
+        assert bar.bubble.text=='ouch'
         bar.play_reaction(1)
         assert not bar.sounds[0].isPlaying()
-        assert bar.sounds[1].played==1 and bar.frame.toImage().pixelColor(50,50).blue()==255
+        assert bar.sounds[1].played==1 and bar.frame.toImage().pixelColor(50,50).red()==255
+        assert bar.bubble.text=='gentle'
         window._muted=True
         bar.play_reaction(1)
         assert bar.sounds[1].played==1
