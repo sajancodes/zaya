@@ -191,7 +191,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         if stream_sig:
             stream_sig.emit(True)   # HUD logo → live camera view
             view_open = True
-        _log("JARVIS: Nutrition scan started.")
+        _log("Zaya: Nutrition scan started.")
 
         # Phase 1 — live preview with scan bar (user positions the food)
         t0 = time.time()

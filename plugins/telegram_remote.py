@@ -163,7 +163,7 @@ except ImportError:
     _HAS_CONFIG = False
 
     def get_assistant_name():                        # type: ignore[misc]
-        return "JARVIS"
+        return "Zaya"
 
     def get_plugin_config(namespace):                # type: ignore[misc]
         return {}
@@ -620,7 +620,7 @@ PLUGIN_SETTINGS = {
          "placeholder": "Any secret phrase. Send it to the bot once to approve your phone."},
         {"key": "allowed_chat_ids", "label": "Approved Chat IDs", "type": "text",
          "placeholder": "Filled in by pairing. Comma-separated. Empty = nothing is accepted."},
-        {"key": "relay_replies", "label": "Send JARVIS's answers back to Telegram",
+        {"key": "relay_replies", "label": "Send Zaya's answers back to Telegram",
          "type": "toggle", "default": True},
         # Off by default, and deliberately so. Updating a plugin must never hand
         # a remote channel a view of your screen because you were not asked.
@@ -655,7 +655,7 @@ PLUGIN_SETTINGS = {
         # would rather not repeat themselves every morning — which is a
         # different thing entirely, and theirs to decide.
         {"key": "start_on_launch",
-         "label": "Start listening when JARVIS launches (no need to ask each time)",
+         "label": "Start listening when Zaya launches (no need to ask each time)",
          "type": "toggle", "default": False},
         {"key": "voice_replies",
          "label": "Speak answers to typed commands too (spoken ones always are)",
@@ -913,7 +913,7 @@ def _name_prefix() -> str:
         except Exception:
             pass
         _name_cache[1] = now
-    return _name_cache[0] or "JARVIS:"
+    return _name_cache[0] or "Zaya:"
 
 
 def _open_turn(chat_id: int, spoken: bool = False) -> None:

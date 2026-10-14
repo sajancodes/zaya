@@ -541,7 +541,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
 
                 if not verdict or upper.startswith("STANDBY"):
                     if not seen_chat and verdict:
-                        _log("JARVIS: Chat in sight — monitoring the "
+                        _log("Zaya: Chat in sight — monitoring the "
                              "conversation now.")
                     seen_chat = True
                     misses = 0
@@ -551,7 +551,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                         # the user may still be opening the conversation —
                         # wait patiently, never give up before seeing a chat
                         if misses == 0:
-                            _log("JARVIS: No chat visible yet — waiting for "
+                            _log("Zaya: No chat visible yet — waiting for "
                                  "you to open the conversation.")
                         misses = 1
                     else:
@@ -559,14 +559,14 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                         if misses >= _MAX_MISSES:
                             ended = ("the chat window disappeared from the "
                                      "screen")
-                            _log("JARVIS: Chat takeover ended — I can no "
+                            _log("Zaya: Chat takeover ended — I can no "
                                  "longer see the conversation on screen.")
                             break
 
                 elif len(verdict) > _MAX_REPLY_CHARS:
                     # a real chat reply is never this long — model chatter,
                     # never paste it
-                    _log("JARVIS: Skipped an over-long engine output "
+                    _log("Zaya: Skipped an over-long engine output "
                          f"({len(verdict)} chars).")
 
                 elif verdict == last_burst:
@@ -588,10 +588,10 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                             # we will ever paste into
                             focus_id = cur_win
                             if focus_id is not None:
-                                _log("JARVIS: Focus guard locked onto the "
+                                _log("Zaya: Focus guard locked onto the "
                                      "chat window.")
                         elif cur_win not in (None, focus_id):
-                            _log("JARVIS: Reply held — focus is not on the "
+                            _log("Zaya: Reply held — focus is not on the "
                                  "chat window. Click the message box to let "
                                  "me continue.")
                             break
@@ -611,7 +611,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
 
             except pyautogui.FailSafeException:
                 ended = "failsafe (mouse in screen corner)"
-                _log("JARVIS: Chat takeover aborted by failsafe corner.")
+                _log("Zaya: Chat takeover aborted by failsafe corner.")
                 break
             except Exception as e:
                 errors += 1
@@ -626,7 +626,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                         engine = _RestEngine(api_key, user_instruction)
                         _state["engine"] = "rest"
                         errors = 0
-                        _log("JARVIS: Live engine unavailable — switched to "
+                        _log("Zaya: Live engine unavailable — switched to "
                              "the REST fallback engine.")
                     else:
                         ended = f"too many consecutive errors (last: {e})"

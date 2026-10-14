@@ -2178,7 +2178,7 @@ def _schedule_daily_update(hour: int = 3, minute: int = 0) -> str:
 
 
 def _schedule_windows(hour: int, minute: int) -> str:
-    task_name = "JARVIS_GameUpdater"
+    task_name = "Zaya_GameUpdater"
     script_path = Path(__file__).resolve()
     subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"],
                    capture_output=True, **_CNW)
@@ -2232,7 +2232,7 @@ def _schedule_mac(hour: int, minute: int) -> str:
 
 def _schedule_linux(hour: int, minute: int) -> str:
     script_path = Path(__file__).resolve()
-    marker = "# JARVIS_GameUpdater"
+    marker = "# Zaya_GameUpdater"
     entry = f"{minute} {hour} * * * {sys.executable} {script_path} --scheduled  {marker}"
     try:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
@@ -2252,7 +2252,7 @@ def _schedule_linux(hour: int, minute: int) -> str:
 
 def _cancel_scheduled_update() -> str:
     if is_windows():
-        result = subprocess.run(["schtasks", "/Delete", "/TN", "JARVIS_GameUpdater", "/F"],
+        result = subprocess.run(["schtasks", "/Delete", "/TN", "Zaya_GameUpdater", "/F"],
                                 capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", **_CNW)
         return ("The scheduled update is cancelled."
@@ -2268,7 +2268,7 @@ def _cancel_scheduled_update() -> str:
     try:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
                                   encoding="utf-8", errors="replace")
-        lines = [l for l in existing.stdout.splitlines() if "JARVIS_GameUpdater" not in l]
+        lines = [l for l in existing.stdout.splitlines() if "Zaya_GameUpdater" not in l]
         subprocess.run(["crontab", "-"], input="\n".join(lines) + "\n",
                        text=True, encoding="utf-8", errors="replace")
         return "The scheduled update is cancelled."
@@ -2290,7 +2290,7 @@ def _next_run_windows() -> str:
     try:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             "(Get-ScheduledTaskInfo -TaskName 'JARVIS_GameUpdater')"
+             "(Get-ScheduledTaskInfo -TaskName 'Zaya_GameUpdater')"
              ".NextRunTime.ToString('yyyy-MM-dd HH:mm')"],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=20, **_CNW)
@@ -2303,7 +2303,7 @@ def _next_run_windows() -> str:
 def _schedule_status() -> str:
     if is_windows():
         result = subprocess.run(
-            ["schtasks", "/Query", "/TN", "JARVIS_GameUpdater", "/FO", "LIST"],
+            ["schtasks", "/Query", "/TN", "Zaya_GameUpdater", "/FO", "LIST"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", **_CNW)
         if result.returncode != 0:
             return "No game update is scheduled."
@@ -2319,7 +2319,7 @@ def _schedule_status() -> str:
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
                                 encoding="utf-8", errors="replace")
         for line in result.stdout.splitlines():
-            if "JARVIS_GameUpdater" in line:
+            if "Zaya_GameUpdater" in line:
                 return f"A game update is scheduled: {line.split('#')[0].strip()}"
         return "No game update is scheduled."
     except Exception:

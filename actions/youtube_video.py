@@ -180,7 +180,7 @@ def _summarize_with_gemini(transcript: str, video_url: str) -> str:
         timeout_ms=60_000,
         config=types.GenerateContentConfig(
             system_instruction=(
-                "You are JARVIS, an AI assistant. "
+                "You are Zaya, an AI assistant. "
                 "Summarize YouTube video transcripts clearly and concisely. "
                 "Structure: 1-sentence overview, then 3-5 key points. "
                 "Be direct. Address the user as 'sir'. "
