@@ -67,3 +67,6 @@ memory/profile*.json
 memory/*.db-*
 config/hermes*.json
 .hermes/
+
+# Downloaded installers are local artifacts
+plugins/*.exe
