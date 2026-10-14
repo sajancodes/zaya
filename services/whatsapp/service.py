@@ -23,10 +23,14 @@ class WhatsAppService:
     def start(self) -> None:
         if self.receiver is None:
             from services.whatsapp.bridge import HookReceiver
+            from services.whatsapp.handler import ReplyWorker
+            self.worker = ReplyWorker(self.store, self.adapter)
             self.receiver = HookReceiver(self.on_hook)
             self.receiver.start()
 
     def close(self) -> None:
+        if self.worker:
+            self.worker.close()
         if self.receiver:
             self.receiver.close()
             self.receiver = None
