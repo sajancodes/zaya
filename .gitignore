@@ -70,3 +70,5 @@ config/hermes*.json
 
 # Downloaded installers are local artifacts
 plugins/*.exe
+config/hermes_pairing*
+config/hermes_connection.tmp

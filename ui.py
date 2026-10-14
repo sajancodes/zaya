@@ -2941,6 +2941,7 @@ class RemoteKeyOverlay(QWidget):
 
 
 class MainWindow(QMainWindow):
+    _whatsapp_connect_sig = pyqtSignal()
     _activity_sig   = pyqtSignal(str)
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
@@ -3225,6 +3226,7 @@ class MainWindow(QMainWindow):
         self._metric_tmr.start(2000)
         self._update_metrics()
 
+        self._whatsapp_connect_sig.connect(self._open_whatsapp_connection)
         self._activity_sig.connect(self._activity_lbl.setText)
         from core.event_bus import bus
         self._unsubscribe_runtime = bus.subscribe('*', self._runtime_event)
@@ -4215,6 +4217,11 @@ class MainWindow(QMainWindow):
         remote_btn.setStyleSheet(_BTN_STYLE_PRI)
         remote_btn.clicked.connect(self._open_remote)
         lay.addWidget(remote_btn)
+        whatsapp_btn = QPushButton("WHATSAPP CONNECTION")
+        whatsapp_btn.setFixedHeight(30)
+        whatsapp_btn.setStyleSheet(_BTN_STYLE_PRI)
+        whatsapp_btn.clicked.connect(self._open_whatsapp_connection)
+        lay.addWidget(whatsapp_btn)
 
         sc_btn = QPushButton("⊞  CREATE DESKTOP SHORTCUT")
         sc_btn.setFixedHeight(26)
@@ -4926,6 +4933,15 @@ class MainWindow(QMainWindow):
     def notify_phone_connected(self) -> None:
         if self._remote_overlay and self._remote_overlay.isVisible():
             self._remote_overlay.mark_connected()
+
+    def _open_whatsapp_connection(self):
+        from services.whatsapp.ui import WhatsAppConnectionDialog
+        current = getattr(self, '_whatsapp_dialog', None)
+        if current and current.isVisible():
+            current.raise_()
+            return
+        self._whatsapp_dialog = WhatsAppConnectionDialog(self)
+        self._whatsapp_dialog.show()
 
     def _open_remote(self):
         if not self.on_remote_clicked:
@@ -5771,6 +5787,9 @@ class JarvisUI:
 
     def set_state(self, state: str):
         self._win._state_sig.emit(state)
+
+    def open_whatsapp_connection(self):
+        self._win._whatsapp_connect_sig.emit()
 
     def write_log(self, text: str):
         self._win._log_sig.emit(text)

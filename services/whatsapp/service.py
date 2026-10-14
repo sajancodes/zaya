@@ -29,16 +29,23 @@ class WhatsAppService:
             self.worker = ReplyWorker(self.store, self.adapter)
             self.receiver = HookReceiver(self.on_hook)
             self.receiver.start()
-            try:
-                from services.whatsapp.connection import load_connection
-                from services.whatsapp.native_bridge import NativeBridge
-                connection = load_connection()
-                if connection:
-                    self.native_bridge = NativeBridge(self.ingest, connection)
-                    self.native_bridge.start()
-                    self.adapter.transport = self.native_bridge
-            except (ValueError, OSError, RuntimeError) as error:
-                self.bridge_error = str(error)
+            self.connect_live()
+
+    def connect_live(self) -> None:
+        if self.native_bridge and self.native_bridge.process and self.native_bridge.process.poll() is None:
+            return
+        try:
+            from services.whatsapp.connection import load_connection
+            from services.whatsapp.native_bridge import NativeBridge
+            connection = load_connection()
+            if connection:
+                bridge = NativeBridge(self.ingest, connection)
+                bridge.start()
+                self.native_bridge = bridge
+                self.adapter.transport = bridge
+                self.bridge_error = None
+        except (ValueError, OSError, RuntimeError) as error:
+            self.bridge_error = str(error)
 
     def close(self) -> None:
         if self.native_bridge:
