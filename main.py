@@ -104,7 +104,7 @@ PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 #
 # It is reassigned on every connect, so a model that runs out of quota is
 # stepped over and the assistant keeps talking instead of failing to start.
-LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
+LIVE_MODEL          = _gemini.LIVE_MODELS[0]
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
@@ -1120,7 +1120,7 @@ class JarvisLive:
         # appear to deliberate on the Live path, so pinning the field only adds a
         # way for a future release to behave differently. Set "thinking_enabled"
         # in config/api_keys.json to true to let it reason instead.
-        if get_thinking_enabled():
+        if get_thinking_enabled() and "gemini-3.8-live" not in LIVE_MODEL:
             out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
 
         return out
