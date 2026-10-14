@@ -1,6 +1,5 @@
 """Non-destructive capability inspection, with exact loader failures."""
 from __future__ import annotations
-from dataclasses import asdict
 import os
 from pathlib import Path
 import shutil

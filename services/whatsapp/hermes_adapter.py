@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+import requests
 from core.audit import redact
 from core.tool_result import ToolResult
 from services.whatsapp.models import Message, validate_chat_id
@@ -13,9 +14,10 @@ from services.whatsapp.store import WhatsAppStore
 
 
 class HermesAdapter:
-    def __init__(self, store: WhatsAppStore, command: list[str] | None = None, runner=None) -> None:
+    def __init__(self, store: WhatsAppStore, command: list[str] | None = None, runner=None, transport=None) -> None:
         self.store, self.command = store, command
         self.runner = runner or subprocess.run
+        self.transport = transport
 
     def _command(self) -> list[str]:
         if self.command:
@@ -52,15 +54,18 @@ class HermesAdapter:
                               {'message_id': item['message_id'], 'transport_status': item['status'], 'deduplicated': True},
                               [{'message_id': item['message_id'], 'request_id': request_id}], side_effect=item['status'] == 'accepted')
         try:
-            command = self._command()
+            command = self._command() if self.transport is None else None
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             return ToolResult('failed', f'Hermes unavailable: {error}')
         if not self.store.reserve_send(request_id, chat_id, text):
             return ToolResult('partial', 'Another worker has reserved this send; no duplicate was sent.')
         options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         try:
-            completed = self.runner([*command, '--to', 'whatsapp:' + chat_id, '--json', '--file', '-'],
-                                    input=text, capture_output=True, text=True, encoding='utf-8', timeout=60, **options)
+            if self.transport is not None:
+                completed = self.transport.send(chat_id, text, reply_to_id)
+            else:
+                completed = self.runner([*command, '--to', 'whatsapp:' + chat_id, '--json', '--file', '-'],
+                                        input=text, capture_output=True, text=True, encoding='utf-8', timeout=60, **options)
             payload = json.loads(completed.stdout or '{}')
             message_id = payload.get('message_id')
             accepted = completed.returncode == 0 and payload.get('success') is True and bool(message_id) and not payload.get('error')
@@ -77,7 +82,7 @@ class HermesAdapter:
             self.store.finish_send(request_id, status, None, detail)
             return ToolResult('failed' if status == 'failed' else 'partial', detail,
                               {'transport_status': status}, [{'exit_code': completed.returncode}], side_effect=True)
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError, requests.RequestException) as error:
             self.store.finish_send(request_id, 'unknown', None, str(redact(str(error)))[:500])
             return ToolResult('partial', 'Transport outcome is unknown; message will not be resent automatically.',
                               {'transport_status': 'unknown'}, side_effect=True)

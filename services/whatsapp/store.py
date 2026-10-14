@@ -1,7 +1,6 @@
 """Transactional inbox, unread counts, alerts and transport idempotency."""
 from __future__ import annotations
 from dataclasses import asdict
-import json
 import sqlite3
 import threading
 import time

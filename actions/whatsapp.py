@@ -30,8 +30,9 @@ def whatsapp(parameters: dict, **_kwargs) -> ToolResult:
             mode = {'start_auto': 'auto', 'resume': 'auto', 'stop_auto': 'manual', 'pause': 'paused'}.get(action, parameters.get('mode', 'observe'))
             state = service.store.set_mode(chat_id, mode)
             bus.publish('whatsapp.mode.changed', **{key: state[key] for key in ('chat_id', 'title', 'mode', 'ai_active')})
-            return ToolResult('partial' if mode == 'auto' else 'success',
-                              'Auto mode saved, but automatic sending waits for a complete inbound feed with reliable IDs; installed Hermes hooks are observation-only.' if mode == 'auto' else f'Chat mode changed to {mode}.',
+            ready = bool(service.native_bridge and service.native_bridge.ready)
+            return ToolResult('partial' if mode == 'auto' and not ready else 'success',
+                              'Auto mode saved, but automatic sending waits for a complete inbound feed with reliable IDs; installed Hermes hooks are observation-only.' if mode == 'auto' and not ready else f'Chat mode changed to {mode}.',
                               state, [{'chat_id': chat_id, 'mode': mode}], side_effect=True)
         if action == 'mark_read':
             chat_id = service.resolve_chat(parameters.get('chat', ''))
