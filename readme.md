@@ -43,6 +43,14 @@ of a safe recoverable failure and have a three-attempt limit. Destructive or
 opaque shell commands require a real HUD confirmation. This confirmation policy
 is for owner-authorized execution; it is not an operating-system sandbox.
 
+## Taskbar character
+
+Running `main.py` also starts a transparent taskbar companion. Set your PNG/GIF
+paths in `zayabar.json`; right-click the character to open the existing full
+window. Standby GIFs, thinking pictures, response expressions and double-click
+Nika reactions are supported. Until images are supplied, a small placeholder
+appears. See [character configuration](docs/ZAYABAR.md) for paths and controls.
+
 ## WhatsApp
 
 Open **Setup → WhatsApp Connection**, then scan the real QR using your phone's

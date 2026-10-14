@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "show_main_window_on_start": false,
+  "width": 240,
+  "height": 240,
+  "seat_fraction": 0.6,
+  "horizontal_position": 0.82,
+  "screen_index": 0,
+  "fit_legs_to_taskbar": true,
+  "reaction_cooldown_seconds": 10,
+  "reaction_duration_ms": 2200,
+  "reaction_lines": ["Ouch! That hurts!", "Hey! Stop poking me!", "Again? Be gentle!"],
+  "assets": {
+    "standby": "",
+    "thinking": "",
+    "poked": "",
+    "talking": {
+      "neutral": "",
+      "happy": "",
+      "sad": "",
+      "angry": "",
+      "surprised": ""
+    }
+  }
+}

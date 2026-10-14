@@ -641,6 +641,7 @@ class JarvisLive:
         self.ui.get_plugins = self._plugin_registry.list_for_ui
         self.ui.get_plugin_settings = self._plugin_registry.settings_schemas  # ⚙ settings tab
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
+        self.ui.on_companion_reaction = self.companion_reaction
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
@@ -1319,6 +1320,30 @@ class JarvisLive:
             response={"result": __import__("core.tool_result", fromlist=["normalize"]).normalize(result).to_dict()},
             **_extra
         )
+
+    def companion_reaction(self, text):
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(self._speak_companion_reaction(text), self._loop)
+
+    async def _speak_companion_reaction(self, text):
+        if not self.session or self.ui.muted or self._is_speaking or not self.audio_in_queue.empty():
+            return
+        from core.notification_voice import synthesize_notice
+        scope = self._operator_scope
+        try:
+            audio, transcript = await synthesize_notice(text, verbatim=True)
+            if scope != self._operator_scope or self._is_speaking or not self.audio_in_queue.empty() or self.ui.muted:
+                return
+            self.ui.write_log('Zaya: ' + (transcript or text))
+            from core.event_bus import bus
+            bus.publish('avatar.reaction.playing', duration_ms=int(len(audio) / 48) + 250)
+            self._visemes.feed_text(transcript or text)
+            self._turn_done_event.clear()
+            for offset in range(0, len(audio), 2400):
+                self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
+            self._turn_done_event.set()
+        except Exception as error:
+            self.ui.write_log(f'ERR: Character reaction voice unavailable ({type(error).__name__}).')
 
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service

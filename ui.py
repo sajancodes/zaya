@@ -5637,7 +5637,28 @@ class JarvisUI:
         self._app.setStyle("Fusion")
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
-        self._win.show()
+        self._bar = None
+        self.on_companion_reaction = None
+        try:
+            from core.zayabar_config import load_config
+            bar_config = load_config()
+            if bar_config.get('enabled', True):
+                from services.zayabar import ZayaBar
+                self._bar = ZayaBar(self._win)
+                self._app.setQuitOnLastWindowClosed(False)
+                self._win._state_sig.connect(self._bar.state_changed.emit)
+                self._bar.reaction_requested.connect(self._bar_reaction)
+                self._app.aboutToQuit.connect(self._bar.shutdown)
+                self._bar.show()
+            if not self._bar or bar_config.get('show_main_window_on_start', False) or not self._win._ready:
+                self._win.show()
+        except (ValueError, OSError) as error:
+            self._win.show()
+            self.write_log(f'ERR: Taskbar companion unavailable: {error}')
+
+    def _bar_reaction(self, text):
+        if self.on_companion_reaction:
+            self.on_companion_reaction(text)
 
     @property
     def muted(self) -> bool:
