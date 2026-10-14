@@ -248,12 +248,9 @@ def send_message(
         return "Please specify a recipient."
     if not message_text:
         return "Please specify the message content."
-    if platform.lower() in {"whatsapp", "whats app", "wa"}:
-        try:
-            return _send_whatsapp(receiver, message_text)
-        except (ValueError, OSError) as error:
-            from core.tool_result import ToolResult
-            return ToolResult("failed", str(error))
+    if platform.lower() in {"whatsapp", "whats app", "wa", "wp", "wapp"}:
+        from core.tool_result import ToolResult
+        return ToolResult("failed", "Use the whatsapp tool with action=send, chat and message. This legacy tool does not send WhatsApp messages.")
     if not _PYAUTOGUI:
         return "PyAutoGUI is not installed — cannot control the desktop."
 
@@ -283,7 +280,8 @@ def send_message(
 TOOL = {
     "name": "send_message",
     "description": (
-        "Sends a text message via WhatsApp, Telegram, or another messaging "
+        "Sends a text message via Telegram or another non-WhatsApp messaging "
+        "platform. For WhatsApp ALWAYS use whatsapp action=send, chat and message. "
         "platform. Write 'message_text' in the USER'S OWN LANGUAGE, exactly "
         "what they asked to be said. If the result says the message was NOT "
         "sent, repeat that plainly along with the reason it gives — never "
@@ -302,7 +300,7 @@ TOOL = {
             },
             "platform": {
                 "type": "STRING",
-                "description": "Platform: WhatsApp, Telegram, etc."
+                "description": "Non-WhatsApp platform, such as Telegram."
             }
         },
         "required": [

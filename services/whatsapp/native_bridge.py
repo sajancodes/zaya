@@ -17,6 +17,46 @@ from services.whatsapp.connection import load_connection
 from services.whatsapp.models import Message, validate_chat_id
 
 
+class AttachedProcess:
+    """Process interface for an exact verified orphan; never an arbitrary PID."""
+    def __init__(self, process):
+        self.process, self.pid = process, process.pid
+        self.returncode = None
+
+    def poll(self):
+        if not self.process.is_running():
+            self.returncode = 1
+        return self.returncode
+
+    def kill(self):
+        self.process.kill()
+
+
+def verified_orphan(port: int, bridge: Path, session: Path):
+    import psutil
+    candidates = {c.pid for c in psutil.net_connections(kind='tcp')
+                  if c.status == 'LISTEN' and c.laddr.port == port and c.pid}
+    if len(candidates) != 1:
+        raise RuntimeError('Cannot establish bridge process ownership.')
+    process = psutil.Process(candidates.pop())
+    args = process.cmdline()
+    try:
+        script = Path(args[1]).resolve()
+        exact_session = Path(args[args.index('--session') + 1]).resolve()
+        exact_port = int(args[args.index('--port') + 1])
+    except (ValueError, IndexError):
+        raise RuntimeError('Existing bridge command is not verifiable.')
+    if script != bridge.resolve() or exact_session != session.resolve() or exact_port != port:
+        raise RuntimeError('Existing bridge belongs to another session or application.')
+    try:
+        parent = process.parent()
+        if parent and parent.create_time() <= process.create_time():
+            raise RuntimeError('Existing bridge still has a live owner; competing consumer refused.')
+    except psutil.NoSuchProcess:
+        pass
+    return AttachedProcess(process)
+
+
 def normalize_event(event: dict, owner_id: str = '') -> Message:
     chat = validate_chat_id(str(event['chatId']))
     timestamp = event.get('timestamp', time.time())
@@ -49,6 +89,26 @@ class NativeBridge:
         self.error: str | None = None
         self.closed = threading.Event()
         self.last_event_at: float | None = None
+        self.lease = None
+
+    def _claim(self):
+        path = Path(self.connection['session_path']) / 'zaya-bridge.lock'
+        self.lease = path.open('a+b')
+        if path.stat().st_size == 0:
+            self.lease.write(b'0')
+            self.lease.flush()
+        self.lease.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(self.lease.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.lease.close()
+            self.lease = None
+            raise RuntimeError('Another Zaya instance already owns WhatsApp monitoring.')
 
     def start(self) -> None:
         if not self.connection:
@@ -71,12 +131,25 @@ class NativeBridge:
         node = shutil.which('node')
         if not node or not bridge.is_file() or not (bridge.parent / 'node_modules').is_dir():
             raise RuntimeError('Hermes WhatsApp bridge or its Node dependencies are unavailable.')
+        self._claim()
         try:
             self.http.get(self.url + '/health', timeout=.5)
         except requests.ConnectionError:
             pass
+        except requests.RequestException as error:
+            self.lease.close()
+            self.lease = None
+            raise RuntimeError('Existing bridge health could not be verified.') from error
         else:
-            raise RuntimeError('Bridge port already belongs to a process; no competing queue consumer was started.')
+            try:
+                self.process = verified_orphan(self.port, bridge, Path(self.connection['session_path']))
+            except Exception as error:
+                self.lease.close()
+                self.lease = None
+                raise RuntimeError(f'Existing bridge ownership refused: {error}') from error
+            self.thread = threading.Thread(target=self._poll, daemon=True, name='ZayaWhatsAppBridge')
+            self.thread.start()
+            return
         # Process-local policy allows contact observations only. This does not
         # weaken Telegram or change Hermes profile allowlists. Zaya never routes
         # this content to the privileged operator, even owner outgoing text.
@@ -84,9 +157,14 @@ class NativeBridge:
                    WHATSAPP_DM_POLICY='open', WHATSAPP_FORWARD_OWNER_MESSAGES='true',
                    WHATSAPP_SEND_READ_RECEIPTS='false', WHATSAPP_REPLY_PREFIX='', HERMES_HOME=str(home))
         options = {'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
-        self.process = subprocess.Popen([node, str(bridge), '--port', str(self.port), '--session', self.connection['session_path']],
+        try:
+            self.process = subprocess.Popen([node, str(bridge), '--port', str(self.port), '--session', self.connection['session_path']],
                                         cwd=str(bridge.parent), env=env, stdin=subprocess.DEVNULL,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
+        except Exception:
+            self.lease.close()
+            self.lease = None
+            raise
         self.thread = threading.Thread(target=self._poll, daemon=True, name='ZayaWhatsAppBridge')
         self.thread.start()
 
@@ -140,3 +218,6 @@ class NativeBridge:
         if hasattr(self, 'thread'):
             self.thread.join(timeout=5)
         self.http.close()
+        if self.lease:
+            self.lease.close()
+            self.lease = None
