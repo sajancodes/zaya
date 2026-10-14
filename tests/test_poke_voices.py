@@ -87,7 +87,13 @@ with tempfile.TemporaryDirectory() as folder:
         bar.set_state('SPEAKING')
         bar.play_reaction(1)
         assert bar.sounds[1].played==2 and bar.pending_reaction==1
-        bar.set_state('MUTED')
+        import main,threading
+        from types import SimpleNamespace
+        agent=main.JarvisLive.__new__(main.JarvisLive)
+        agent._speaking_lock=threading.Lock()
+        agent._out_latency=0
+        agent.ui=SimpleNamespace(muted=True,set_state=bar.set_state)
+        agent.set_speaking(False)
         assert bar.sounds[1].played==3 and bar.pending_reaction is None
         bar.config['poke_audio_enabled']=False
         bar.play_reaction(1)

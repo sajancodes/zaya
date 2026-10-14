@@ -885,8 +885,8 @@ class JarvisLive:
             self._out_level = 0.0
         if value:
             self.ui.set_state("SPEAKING")
-        elif not self.ui.muted:
-            self.ui.set_state("LISTENING")
+        else:
+            self.ui.set_state("MUTED" if self.ui.muted else "LISTENING")
 
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
