@@ -28,6 +28,11 @@ class HandlerTests(unittest.TestCase):
         self.worker.process(self.message)
         self.adapter.send.assert_called_once()
 
+    def test_observe_announces_separately_and_never_sends(self):
+        self.store.set_mode(CHAT, 'observe')
+        self.worker.process(self.message)
+        self.adapter.send.assert_not_called()
+
     def test_manual_takeover_during_generation(self):
         def generate(*_):
             self.store.ingest(Message('manual', CHAT, 'owner', 'I will reply', 2, direction='outgoing'))

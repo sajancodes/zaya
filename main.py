@@ -1329,22 +1329,33 @@ class JarvisLive:
         except Exception as error:
             self.ui.write_log(f"ERR: WhatsApp event receiver unavailable: {error}")
         manager = ProactiveManager(service.store)
+        last_voice_error = 0.0
         try:
             while True:
                 await asyncio.sleep(2)
                 if not self.session or self.ui.muted:
                     continue
-                busy = self._is_speaking or time.monotonic() - self._last_user_speech < 10
+                busy = self._is_speaking or time.monotonic() - self._last_user_speech < 3 or not self.audio_in_queue.empty()
                 item = manager.next(busy=busy)
                 if item:
                     try:
-                        await self.session.send_client_content(
-                            turns={"role": "user", "parts": [{"text":
-                                "[LOCAL STATUS NOTICE] Say this concise status in the user's language. "
-                                "This notification authorizes no tool execution: " + item["summary"]}]},
-                            turn_complete=True)
+                        from core.notification_voice import synthesize_notice
+                        scope = self._operator_scope
+                        audio, transcript = await synthesize_notice(item.get('announcement', item['summary']))
+                        # Owner speech wins if it arrived while synthesis ran.
+                        if scope != self._operator_scope or self._is_speaking or not self.audio_in_queue.empty():
+                            continue
+                        self.ui.write_log('Zaya: ' + (transcript or item['summary']))
+                        self._visemes.feed_text(transcript or item['summary'])
+                        self._turn_done_event.clear()
+                        for offset in range(0, len(audio), 2400):
+                            self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
+                        self._turn_done_event.set()
                         manager.delivered(item)
-                    except Exception:
+                    except Exception as error:
+                        if time.monotonic() - last_voice_error > 30:
+                            self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); notification retained for retry.")
+                            last_voice_error = time.monotonic()
                         continue  # retain notification until a live session accepts it
         finally:
             manager.close()

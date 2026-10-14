@@ -45,6 +45,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PLUGIN = {
     "name": "chat_takeover",
     "description": (
+        "SCREEN FALLBACK FOR NON-WHATSAPP APPS ONLY. Explicit platform is required. "
+        "For WhatsApp use whatsapp monitor/start_auto/stop_auto, never this tool. "
         "Takes over the chat/messaging conversation currently visible on the "
         "user's SCREEN and automatically replies to new incoming messages in "
         "the user's style until told to stop. Use action='start' when the user "
@@ -62,6 +64,8 @@ PLUGIN = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
+            "platform": {"type": "STRING", "enum": ["instagram", "discord", "telegram", "signal", "slack", "whatsapp"],
+                         "description": "Owner-selected app. WhatsApp is refused; use its message service."},
             "action": {
                 "type": "STRING",
                 "enum": ["start", "stop", "status"],
@@ -654,6 +658,9 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
 def run(parameters: dict, player=None, session_memory=None) -> str:
     action = (parameters.get("action") or "start").strip().lower()
     query  = (parameters.get("query") or "").strip()
+    if action == 'start' and parameters.get('platform') not in {'instagram', 'discord', 'telegram', 'signal', 'slack'}:
+        from core.tool_result import ToolResult
+        return ToolResult('failed', 'Screen takeover requires an explicit non-WhatsApp platform. Use whatsapp monitor for notifications or start_auto for assistant replies.')
 
     try:
         if action == "stop":
