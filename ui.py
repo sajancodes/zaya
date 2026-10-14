@@ -5639,6 +5639,7 @@ class JarvisUI:
         self.root = _RootShim(self._app)
         self._bar = None
         self.on_companion_reaction = None
+        self.on_companion_audio_activity = None
         try:
             from core.zayabar_config import load_config
             bar_config = load_config()
@@ -5648,6 +5649,7 @@ class JarvisUI:
                 self._app.setQuitOnLastWindowClosed(False)
                 self._win._state_sig.connect(self._bar.state_changed.emit)
                 self._bar.reaction_requested.connect(self._bar_reaction)
+                self._bar.reaction_audio_active.connect(self._bar_audio_activity)
                 self._app.aboutToQuit.connect(self._bar.shutdown)
                 self._bar.show()
             if not self._bar or bar_config.get('show_main_window_on_start', False) or not self._win._ready:
@@ -5659,6 +5661,10 @@ class JarvisUI:
     def _bar_reaction(self, text):
         if self.on_companion_reaction:
             self.on_companion_reaction(text)
+
+    def _bar_audio_activity(self, active):
+        if self.on_companion_audio_activity:
+            self.on_companion_audio_activity(active)
 
     @property
     def muted(self) -> bool:

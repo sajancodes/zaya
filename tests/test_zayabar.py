@@ -11,6 +11,7 @@ from core.zayabar_config import CONFIG_PATH, load_config, asset_path
 class BarConfigTests(unittest.TestCase):
     def test_paths_defaults_and_emotion_fallback(self):
         config = load_config()
+        config['assets']['standby'] = ''
         self.assertTrue(config['enabled'])
         self.assertIsNone(asset_path(config, 'standby'))
         config['assets']['standby'] = 'images/rest.gif'
@@ -52,6 +53,7 @@ with tempfile.TemporaryDirectory() as folder:
     a.save(root/'standby.gif', save_all=True, append_images=[b], duration=80, loop=0)
     b.save(root/'thinking.png')
     config = load_config()
+    config['poke_reactions'] = []
     config['assets']['standby'] = str(root/'standby.gif')
     config['assets']['thinking'] = str(root/'thinking.png')
     path = root/'zayabar.json'
@@ -71,6 +73,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert bar.mode == 'talking'
     bar.on_runtime({'event':'avatar.emotion','emotion':'happy'})
     assert bar.emotion == 'happy'
+    bar.state_changed.emit('LISTENING')
     seen=[]
     bar.reaction_requested.connect(seen.append)
     QTest.mouseDClick(bar, Qt.MouseButton.LeftButton)

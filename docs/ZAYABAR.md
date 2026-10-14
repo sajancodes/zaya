@@ -46,10 +46,39 @@ Invalid configuration edits retain the currently loaded character.
 
 Speaking and thinking states follow the existing assistant/runtime signals.
 The assistant can select a response expression through `avatar_expression`.
-Double-click shows the poked picture and requests a random line from
-`reaction_lines`, using the Nika voice without computer tools. A cooldown avoids
-repeated interruptions. Reactions stay silent while muted or while Zaya is
-already speaking; provider/network access is needed for voice playback.
+Double-click randomly selects a `poke_reactions` entry. Each entry pairs a
+preloaded local WAV with its own picture. Playback is local and instant: no
+Gemini request, internet connection, or live AI session is required. A cooldown
+avoids repeated interruptions. Reactions stay silent while muted or while Zaya
+is already speaking, and microphone echo is suppressed during local playback.
+
+The supplied Nika clips are paired as follows. Generate your corresponding
+images at these paths, or replace each `image` path with your exact filename:
+
+| Picture | Saved voice | Line |
+| --- | --- | --- |
+| `assets/poke/ouch.png` | `assets/poke/ouch.wav` | Ouch! Stop poking me! |
+| `assets/poke/gentle.png` | `assets/poke/gentle.wav` | Be gentle with me! |
+| `assets/poke/hurts.png` | `assets/poke/hurts.wav` | Hey, that hurts! |
+
+```json
+"poke_reactions": [
+  {"text": "Ouch! Stop poking me!", "image": "assets/poke/ouch.png", "audio": "assets/poke/ouch.wav"},
+  {"text": "Be gentle with me!", "image": "assets/poke/gentle.png", "audio": "assets/poke/gentle.wav"},
+  {"text": "Hey, that hurts!", "image": "assets/poke/hurts.png", "audio": "assets/poke/hurts.wav"}
+]
+```
+
+Add more entries to add more reactions. WAV audio is preloaded when the bar
+starts or configuration is reloaded. Missing reaction images use the normal
+poked/standby fallback. Missing audio never triggers an AI voice call.
+The older `reaction_lines` list is retained for configuration compatibility but
+does not generate speech on click.
+
+To generate new configured audio once, use
+`python -m tools.generate_poke_voices`. Existing files are kept. To regenerate
+clips after editing their text, add `--overwrite`. Only this generation step
+requires the configured Gemini API key and network access.
 The app's existing proactive behavior and controls remain available in its
 original window.
 

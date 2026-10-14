@@ -32,7 +32,25 @@ def load_config(path=CONFIG_PATH):
     if not isinstance(lines, list) or not lines or any(not isinstance(s, str) or not s.strip() or len(s) > 160 for s in lines):
         raise ValueError('reaction_lines must contain short nonempty strings.')
     data['reaction_lines'], data['assets'] = lines, assets
+    reactions = data.get('poke_reactions', [])
+    if not isinstance(reactions, list) or len(reactions) > 30:
+        raise ValueError('poke_reactions must be a list of up to 30 voice/image pairs.')
+    for item in reactions:
+        if not isinstance(item, dict) or not isinstance(item.get('text'), str) or not item['text'].strip() or len(item['text']) > 160:
+            raise ValueError('Each poke reaction needs a short text line.')
+        if any(not isinstance(item.get(key, ''), str) for key in ('image', 'audio')):
+            raise ValueError('Poke image and audio paths must be strings.')
+        if item.get('audio') and Path(item['audio']).suffix.lower() != '.wav':
+            raise ValueError('Use a local WAV file for instant poke playback.')
+    data['poke_reactions'] = reactions
     return data
+
+
+def local_path(value, config_path=CONFIG_PATH):
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else Path(config_path).parent / path
 
 
 def asset_path(config, mode, emotion='neutral', config_path=CONFIG_PATH):
@@ -43,5 +61,4 @@ def asset_path(config, mode, emotion='neutral', config_path=CONFIG_PATH):
     value = value or assets.get('standby', '')
     if not value:
         return None
-    path = Path(value).expanduser()
-    return path if path.is_absolute() else Path(config_path).parent / path
+    return local_path(value, config_path)

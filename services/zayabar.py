@@ -2,19 +2,22 @@
 import json
 import random
 import time
+import wave
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer, QSize, QBuffer, QIODevice, pyqtSignal
 from PyQt6.QtGui import QPixmap, QMovie, QPainter, QColor, QIcon, QDesktopServices
 from PyQt6.QtCore import QUrl
+from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtWidgets import QWidget, QApplication, QMenu, QSystemTrayIcon, QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel
 from core.event_bus import bus
-from core.zayabar_config import CONFIG_PATH, EMOTIONS, load_config, asset_path
+from core.zayabar_config import CONFIG_PATH, EMOTIONS, load_config, asset_path, local_path
 
 
 class ZayaBar(QWidget):
     state_changed = pyqtSignal(str)
     runtime_event = pyqtSignal(dict)
     reaction_requested = pyqtSignal(str)
+    reaction_audio_active = pyqtSignal(bool)
     config_reloaded = pyqtSignal()
 
     def __init__(self, main_window, config_path=CONFIG_PATH):
@@ -34,6 +37,8 @@ class ZayaBar(QWidget):
         self.movie, self.frame, self.loaded_asset = None, QPixmap(), None
         self.last_poke, self.poked_until, self.drag_origin = -1000.0, 0.0, None
         self.active_tasks = set()
+        self.selected_reaction = None
+        self.sounds = {}
         self.error = ''
         self.state_changed.connect(self.set_state)
         self.runtime_event.connect(self.on_runtime)
@@ -46,6 +51,7 @@ class ZayaBar(QWidget):
         self.position_timer.start(1500)
         self.position_on_taskbar()
         self.load_media()
+        self.preload_reactions()
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             icon = QPixmap(40, 40)
@@ -97,7 +103,56 @@ class ZayaBar(QWidget):
 
     def set_state(self, state):
         self.base_state = state
+        if state in {'SPEAKING', 'MUTED'}:
+            for sound in self.sounds.values():
+                sound.stop()
         self.refresh_mode()
+
+    def preload_reactions(self):
+        for sound in self.sounds.values():
+            sound.stop()
+            sound.deleteLater()
+        self.sounds = {}
+        self.reactions = self.config['poke_reactions'] or [
+            {'text': line, 'image': self.config['assets'].get('poked', ''), 'audio': ''}
+            for line in self.config['reaction_lines']]
+        for index, reaction in enumerate(self.reactions):
+            path = local_path(reaction.get('audio', ''), self.config_path)
+            if path and path.is_file():
+                sound = QSoundEffect(self)
+                sound.setLoopCount(1)
+                sound.setVolume(.8)
+                sound.setSource(QUrl.fromLocalFile(str(path.resolve())))
+                sound.playingChanged.connect(self.sound_activity)
+                self.sounds[index] = sound
+
+    def sound_activity(self):
+        self.reaction_audio_active.emit(any(sound.isPlaying() for sound in self.sounds.values()))
+
+    def play_reaction(self, index):
+        reaction = self.reactions[index]
+        self.selected_reaction = reaction
+        duration = self.config['reaction_duration_ms']
+        path = local_path(reaction.get('audio', ''), self.config_path)
+        try:
+            if path:
+                with wave.open(str(path), 'rb') as stream:
+                    duration = max(duration, int(1000 * stream.getnframes() / stream.getframerate()) + 150)
+        except (OSError, wave.Error):
+            pass
+        self.poked_until = time.monotonic() + duration / 1000
+        self.restore_timer.start(int(duration))
+        self.refresh_mode()
+        self.load_media()
+        if not getattr(self.main_window, '_muted', False) and self.base_state != 'SPEAKING':
+            sound = self.sounds.get(index)
+            if sound and sound.status() == QSoundEffect.Status.Ready:
+                sound.play()
+                self.reaction_requested.emit(reaction['text'])
+            elif not reaction.get('audio'):
+                self.reaction_requested.emit(reaction['text'])
+            else:
+                self.main_window._log_sig.emit('SYS: Poke audio is missing or not loaded; no AI voice request was made.')
 
     def on_runtime(self, event):
         if event['event'] == 'avatar.reaction.playing':
@@ -128,6 +183,10 @@ class ZayaBar(QWidget):
 
     def load_media(self):
         path = asset_path(self.config, self.mode, self.emotion, self.config_path)
+        if self.mode == 'poked' and self.selected_reaction:
+            selected = local_path(self.selected_reaction.get('image', ''), self.config_path)
+            if selected and selected.is_file():
+                path = selected
         key = (str(path), self.mode, self.emotion, self.size().width(), self.size().height())
         if key == self.loaded_asset:
             return
@@ -182,10 +241,7 @@ class ZayaBar(QWidget):
             now = time.monotonic()
             if now - self.last_poke >= self.config['reaction_cooldown_seconds']:
                 self.last_poke = now
-                self.poked_until = now + self.config['reaction_duration_ms'] / 1000
-                self.restore_timer.start(int(self.config['reaction_duration_ms']))
-                self.refresh_mode()
-                self.reaction_requested.emit(random.choice(self.config['reaction_lines']))
+                self.play_reaction(random.randrange(len(self.reactions)))
             event.accept()
 
     def mousePressEvent(self, event):
@@ -215,6 +271,8 @@ class ZayaBar(QWidget):
             self.main_window._log_sig.emit(f'ERR: Character configuration: {error}')
             return False
         self.loaded_asset = None
+        self.selected_reaction = None
+        self.preload_reactions()
         self.position_on_taskbar()
         self.load_media()
         self.setVisible(self.config.get('enabled', True))
@@ -254,6 +312,8 @@ class ZayaBar(QWidget):
         self.config_dialog = dialog
 
     def shutdown(self):
+        for sound in self.sounds.values():
+            sound.stop()
         self.unsubscribe()
         self.position_timer.stop()
         self.restore_timer.stop()

@@ -544,6 +544,8 @@ class JarvisLive:
         self.out_queue            = None
         self._loop                     = None
         self._is_speaking         = False
+        self._companion_audio_active = False
+        self._companion_tail_until = 0.0
         import uuid
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = ""
@@ -642,6 +644,7 @@ class JarvisLive:
         self.ui.get_plugin_settings = self._plugin_registry.settings_schemas  # ⚙ settings tab
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
         self.ui.on_companion_reaction = self.companion_reaction
+        self.ui.on_companion_audio_activity = self.companion_audio_activity
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
@@ -1322,28 +1325,12 @@ class JarvisLive:
         )
 
     def companion_reaction(self, text):
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self._speak_companion_reaction(text), self._loop)
+        self.ui.write_log('Zaya: ' + text)
 
-    async def _speak_companion_reaction(self, text):
-        if not self.session or self.ui.muted or self._is_speaking or not self.audio_in_queue.empty():
-            return
-        from core.notification_voice import synthesize_notice
-        scope = self._operator_scope
-        try:
-            audio, transcript = await synthesize_notice(text, verbatim=True)
-            if scope != self._operator_scope or self._is_speaking or not self.audio_in_queue.empty() or self.ui.muted:
-                return
-            self.ui.write_log('Zaya: ' + (transcript or text))
-            from core.event_bus import bus
-            bus.publish('avatar.reaction.playing', duration_ms=int(len(audio) / 48) + 250)
-            self._visemes.feed_text(transcript or text)
-            self._turn_done_event.clear()
-            for offset in range(0, len(audio), 2400):
-                self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
-            self._turn_done_event.set()
-        except Exception as error:
-            self.ui.write_log(f'ERR: Character reaction voice unavailable ({type(error).__name__}).')
+    def companion_audio_activity(self, active):
+        self._companion_audio_active = active
+        if not active:
+            self._companion_tail_until = time.monotonic() + .5
 
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service
@@ -1430,7 +1417,7 @@ class JarvisLive:
             # So the test is not "is the mic loud" but "is the mic louder than
             # the echo of what we are playing right now", sustained long enough
             # that a cough or a keystroke cannot trigger it.
-            if jarvis_speaking:
+            if jarvis_speaking or self._companion_audio_active or time.monotonic() < self._companion_tail_until:
                 # Nothing is streamed while JARVIS talks.
                 #
                 # Interrupting by voice used to live here: `EchoGuard` can pick a

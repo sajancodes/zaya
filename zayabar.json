@@ -9,9 +9,13 @@
   "fit_legs_to_taskbar": true,
   "reaction_cooldown_seconds": 10,
   "reaction_duration_ms": 2200,
-  "reaction_lines": ["Ouch! That hurts!", "Hey! Stop poking me!", "Again? Be gentle!"],
+  "reaction_lines": [
+    "Ouch! That hurts!",
+    "Hey! Stop poking me!",
+    "Again? Be gentle!"
+  ],
   "assets": {
-    "standby": "",
+    "standby": "assets/standby.gif",
     "thinking": "",
     "poked": "",
     "talking": {
@@ -21,5 +25,22 @@
       "angry": "",
       "surprised": ""
     }
-  }
+  },
+  "poke_reactions": [
+    {
+      "text": "Ouch! Stop poking me!",
+      "image": "assets/poke/ouch.png",
+      "audio": "assets/poke/ouch.wav"
+    },
+    {
+      "text": "Be gentle with me!",
+      "image": "assets/poke/gentle.png",
+      "audio": "assets/poke/gentle.wav"
+    },
+    {
+      "text": "Hey, that hurts!",
+      "image": "assets/poke/hurts.png",
+      "audio": "assets/poke/hurts.wav"
+    }
+  ]
 }
