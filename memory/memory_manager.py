@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Lock
 from pathlib import Path
 import sys
@@ -148,8 +148,17 @@ def _recursive_update(target: dict, updates: dict) -> bool:
                 changed = True
         else:
             new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value))
-            entry    = {"value": new_val, "updated": datetime.now().strftime("%Y-%m-%d")}
             existing = target.get(key, {})
+            previous = existing if isinstance(existing, dict) else {}
+            metadata = value if isinstance(value, dict) else {}
+            confidence = float(metadata.get("confidence", 1.0))
+            if confidence < 0.7:
+                continue
+            now = datetime.now(timezone.utc).isoformat()
+            entry = {"value": new_val, "updated": now[:10], "category": metadata.get("category", ""),
+                     "source": metadata.get("source", "user"), "confidence": min(1.0, confidence),
+                     "created_at": previous.get("created_at", now), "updated_at": now,
+                     "last_used_at": previous.get("last_used_at"), "expires_at": metadata.get("expires_at")}
             if not isinstance(existing, dict) or existing.get("value") != new_val:
                 target[key] = entry
                 changed = True
