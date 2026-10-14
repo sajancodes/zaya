@@ -25,6 +25,9 @@ def load_connection(path: Path = CONNECTION_PATH) -> dict | None:
     # the runtime DB, logs, tool results, repository or model context.
     credentials = json.loads((session / 'creds.json').read_text(encoding='utf-8'))
     account = normalize_account(str(credentials.get('me', {}).get('id', '')))
-    if account != normalize_account(record['account_id']) or not credentials.get('registered'):
-        raise ValueError('Saved connection does not match a registered linked account.')
+    # Baileys linked-device sessions can retain registered=false after a real
+    # successful QR handshake. `me.id` is populated by pairing; actual online
+    # readiness is separately verified using the bridge health response.
+    if account != normalize_account(record['account_id']):
+        raise ValueError('Saved connection does not match the linked account.')
     return {**record, 'hermes_home': str(home), 'session_path': str(session), 'account_id': account}

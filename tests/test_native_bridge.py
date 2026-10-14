@@ -19,7 +19,7 @@ class NativeBridgeTests(unittest.TestCase):
             home = Path(folder)
             session = home / 'whatsapp' / 'session'
             session.mkdir(parents=True)
-            (session / 'creds.json').write_text(json.dumps({'me': {'id': '123:4@s.whatsapp.net'}, 'registered': True, 'secret': 'private'}))
+            (session / 'creds.json').write_text(json.dumps({'me': {'id': '123:4@s.whatsapp.net'}, 'registered': False, 'secret': 'private'}))
             path = home / 'connection.json'
             path.write_text(json.dumps({'hermes_home': str(home), 'session_path': str(session), 'account_id': '123@s.whatsapp.net'}))
             record = load_connection(path)
