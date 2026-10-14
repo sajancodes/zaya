@@ -1,0 +1,25 @@
+name: Zaya regression tests
+on:
+  push:
+    branches: [zaya-updates, main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt ruff
+      - name: Install isolated browser test runtime
+        run: python -m playwright install chromium
+      - name: Check syntax and undefined names
+        run: python -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py tests tools
+      - name: Run offline regression and integration tests
+        run: python -m unittest discover -s tests -v

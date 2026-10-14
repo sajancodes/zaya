@@ -83,6 +83,7 @@ def _read_full_config() -> dict:
 # Single source of truth for the release name — the window title, the header
 # badge and the readme must never disagree again.
 APP_VERSION  = "Zaya"
+_HEADER_HEIGHT = 72
 APP_PROTOCOL = APP_VERSION.split()[-1]
 
 _DEFAULT_W, _DEFAULT_H = 980, 700
@@ -3940,7 +3941,7 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(54)
+        w.setFixedHeight(_HEADER_HEIGHT)
         w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER_B};")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
@@ -4386,7 +4387,7 @@ class MainWindow(QMainWindow):
         _W = 220
         drawer.setFixedWidth(_W)
         drawer.adjustSize()
-        drawer.setGeometry(left, 54, _W, drawer.sizeHint().height())
+        drawer.setGeometry(left, _HEADER_HEIGHT, _W, drawer.sizeHint().height())
 
     def _position_quick_drawer(self):
         if hasattr(self, "_quick_drawer"):
