@@ -4,6 +4,7 @@ Offline events remain in a local SQLite outbox and are replayed on the next hook
 Hermes calls this synchronously/asynchronously according to its public hook API.
 """
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import time
@@ -19,7 +20,7 @@ def handle(event_type: str, context: dict) -> None:
     payload = json.dumps({'event': event_type, 'context': {k: v for k, v in context.items() if k in allowed}}, ensure_ascii=False)
     if len(payload.encode('utf-8')) > 60000:
         return
-    with sqlite3.connect(folder / 'zaya-hook-outbox.db', timeout=3) as db:
+    with closing(sqlite3.connect(folder / 'zaya-hook-outbox.db', timeout=3)) as db:
         db.execute('CREATE TABLE IF NOT EXISTS pending(id INTEGER PRIMARY KEY, payload TEXT, created REAL)')
         db.execute('INSERT INTO pending(payload,created) VALUES(?,?)', (payload, time.time()))
         db.execute('DELETE FROM pending WHERE created < ?', (time.time() - 7 * 86400,))
