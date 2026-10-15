@@ -299,17 +299,12 @@ def _cooling(model: str) -> bool:
 
 
 def api_key(refresh: bool = False) -> str:
-    """The Gemini key from config/api_keys.json. Cached; never raises."""
-    global _cached_key
-    with _key_lock:
-        if _cached_key is not None and not refresh:
-            return _cached_key
-        try:
-            data = json.loads(_KEY_FILE.read_text(encoding="utf-8"))
-            _cached_key = str(data.get("gemini_api_key") or "")
-        except Exception:
-            _cached_key = ""
-        return _cached_key
+    """Return a single configured key; comma lists never reach the provider."""
+    from core.gemini_keys import pool, KeysCooling
+    try:
+        return pool.select('rest')
+    except (ValueError, KeysCooling):
+        return ''
 
 
 def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
@@ -323,7 +318,8 @@ def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
         raise RuntimeError("no Gemini API key is configured")
     return genai.Client(
         api_key=key,
-        http_options=gtypes.HttpOptions(timeout=max(MIN_TIMEOUT_MS, int(timeout_ms))),
+        http_options=gtypes.HttpOptions(timeout=max(MIN_TIMEOUT_MS, int(timeout_ms)),
+                                        retry_options=gtypes.HttpRetryOptions(attempts=1)),
     )
 
 
@@ -486,41 +482,49 @@ def call(contents, tier: str = FAST, config=None,
     if ladder is None:
         ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
 
-    resolved_key = key or api_key()
-    if not resolved_key:
-        print("[Gemini] no Gemini API key is configured")
+    from core.gemini_keys import pool, KeysCooling
+    from core.audit import redact
+    if not key and not pool.keys():
+        print('[Gemini] no Gemini API keys are configured')
         return None
-
-    cl = None
     tried = [m for m in ladder if not _cooling(m)] or list(ladder)
     for model in tried:
-        try:
-            if model == LIVE:
-                reply = _live_call(contents, config, timeout_ms, resolved_key)
-                if reply is not None:
-                    return reply
-                raise RuntimeError("the Live turn came back empty")
-            if cl is None:
+        resource = 'helper:' + model
+        for _attempt in range(1 if key else len(pool.keys())):
+            try:
+                resolved_key = key or pool.select(resource)
+            except (KeysCooling, ValueError):
+                break
+            cl = None
+            try:
+                if model == LIVE:
+                    reply = _live_call(contents, config, timeout_ms, resolved_key)
+                    if reply is not None:
+                        return reply
+                    raise RuntimeError('the Live turn came back empty')
                 cl = client(timeout_ms=timeout_ms, key=resolved_key)
-            kwargs = {"model": model, "contents": contents}
-            if config is not None:
-                kwargs["config"] = config
-            return cl.models.generate_content(**kwargs)
-        except Exception as e:
-            msg = str(e)
-            if is_quota_error(msg):
-                _cool(model)
-                print(f"[Gemini] {model}: out of quota — skipping it for "
-                      f"{_COOLDOWN_SECONDS // 60} minutes")
-            elif is_gone_error(msg):
-                _cool(model, _GONE_SECONDS)
-                print(f"[Gemini] {model}: unavailable to this key — set aside")
-            elif is_unavailable_error(msg):
-                _cool(model, _UNAVAILABLE_SECONDS)
-                print(f"[Gemini] {model}: not answering — resting it for "
-                      f"{_UNAVAILABLE_SECONDS // 60} minutes")
-            else:
-                print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+                kwargs = {'model': model, 'contents': contents}
+                if config is not None:
+                    kwargs['config'] = config
+                return cl.models.generate_content(**kwargs)
+            except Exception as error:
+                msg = str(error)
+                if is_quota_error(msg):
+                    if not key:
+                        pool.limited(resolved_key, error, resource)
+                        print(f'[Gemini] {model}: rate limit; checking the next configured key')
+                        continue
+                    _cool(model)
+                elif is_gone_error(msg):
+                    _cool(model, _GONE_SECONDS)
+                elif is_unavailable_error(msg):
+                    _cool(model, _UNAVAILABLE_SECONDS)
+                else:
+                    print(f'[Gemini] {model}: {type(error).__name__}: {redact(msg)[:140]}')
+                break
+            finally:
+                if cl is not None:
+                    cl.close()
     return None
 
 

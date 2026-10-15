@@ -1424,18 +1424,18 @@ class SetupOverlay(QWidget):
             return w
 
         layout.addWidget(_lbl("◈  INITIALISATION REQUIRED", 13, True))
-        layout.addWidget(_lbl("Configure J.A.R.V.I.S. before first boot.", 9, color=C.PRI_DIM))
+        layout.addWidget(_lbl("Configure Zaya · Created by Sajan Rai", 9, color=C.PRI_DIM))
         layout.addSpacing(6)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER};"); layout.addWidget(sep)
         layout.addSpacing(4)
 
-        layout.addWidget(_lbl("GEMINI API KEY", 8, color=C.TEXT_DIM,
+        layout.addWidget(_lbl("GEMINI API KEYS — SEPARATE WITH COMMAS", 8, color=C.TEXT_DIM,
                                align=Qt.AlignmentFlag.AlignLeft))
         self._key_input = QLineEdit()
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._key_input.setPlaceholderText("AIza…")
+        self._key_input.setPlaceholderText("AIza… , AIza… , AIza…")
         self._key_input.setFont(QFont("Courier New", 10))
         self._key_input.setFixedHeight(32)
         self._key_input.setStyleSheet(f"""
@@ -2993,6 +2993,7 @@ class MainWindow(QMainWindow):
         self.on_remote_clicked = None   # callable: () -> (url, key) | None
         self.on_interrupt      = None   # callable: () -> None — stop JARVIS mid-speech
         self.on_voice_change   = None   # callable: () -> None — rebuild session with new voice
+        self.on_credentials_change = None
         self.on_audio_device_change = None  # callable: () -> None — reopen audio streams
         self._confirm_overlay  = None   # live ConfirmBanner, if one is on screen
         self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
@@ -5715,6 +5716,9 @@ class MainWindow(QMainWindow):
         if getattr(self, '_desktop_mode', False):
             self.showNormal()
         ov = SetupOverlay(self.centralWidget())
+        from core.gemini_keys import parse_keys
+        saved = _read_full_config()
+        ov._key_input.setText(', '.join(parse_keys(saved.get('gemini_api_keys') or saved.get('gemini_api_key', ''))))
         cw = self.centralWidget()
         ow, oh = 460, 390
         ov.setGeometry(
@@ -5728,8 +5732,15 @@ class MainWindow(QMainWindow):
 
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
+        from core.gemini_keys import parse_keys
+        keys = parse_keys(key)
+        if not keys:
+            self._log_sig.emit('ERR: Enter at least one Gemini API key.')
+            return
+        data = _read_full_config()
+        data.update(gemini_api_key=keys[0], gemini_api_keys=keys, os_system=os_name)
         API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
+            json.dumps(data, indent=4),
             encoding="utf-8",
         )
         self._ready = True
@@ -5739,6 +5750,8 @@ class MainWindow(QMainWindow):
         self._apply_state("LISTENING")
         self._assistant_name = "Zaya"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")
+        if self.on_credentials_change:
+            self.on_credentials_change()
 
 
 class _RootShim:
@@ -5846,6 +5859,14 @@ class JarvisUI:
     @on_voice_change.setter
     def on_voice_change(self, cb):
         self._win.on_voice_change = cb
+
+    @property
+    def on_credentials_change(self):
+        return self._win.on_credentials_change
+
+    @on_credentials_change.setter
+    def on_credentials_change(self, cb):
+        self._win.on_credentials_change = cb
 
     @property
     def on_audio_device_change(self):

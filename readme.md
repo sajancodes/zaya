@@ -14,9 +14,11 @@ history is also available on `zaya-updates`.
 
 - [Capabilities](#capabilities)
 - [Requirements and installation](#requirements-and-installation)
+- [Multiple Gemini keys and rate limits](#multiple-gemini-keys-and-rate-limits)
 - [Everyday controls](#everyday-controls)
 - [Character artwork, voices, and bubbles](#character-artwork-voices-and-bubbles)
 - [Media and audio ducking](#media-and-audio-ducking)
+- [Continue the same chat after closing Zaya](#continue-the-same-chat-after-closing-zaya)
 - [Full Access and command permissions](#full-access-and-command-permissions)
 - [Browser automation and recovery](#browser-automation-and-recovery)
 - [WhatsApp connection and chat modes](#whatsapp-connection-and-chat-modes)
@@ -86,6 +88,28 @@ Use **Create Desktop Shortcut** in Settings & Controls for convenient launches.
 If you move or rename the project folder, update the shortcut's working directory
 and script path. Python virtual-environment launchers may also need repair or
 recreation after a move.
+
+## Multiple Gemini keys and rate limits
+
+Right-click Zaya → **Gemini API keys…**. Enter one key or a comma-separated list:
+
+```text
+key_one, key_two, key_three
+```
+
+The field stays masked. Saving preserves voice, WhatsApp and other preferences,
+then reconnects with the saved chat. On a `429` rate-limit response, Zaya tries
+the next available configured key. Provider retry delays are respected; when
+all keys are cooling down, Zaya waits and shows the reason. Helper generations
+also use key failover. Credentials remain in ignored local configuration.
+
+Google applies quota per project, so multiple keys from one project can share
+the same limit. Failover provides access to already available quota; it does
+not guarantee that rate limits disappear. See [Google's rate-limit guide](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+Connection setup has a 20-second deadline. A slow or unavailable provider shows
+connection/retry status rather than leaving a permanent Thinking state. Startup
+worker failures are visible and recorded in `logs/startup_failure.log`.
 
 ## Everyday controls
 
@@ -179,6 +203,14 @@ For a missed reply, audio diagnostics include `logs/runtime/voice_status.json`:
 microphone, queue, network-send and transcription counters plus the current
 gate. This local file contains no recording or transcript.
 
+Your active request takes priority over spoken WhatsApp announcements. Incoming
+messages remain queued until your request and reply finish; speaking during a
+local announcement stops it and returns the speaker to your conversation.
+The microphone sender supplies a short generated quiet tail when echo filtering
+pauses capture, so the provider can finish detecting your sentence. This quiet
+padding contains no recorded microphone audio. A stalled voice reply reconnects
+with saved context; active tools are allowed to finish and are never replayed.
+
 During your speech or Zaya's speech, background computer audio drops to 20% of
 its previous level by default. Zaya's voice receives mixer priority; previous
 levels return afterward. Poke voices participate too. Windows uses per-session
@@ -197,6 +229,22 @@ Restart after changing audio-ducking settings. Speech detection runs locally
 using WebRTC VAD and respects microphone mute, wake-word sleep, and push-to-talk.
 This controls computer audio rather than physical room noise. Speech leaking
 from songs or a nearby TV can trigger detection.
+
+## Continue the same chat after closing Zaya
+
+Zaya keeps one continuous private conversation in `memory/conversation.db`.
+Closing and reopening `main.py` loads its recent messages in the chat and resumes
+the provider session when its checkpoint is still valid. An existing conversation
+opens without another morning briefing. Voice and dashboard text are saved as
+they arrive; typed messages are saved before being sent.
+
+Provider checkpoints expire, so an expired/rejected checkpoint or a voice/model
+change restores recent saved text as context instead. The local chat ID and full
+text archive remain the same. Zaya can use `conversation_history` to find older
+details beyond the recent context window. Saved history never automatically
+repeats old commands, tools, or messages. Audio/video files are not archived by
+this feature. The database includes the private provider checkpoint and stays
+excluded from Git; this begins saving conversations with this update.
 
 ## Full Access and command permissions
 
@@ -289,6 +337,7 @@ rather than silently replacing a core action.
 | --- | --- |
 | `zayabar.json` | Character paths, poke clips, expressions, bubbles, and ducking. |
 | `config/api_keys.json` | Local API key, voice/device preferences, Full Access, and service settings; ignored by Git. |
+| `memory/conversation.db` | Private continuous chat archive, command identity and provider resume checkpoint; ignored by Git. |
 | `memory/` | Local profile, project aliases, task and observed WhatsApp state. Private runtime files are ignored. |
 | `logs/runtime/events.jsonl` | Structured tool results and redacted evidence; ignored by Git. |
 | Hermes profile | Linked-device credentials outside source control. |

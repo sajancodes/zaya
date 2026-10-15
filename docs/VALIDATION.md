@@ -128,3 +128,84 @@ Validation: 135 local tests and Ruff error checks passed. The restarted desktop
 session reports `selective_audio: false`, active microphone callbacks, successful
 network sends and an open gate after replies. The two-request live provider
 check above used synthesized fixtures rather than recorded owner speech.
+
+## Persistent conversation and startup recovery
+
+Created and developed by Sajan Rai. Zaya now keeps a continuous chat ID, the full
+local text archive, current owner request identity and provider checkpoints in
+ignored `memory/conversation.db`. Commits never include this database or its
+journals. Incoming transcript fragments update one durable user turn, and
+closing during a response retains partial assistant text. Typed/phone text is
+saved before delivery. Recent turns are shown again in the desktop chat; the
+`conversation_history` tool retrieves older details with owner-only access.
+
+Provider checkpoints are scoped to model, voice and a credential hash. Unsafe
+in-flight checkpoints are cleared. Expired/rejected checkpoints and changed
+credentials restore bounded recent text as explicitly historical context, with
+`turn_complete=False`. Old requests and tool calls are not replayed. The full
+archive and chat ID remain unchanged. An existing chat skips the fresh morning
+briefing. Google documents a [two-hour resume-token window](https://ai.google.dev/gemini-api/docs/live-api/session-management).
+
+A live Nika check remembered a synthetic marker across a closed/reopened
+provider connection using a saved token. After that token was removed, another
+new connection remembered it using restored local text, with the same chat ID.
+These tests used a temporary database, not the owner's chat history.
+
+Startup connection entry is bounded at 20 seconds. Constructor/worker failures
+leave a visible error and redacted local diagnostic log instead of silently
+leaving the character in Thinking. The updated desktop reached Connected with
+an active microphone and an open sending gate.
+
+## Comma-separated Gemini credentials
+
+The masked editor accepts and deduplicates comma-separated keys, preserving
+other saved preferences. The legacy primary-key setting still contains one
+valid key for older integrations. Live sessions and central helper generations
+switch configured keys on quota errors, including errors nested in background
+TaskGroups. Cooldowns honor provider retry hints; exhausting the pool waits
+instead of issuing a rapid retry loop. Helper HTTP requests use one SDK attempt
+so credential failover owns retry behavior. Quota is project-scoped; adding
+keys from the same project does not create additional quota.
+
+Tests inject quota errors rather than deliberately exhausting real accounts.
+They cover key order, deduplication, cooldown expiry, headers, nested failures,
+helper failover, exhausted-pool waiting, saved settings and the actual Qt editor.
+The isolated notification voice also uses the key pool and does not issue new
+provider requests while all notification credentials are cooling down.
+
+## Owner speech versus WhatsApp announcements
+
+The announcer previously considered the owner idle three seconds after speech,
+even if the main session still owed a reply. Local notification audio shared the
+speaker queue, and interrupting it set the main model's interruption flag even
+though the main server had no matching spoken turn to cancel.
+
+Local speech detection now reserves the owner's turn before provider
+transcription, independently of whether ducking is enabled. Announcements are
+deferred until the owner's turn finishes and the speaker is idle. Speech during
+synthesis invalidates the pending announcement. Interrupting notification audio
+does not suppress the main model's next reply, and arriving owner response audio
+takes the speaker queue back. General proactive announcements also defer to an
+unanswered owner request. Inbox observation continues throughout.
+
+A live comparison reproduced another voice-path failure: pausing PCM and sending
+only a stream-end marker produced no transcription/reply. Supplying trailing
+quiet made the same sample work. The sender now paces one second of generated
+quiet before the stream-end marker whenever microphone delivery pauses. The
+audio format explicitly declares 16 kHz. This is generated silence, never audio
+captured while mute/sleep/privacy gates are closed.
+
+The updated real main microphone-queue/send/receive methods were exercised with
+two synthetic spoken requests against Nika. Both produced owner/assistant turns;
+the second interrupted a local notification fixture and received an answer.
+No contact message was sent and no owner's speech was saved by these checks.
+This proves the streaming path; actual speaker/microphone room separation still
+depends on acoustics. A 20-second no-progress watchdog reconnects a stalled reply
+without replaying actions; running tools and fresh server progress prevent it.
+
+Final validation: all 162 local tests passed, plus the live spoken-input,
+notification-interruption, provider-resume and text-fallback checks described
+above. Ruff error checks and whitespace checks passed. Real rate-limit failover
+was simulated with injected provider errors; no account quota was deliberately
+exhausted. The owner's configuration currently contains one key, so additional
+credentials must be entered in the masked editor to use cross-key failover.

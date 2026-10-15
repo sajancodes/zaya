@@ -64,6 +64,7 @@ class ZayaBar(QWidget):
         self.context_menu.addAction('Zaya · Created by Sajan Rai').setEnabled(False)
         self.context_menu.addSeparator()
         self.context_menu.addAction('Settings & Controls', self.open_main_window)
+        self.context_menu.addAction('Gemini API keys…', lambda: main_window._show_setup())
         self.context_menu.addAction('Character configuration…', self.open_config)
         self.context_menu.addAction('Reload zayabar.json', self.reload_config)
         self.context_menu.addAction('Mute / unmute microphone', main_window._toggle_mute)

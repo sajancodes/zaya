@@ -42,7 +42,9 @@ import time
 import json
 import sys
 import traceback
+import sqlite3
 from collections import deque
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -76,6 +78,7 @@ from memory.config_manager     import (
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
 from core                     import gemini as _gemini
+from core.gemini_keys import pool as gemini_keys, KeysCooling, quota_failure, error_text
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
@@ -97,8 +100,23 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 BASE_DIR        = get_base_dir()
+LIVE_CONNECT_TIMEOUT = 20.0
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+
+
+@asynccontextmanager
+async def _connect_live(client, model, config):
+    """Bound connection setup; a stalled provider must not strand startup."""
+    context = client.aio.live.connect(model=model, config=config)
+    session = await asyncio.wait_for(context.__aenter__(), LIVE_CONNECT_TIMEOUT)
+    try:
+        yield session
+    except BaseException:
+        if not await context.__aexit__(*sys.exc_info()):
+            raise
+    else:
+        await context.__aexit__(None, None, None)
 # The conversation's model. A NAME, not a decision: the ladder lives in
 # core/gemini.py and this is only whichever rung is currently in use, kept here
 # as a module attribute because plugins read it (chat_takeover asks main for it
@@ -293,8 +311,7 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return gemini_keys.select('live')
 
 
 def _load_system_prompt() -> str:
@@ -548,13 +565,20 @@ class JarvisLive:
         self._is_speaking         = False
         self._companion_audio_active = False
         self._companion_tail_until = 0.0
-        from core.audio_ducking import AudioDucker
+        from core.audio_ducking import AudioDucker, SpeechDetector
         from core.zayabar_config import load_config
         try:
             duck_config = load_config()['audio_ducking']
         except (ValueError, OSError):
             duck_config = None
         self._audio_ducker = AudioDucker(duck_config).start()
+        try:
+            self._owner_detector = SpeechDetector()
+        except ImportError:
+            self._owner_detector = None
+        self._owner_turn_pending = False
+        self._owner_epoch = 0
+        self._notification_active = False
         self.ui.on_shutdown = self.shutdown
         import uuid
         self._operator_scope = uuid.uuid4().hex
@@ -597,6 +621,7 @@ class JarvisLive:
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
+        self.ui.on_credentials_change = lambda: self.request_reconnect(keep_context=False, reason='Gemini API keys')
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
         self._reconnect_keep = True   # False → next rebuild drops the resumption handle
@@ -609,16 +634,29 @@ class JarvisLive:
         # switching microphone — started an empty session. "Unlimited sessions"
         # leaked through exactly this hole.
         #
-        # Deliberately in RAM only, never written to disk. Persisting it would
-        # make a fresh launch continue yesterday's conversation, which sounds
-        # appealing but breaks the session-summary flow: _save_session_summary
-        # runs at shutdown and the morning briefing pops it the next day. A
-        # conversation that never ends never produces a summary, and the
-        # "yesterday we talked about…" line silently disappears.
+        # Persist both provider checkpoints and the continuous local chat.
+        # Expired checkpoints fall back to historical text, never action replay.
         self._resume_handle: str | None = None
+        self._resume_scope = None
+        from memory.conversation_store import ConversationStore
+        try:
+            self._conversation = ConversationStore()
+            previous = self._conversation.recent(limit=80, max_chars=64000)
+            state = self._conversation.state()
+            self._operator_scope = state.get('operator_scope', self._operator_scope)
+            self._operator_goal = state.get('operator_goal', '')
+            for turn in previous:
+                speaker = 'You' if turn['role'] == 'user' else 'Zaya'
+                self.ui.write_log(f"{speaker}: {turn['text']}")
+            if previous:
+                self.ui.write_log('SYS: Previous conversation loaded — continuing the same chat.')
+        except (OSError, sqlite3.Error):
+            self._conversation = None
+            previous = []
+            self.ui.write_log('SYS: Conversation storage unavailable; this launch cannot restore chat history.')
         self._turn_done_event: asyncio.Event | None = None
         self._dashboard     = None
-        self._briefing_sent    = False          # morning briefing fires once per process
+        self._briefing_sent    = bool(previous)  # Do not replace an existing chat with another greeting.
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
@@ -802,9 +840,8 @@ class JarvisLive:
         session. Called from the Qt thread. No-op until the async loop and
         reconnect event exist.
 
-        `keep_context=False` drops the resumption handle so the new session
-        starts empty — only for changes the server cannot apply to a resumed
-        session."""
+        `keep_context=False` drops the provider checkpoint; saved text restores
+        the chat when settings cannot be applied to a resumed connection."""
         loop = getattr(self, "_loop", None)
         ev   = self._reconnect_event
         self._reconnect_keep   = keep_context
@@ -819,8 +856,8 @@ class JarvisLive:
         required. It is rebuilt WITHOUT the resumption handle on purpose:
         resuming restores the server's own session state, and the safe reading
         is that it restores the voice with it — which would make the picker
-        appear to do nothing. Losing context here is acceptable because changing
-        voice is a deliberate, rare act; losing it on a dropped packet was not."""
+        appear to do nothing. Local chat history restores the conversation when
+        the provider checkpoint cannot carry the new voice."""
         self.request_reconnect(keep_context=False, reason="new voice")
 
     def _on_audio_device_change(self):
@@ -840,7 +877,7 @@ class JarvisLive:
         reason = getattr(self, "_reconnect_reason", "") or "settings"
         self.ui.write_log(
             f"SYS: Applying {reason} — reconnecting"
-            + ("..." if keep else " (starting a fresh conversation)...")
+            + ("..." if keep else " (restoring saved chat with the new settings)...")
         )
         raise _ReconnectSignal(keep_context=keep)
 
@@ -868,12 +905,30 @@ class JarvisLive:
             return
         self._begin_owner_goal(text)
         asyncio.run_coroutine_threadsafe(
-            self.session.send_client_content(
-                turns={"role": "user", "parts": [{"text": text}]},
-                turn_complete=True
-            ),
+            self._send_owner_text(text),
             self._loop
         )
+
+    async def _conversation_write(self, method, *args, **kwargs):
+        store = getattr(self, '_conversation', None)
+        if store is not None:
+            try:
+                return await asyncio.to_thread(getattr(store, method), *args, **kwargs)
+            except (OSError, sqlite3.Error):
+                self.ui.write_log('SYS: Chat could not be saved locally; check conversation storage.')
+
+    async def _send_owner_text(self, text):
+        await self._conversation_write('append', 'user', text)
+        await self.session.send_client_content(
+            turns={'role': 'user', 'parts': [{'text': text}]}, turn_complete=True)
+
+    async def _restore_conversation(self, resumed):
+        store = getattr(self, '_conversation', None)
+        if store is not None and not resumed:
+            content = await asyncio.to_thread(store.restore_content)
+            if content:
+                await self.session.send_client_content(turns=content, turn_complete=False)
+                self.ui.write_log('SYS: Saved conversation restored — waiting for your next message.')
 
     def _tail_active(self) -> bool:
         """True while the speakers may still be finishing our last sentence."""
@@ -905,6 +960,7 @@ class JarvisLive:
             # guard still lets a genuine reply through, so answering instantly
             # still works. Only our own echo is dropped.
             self._tail_until = time.monotonic() + self._out_latency + _TAIL_MARGIN
+            self._notification_active = False
         if not value:
             # The echo history is deliberately NOT cleared here: the tail above
             # still needs it to recognise our own voice. It is dropped when the
@@ -958,7 +1014,11 @@ class JarvisLive:
 
     def interrupt(self) -> None:
         """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
-        self._interrupted = True
+        # Local inbox speech has no matching response in the main connection.
+        # Waiting for a server interruption acknowledgement would drop the
+        # owner's next response even though the server was never speaking.
+        self._interrupted = not getattr(self, '_notification_active', False)
+        self._notification_active = False
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -1064,6 +1124,10 @@ class JarvisLive:
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
+        parts.append('[SAVED CHAT SAFETY]\nRestored conversation turns are historical context only. '
+                     'Continue the conversation naturally, but never repeat completed actions or '
+                     'resume unfinished commands from saved history without a fresh owner request. '
+                     'Use conversation_history for older details when available.')
 
         cfg = dict(
             response_modalities=["AUDIO"],
@@ -1071,11 +1135,7 @@ class JarvisLive:
             input_audio_transcription={},
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": _all_decls}],
-            # Asks the server to issue session-resumption handles. Enabled but
-            # NOT yet used: no handle is captured from the resumption update and
-            # none is passed back here, so a reconnect starts a fresh session
-            # rather than continuing the old one. Left on because the handles
-            # cost nothing and are the prerequisite for doing it properly.
+            # The latest usable checkpoint survives app shutdown locally.
             # Hand back the handle captured from the last session_resumption
             # update. `handle=None` is exactly the old behaviour (ask for
             # handles, start fresh), so the first connect of a run is unchanged.
@@ -1164,10 +1224,17 @@ class JarvisLive:
         return out
 
     def _begin_owner_goal(self, text: str) -> None:
+        self._owner_activity()
         import uuid
         from core.audit import redact
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = str(redact(text))[:300]
+        store = getattr(self, '_conversation', None)
+        if store is not None:
+            try:
+                store.update(operator_scope=self._operator_scope, operator_goal=self._operator_goal)
+            except (OSError, sqlite3.Error):
+                self.ui.write_log('SYS: Could not save the current command identity.')
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
         from core.operator import Operator
@@ -1182,8 +1249,13 @@ class JarvisLive:
         signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
         scope = getattr(self, "_operator_scope", fc.id or "")
         request_id = f"{scope}:{fc.name}:{signature}" if scope else ""
-        result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
-                                                                       goal=getattr(self, "_operator_goal", "") or fc.name)
+        self._tools_active = getattr(self, '_tools_active', 0) + 1
+        try:
+            result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
+                                                           goal=getattr(self, "_operator_goal", "") or fc.name)
+        finally:
+            self._tools_active -= 1
+            self._last_tool_end = time.monotonic()
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
@@ -1365,6 +1437,44 @@ class JarvisLive:
         if not active:
             self._companion_tail_until = time.monotonic() + .5
 
+    def _owner_activity(self):
+        if not getattr(self, '_owner_turn_pending', False):
+            self._owner_turn_started = time.monotonic()
+        self._last_user_speech = time.monotonic()
+        self._owner_turn_pending = True
+        self._owner_epoch = getattr(self, '_owner_epoch', 0) + 1
+        if getattr(self, '_notification_active', False):
+            loop = getattr(self, '_loop', None)
+            if loop and loop.is_running():
+                loop.call_soon_threadsafe(self.interrupt)
+            else:
+                self.interrupt()
+
+    def _notifications_busy(self):
+        return (getattr(self, '_owner_turn_pending', False) or self._is_speaking
+                or time.monotonic() - self._last_user_speech < 10
+                or not self.audio_in_queue.empty()
+                or (self._wake_enabled and not self._awake))
+
+    def _can_announce(self, epoch):
+        return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy()
+
+    def _voice_reply_stalled(self, now):
+        if (not getattr(self, '_owner_turn_pending', False) or self._is_speaking
+                or not self.audio_in_queue.empty() or getattr(self, '_tools_active', 0)):
+            return False
+        health = getattr(self, '_voice_health', {})
+        anchor = max(getattr(self, '_owner_turn_started', now), health.get('received_at', 0),
+                     getattr(self, '_last_tool_end', 0))
+        return now - self._last_user_speech >= 2 and now - anchor > 20
+
+    async def _watch_voice_reply(self):
+        while True:
+            await asyncio.sleep(1)
+            if self._voice_reply_stalled(time.monotonic()):
+                self.ui.write_log('SYS: Voice response stalled — reconnecting with saved chat. Your request is retained; old actions will not be replayed.')
+                raise _ReconnectSignal(keep_context=True)
+
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service
         from core.proactive_manager import ProactiveManager
@@ -1380,19 +1490,20 @@ class JarvisLive:
                 await asyncio.sleep(2)
                 if not self.session or self.ui.muted:
                     continue
-                busy = self._is_speaking or time.monotonic() - self._last_user_speech < 3 or not self.audio_in_queue.empty()
+                busy = self._notifications_busy()
                 item = manager.next(busy=busy)
                 if item:
                     try:
                         from core.notification_voice import synthesize_notice
-                        scope = self._operator_scope
+                        epoch = getattr(self, '_owner_epoch', 0)
                         audio, transcript = await synthesize_notice(item.get('announcement', item['summary']))
                         # Owner speech wins if it arrived while synthesis ran.
-                        if scope != self._operator_scope or self._is_speaking or not self.audio_in_queue.empty():
+                        if not self._can_announce(epoch):
                             continue
                         self.ui.write_log('Zaya: ' + (transcript or item['summary']))
                         self._visemes.feed_text(transcript or item['summary'])
                         self._turn_done_event.clear()
+                        self._notification_active = True
                         for offset in range(0, len(audio), 2400):
                             self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
                         self._turn_done_event.set()
@@ -1414,20 +1525,45 @@ class JarvisLive:
             health.update(fields)
 
     async def _send_realtime(self):
+        streamed = False
+        quiet_blocks = 0
         while True:
-            msg = await self.out_queue.get()
+            try:
+                msg = await asyncio.wait_for(self.out_queue.get(), timeout=.1)
+            except asyncio.TimeoutError:
+                if streamed:
+                    if quiet_blocks < 10:
+                        # A raw stream-end alone can discard the pending VAD
+                        # turn. Give it one second of generated quiet, paced
+                        # like the microphone, before closing the audio stream.
+                        # This contains no captured microphone data.
+                        await self.session.send_realtime_input(audio=types.Blob(
+                            data=bytes(SEND_SAMPLE_RATE // 10 * 2),
+                            mime_type=f'audio/pcm;rate={SEND_SAMPLE_RATE}'))
+                        quiet_blocks += 1
+                        self._voice_mark('quiet_padding')
+                    else:
+                        await self.session.send_realtime_input(audio_stream_end=True)
+                        streamed = False
+                        self._voice_mark('stream_end')
+                continue
             # Gemini 3.x Live rejects the old realtime_input.media_chunks field
             # (what `media=...` maps to) and closes the socket with a 1007. Send
             # mic / phone PCM through the new `audio` field instead. Queue items
             # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
             # the phone relay.
+            mime_type = msg.get('mime_type', 'audio/pcm')
+            if mime_type == 'audio/pcm':
+                mime_type = f'audio/pcm;rate={SEND_SAMPLE_RATE}'
             await self.session.send_realtime_input(
                 audio=types.Blob(
                     data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
+                    mime_type=mime_type,
                 )
             )
             self._voice_mark('sent')
+            streamed = True
+            quiet_blocks = 0
 
     def _microphone_input(self, indata, loop):
         """Filter echo locally and deliver owner speech, including interruptions.
@@ -1495,6 +1631,9 @@ class JarvisLive:
                 queue.put_nowait({"data": packet, "mime_type": "audio/pcm"})
                 self._voice_mark('queued', gate='open')
                 self._audio_ducker.microphone(packet)
+                detector = getattr(self, '_owner_detector', None)
+                if detector is not None and detector.feed(packet):
+                    self._owner_activity()
             self.ui.set_audio_level(_pcm_level(indata))
 
         try:
@@ -1554,6 +1693,8 @@ class JarvisLive:
                                     'speaking': self._is_speaking, 'muted': self.ui.muted,
                                     'mic_active': bool(_mic_stream.active),
                                     'selective_audio': getattr(self, '_active_selective_audio', False),
+                                    'owner_pending': getattr(self, '_owner_turn_pending', False),
+                                    'notification_audio': getattr(self, '_notification_active', False),
                                     'input_queue': self.out_queue.qsize(),
                                     'output_queue': self.audio_in_queue.qsize()}
                         path = BASE_DIR / 'logs' / 'runtime' / 'voice_status.json'
@@ -1612,6 +1753,7 @@ class JarvisLive:
     async def _receive_audio(self):
         print("[Zaya] 👂 Recv started")
         out_buf, in_buf = [], []
+        input_row = None
 
         try:
             while True:
@@ -1637,12 +1779,20 @@ class JarvisLive:
                     # the entire fix for "every reconnect forgets everything".
                     _sru = getattr(response, "session_resumption_update", None)
                     if _sru is not None:
-                        if getattr(_sru, "resumable", False) and getattr(_sru, "new_handle", None):
+                        if not getattr(_sru, "resumable", False):
+                            # An unsafe in-flight checkpoint must not be resumed
+                            # after a restart, potentially repeating an action.
+                            self._resume_handle = None
+                            await self._conversation_write('clear_handle')
+                        elif getattr(_sru, "new_handle", None):
                             if self._resume_handle is None:
                                 print("[Zaya] 🔗 Session resumption armed")
                             self._resume_handle = _sru.new_handle
+                            await self._conversation_write('save_handle', self._resume_handle, self._resume_scope)
 
                     if response.data:
+                        if getattr(self, '_notification_active', False):
+                            self.interrupt()  # The owner's model response takes the speaker back.
                         if self._interrupted:
                             pass  # discard: interrupted
                         else:
@@ -1683,10 +1833,13 @@ class JarvisLive:
                             if txt:
                                 self._interrupted = False
                                 in_buf.append(txt)
+                                input_row = await self._conversation_write('record', 'user', ' '.join(in_buf), input_row)
                                 self._begin_owner_goal(" ".join(in_buf))
                                 self._last_user_speech = time.monotonic()
 
                         if sc.turn_complete:
+                            if not self._interrupted:
+                                self._owner_turn_pending = False
                             if self._turn_done_event:
                                 self._turn_done_event.set()
 
@@ -1695,6 +1848,7 @@ class JarvisLive:
                             if self._interrupted:
                                 self._interrupted = False
                                 in_buf  = []
+                                input_row = None
                                 out_buf = []
                                 self._visemes.reset()
                                 continue
@@ -1711,6 +1865,7 @@ class JarvisLive:
                                         "ts": datetime.now().isoformat(),
                                     }))
                             in_buf = []
+                            input_row = None
 
                             full_out = " ".join(out_buf).strip()
                             # Second line of defence: even if a repeat slips
@@ -1721,6 +1876,7 @@ class JarvisLive:
                                     full_out = ""
                             if full_out:
                                 self._last_out_logged = full_out
+                                await self._conversation_write('append', 'model', full_out)
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
                                 if self._dashboard:
@@ -1741,6 +1897,7 @@ class JarvisLive:
                                 asyncio.create_task(_cam_close())
 
                     if response.tool_call:
+                        self._owner_turn_pending = True
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
                             print(f"[Zaya] 📞 {fc.name}")
@@ -1754,6 +1911,9 @@ class JarvisLive:
             print(f"[Zaya] ❌ Recv: {e}")
             traceback.print_exc()
             raise
+        finally:
+            if out_buf:
+                await self._conversation_write('append', 'model', ' '.join(out_buf))
 
     async def _play_audio(self):
         print("[Zaya] 🔊 Play started")
@@ -1814,6 +1974,7 @@ class JarvisLive:
                     # covers the device buffer after releasing it.
                     if self._is_speaking and time.monotonic() - last_audio >= 0.35:
                         self.set_speaking(False)
+                        self._notification_active = False
                     if self._turn_done_event and self._turn_done_event.is_set():
                         if self._is_speaking:
                             self.set_speaking(False)
@@ -2073,7 +2234,7 @@ class JarvisLive:
             # Don't interrupt an active conversation
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if speaking or (time.monotonic() - self._last_user_speech) < 10:
+            if speaking or getattr(self, '_owner_turn_pending', False) or (time.monotonic() - self._last_user_speech) < 10:
                 continue
             try:
                 await self.session.send_client_content(
@@ -2094,7 +2255,7 @@ class JarvisLive:
                 with self._speaking_lock:
                     speaking = self._is_speaking
                 recent_speech = (time.monotonic() - self._last_user_speech) < 30
-                if not speaking and not recent_speech:
+                if not speaking and not recent_speech and not getattr(self, '_owner_turn_pending', False):
                     try:
                         alerts = await asyncio.to_thread(monitor_check_all)
                         memory = load_memory()
@@ -2132,7 +2293,7 @@ class JarvisLive:
 
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if speaking:
+            if speaking or getattr(self, '_owner_turn_pending', False):
                 continue
 
             if not self._proactive.should_trigger(self._last_user_speech):
@@ -2203,10 +2364,7 @@ class JarvisLive:
                     # has no desktop WAKE button — so it wakes JARVIS if asleep.
                     if self._wake_enabled and not self._awake:
                         self.wake(reason="remote command")
-                    await self.session.send_client_content(
-                        turns={"role": "user", "parts": [{"text": text}]},
-                        turn_complete=True,
-                    )
+                    await self._send_owner_text(text)
                     self.ui.write_log(f"[Web]: {text}")
                 else:
                     print(f"[Dashboard] Dropped command (no session): {text}")
@@ -2260,17 +2418,31 @@ class JarvisLive:
             self._dashboard = None
 
         while True:
+            _resumed_with = False
+            live_key = None
             try:
                 print("[Zaya] Connecting...")
-                self.ui.set_state("THINKING")
+                self.ui.set_state("CONNECTING")
+                from core.event_bus import bus
+                bus.publish('avatar.caption', text='Connecting…')
                 # Pick the rung to open the conversation on. A model resting
                 # off a quota limit is skipped; the name is published back to
                 # LIVE_MODEL so plugins follow whatever is actually in use.
                 global LIVE_MODEL
                 LIVE_MODEL = _gemini.live_model()
                 live_model = LIVE_MODEL
+                live_key = _get_api_key()
                 print(f"[Zaya] Live model: {live_model}")
 
+                from memory.conversation_store import resume_scope
+                scope = resume_scope(live_model, get_voice(), live_key)
+                store = getattr(self, '_conversation', None)
+                if store is not None:
+                    if scope != getattr(self, '_resume_scope', None):
+                        self._resume_handle = None
+                    self._resume_scope = scope
+                    if self._resume_handle is None:
+                        self._resume_handle = await asyncio.to_thread(store.handle, scope)
                 _resumed_with = self._resume_handle is not None
                 config = self._build_config()
 
@@ -2278,12 +2450,12 @@ class JarvisLive:
                 # v1alpha carries proactive audio; if it gets rejected we fall
                 # back to v1beta.
                 client = genai.Client(
-                    api_key=_get_api_key(),
+                    api_key=live_key,
                     http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
                 )
 
                 async with (
-                    client.aio.live.connect(model=live_model, config=config) as session,
+                    _connect_live(client, live_model, config) as session,
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session          = session
@@ -2300,6 +2472,10 @@ class JarvisLive:
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
                     self._barge_audio.clear()
+                    self._owner_turn_pending = False
+                    self._notification_active = False
+
+                    await self._restore_conversation(_resumed_with)
 
                     print("[Zaya] Connected.")
                     if _resumed_with:
@@ -2319,6 +2495,7 @@ class JarvisLive:
                         self._awake = True
                         self.ui.set_state("LISTENING")
                         self.ui.write_log("SYS: Zaya online.")
+                        bus.publish('avatar.caption', text='Listening…')
 
                     if self._dashboard:
                         await self._dashboard.broadcast({"type": "status", "state": "active"})
@@ -2328,6 +2505,7 @@ class JarvisLive:
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
                     tg.create_task(self._receive_audio())
+                    tg.create_task(self._watch_voice_reply())
                     tg.create_task(self._play_audio())
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_background_monitor())
@@ -2357,12 +2535,22 @@ class JarvisLive:
                 # start shutdown — resulting in "executor after shutdown" errors).
                 # Voluntary reconnect (voice change) — not an error. Rebuild the
                 # session immediately with no backoff and no scary logs.
+                if isinstance(e, KeysCooling):
+                    self.ui.set_state('SLEEPING')
+                    self.ui.write_log(f'SYS: Gemini keys are rate-limited — waiting {int(e.retry_after) + 1}s before retrying.')
+                    bus.publish('avatar.caption', text='Gemini is rate-limited. Waiting to reconnect…')
+                    try:
+                        await asyncio.wait_for(self._reconnect_event.wait(), timeout=e.retry_after)
+                        self._reconnect_event.clear()
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
                 if _is_reconnect_signal(e):
                     print("[Zaya] Voluntary reconnect requested.")
                     if not _keep_context_of(e):
-                        # A deliberate clean slate (voice change) — drop the
-                        # handle so the next connect really does start empty.
+                        # Rebuild provider settings while keeping the local chat.
                         self._resume_handle = None
+                        await self._conversation_write('clear_handle')
                     self._conn_backoff = 0
                     continue
 
@@ -2378,15 +2566,25 @@ class JarvisLive:
                     or "INVALID_ARGUMENT" in str(e)
                     or "NOT_FOUND" in str(e)
                 ):
-                    print("[Zaya] 🔗 Resumption handle rejected — starting a fresh session")
-                    self.ui.write_log("SYS: Could not restore the conversation — starting fresh.")
+                    print("[Zaya] 🔗 Provider checkpoint rejected — restoring saved chat")
+                    self.ui.write_log("SYS: Provider checkpoint expired — restoring saved conversation instead.")
                     self._resume_handle = None
+                    await self._conversation_write('clear_handle')
                     self._conn_backoff = 0
                     continue
 
-                err_str = str(e)
+                err_str = error_text(e)
                 print(f"[Zaya] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
+
+                rate_error = quota_failure(e)
+                if live_key and rate_error is not None:
+                    gemini_keys.limited(live_key, rate_error, 'live')
+                    self.ui.set_state('SLEEPING')
+                    self.ui.write_log('SYS: Gemini key reached its quota — checking the next configured key.')
+                    # The next loop either selects a ready key or waits for the
+                    # provider's cooldown. Never replay a previous owner action.
+                    continue
 
                 # Out of quota, or this model is not available to this key —
                 # step down the ladder and reconnect straight away. This is the
@@ -2447,7 +2645,7 @@ class JarvisLive:
                     continue
 
                 # Network / timeout errors — log clearly and back off
-                is_net_err = any(k in err_str for k in (
+                is_net_err = isinstance(e, (TimeoutError, ConnectionError, OSError)) or any(k in err_str for k in (
                     "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
                     "ConnectionRefusedError", "OSError", "Cannot connect",
                 ))
@@ -2458,6 +2656,7 @@ class JarvisLive:
                         f"NET: Connection failed — retrying in {_conn_backoff}s. "
                         "(a VPN may be required)"
                     )
+                    self.ui.set_state('SLEEPING')
                 else:
                     self._conn_backoff = 3
             finally:
@@ -2476,6 +2675,34 @@ class JarvisLive:
             print(f"[Zaya] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
 
+def _run_desktop_agent(ui, stopping):
+    agent = None
+    try:
+        if not ui.wait_for_api_key(stopping):
+            return
+        agent = JarvisLive(ui)
+        if not stopping.is_set():
+            asyncio.run(agent.run())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print('\nZaya shutting down...')
+    except Exception as error:
+        from core.audit import redact
+        ui.set_state('SLEEPING')
+        ui.write_log(f'ERR: Zaya could not start: {redact(str(error))[:180]}')
+        from core.event_bus import bus
+        bus.publish('avatar.caption', text='Could not connect. Check Settings & Controls.')
+        try:
+            path = BASE_DIR / 'logs' / 'startup_failure.log'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open('a', encoding='utf-8') as stream:
+                stream.write(redact(traceback.format_exc()) + '\n')
+        except OSError:
+            pass
+    finally:
+        if agent is not None:
+            agent._audio_ducker.close()
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     from core.single_instance import SingleInstance
@@ -2488,19 +2715,7 @@ def main():
         instance.on_activate = ui.activate_existing
         stopping = threading.Event()
 
-        def runner():
-            if not ui.wait_for_api_key(stopping):
-                return
-            jarvis = JarvisLive(ui)
-            try:
-                if not stopping.is_set():
-                    asyncio.run(jarvis.run())
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                print("\n🔴 Shutting down...")
-            finally:
-                jarvis._audio_ducker.close()
-
-        worker = threading.Thread(target=runner, daemon=True)
+        worker = threading.Thread(target=_run_desktop_agent, args=(ui, stopping), daemon=True)
         worker.start()
         try:
             ui.root.mainloop()

@@ -27,7 +27,12 @@ def save_api_keys(gemini_api_key: str) -> None:
         except Exception:
             data = {}
 
-    data["gemini_api_key"] = gemini_api_key.strip()
+    from core.gemini_keys import parse_keys
+    keys = parse_keys(gemini_api_key)
+    if not keys:
+        raise ValueError('Enter at least one Gemini API key.')
+    data['gemini_api_key'] = keys[0]
+    data['gemini_api_keys'] = keys
 
     CONFIG_FILE.write_text(
         json.dumps(data, indent=2),
