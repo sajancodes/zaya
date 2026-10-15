@@ -37,6 +37,12 @@ def inspect(operation: str = 'full') -> ToolResult:
         try:
             import sounddevice
             checks['audio'] = {'devices': [dict(d) for d in sounddevice.query_devices()]}
+            import json
+            voice_path = Path(__file__).resolve().parent.parent / 'logs' / 'runtime' / 'voice_status.json'
+            try:
+                checks['audio']['live_voice'] = json.loads(voice_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                checks['audio']['live_voice'] = {'available': False}
         except Exception as error:
             checks['audio'] = {'error': str(error)}
     if operation in {'full', 'whatsapp'}:

@@ -578,6 +578,7 @@ class JarvisLive:
         self._out_level            = 0.0     # level of the audio being played right now
         self._echo                 = EchoGuard()
         self._barge_audio          = deque(maxlen=12)
+        self._voice_health         = {}
         # `stream.write()` returns when the buffer accepts the audio, not when the
         # speaker has finished with it, so sound is still in the room after the
         # speaking flag drops. Streaming the microphone during that gap is how an
@@ -1405,6 +1406,13 @@ class JarvisLive:
             manager.close()
             service.close()
 
+    def _voice_mark(self, stage, **fields):
+        health = getattr(self, '_voice_health', None)
+        if health is not None:
+            health[stage + '_at'] = time.monotonic()
+            health[stage + '_count'] = health.get(stage + '_count', 0) + 1
+            health.update(fields)
+
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
@@ -1419,6 +1427,7 @@ class JarvisLive:
                     mime_type=msg.get("mime_type", "audio/pcm"),
                 )
             )
+            self._voice_mark('sent')
 
     def _microphone_input(self, indata, loop):
         """Filter echo locally and deliver owner speech, including interruptions.
@@ -1426,15 +1435,19 @@ class JarvisLive:
         Called by PortAudio. Queue and playback mutations belong to the event
         loop; retain the initial speech blocks until the echo guard agrees.
         """
+        self._voice_mark('microphone', gate='checking', level=round(_pcm_level(indata), 3))
         if self._wake_enabled and not self._awake:
+            self._voice_mark('blocked', gate='sleep')
             self._barge_audio.clear()
             if self._wake_detector is not None:
                 self._wake_detector.feed(indata)
             return
         if self.ui.muted or self._phone_active or (self._ptt_enabled and not self._ptt_held):
+            self._voice_mark('blocked', gate='mute/phone/ptt')
             self._barge_audio.clear()
             return
         if self._companion_audio_active or time.monotonic() < self._companion_tail_until:
+            self._voice_mark('blocked', gate='poke')
             self._barge_audio.clear()
             return
         with self._speaking_lock:
@@ -1444,10 +1457,12 @@ class JarvisLive:
         barge_in = False
         if speaking:
             if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
+                self._voice_mark('blocked', gate='speaking/echo')
                 self._barge_audio.clear()
                 return
             self._barge_audio.append(data)
             if len(self._barge_audio) < self._echo.required_blocks:
+                self._voice_mark('blocked', gate='speaking/confirming')
                 return
             packets = list(self._barge_audio)
             self._barge_audio.clear()
@@ -1456,6 +1471,7 @@ class JarvisLive:
             self._barge_audio.clear()
             if self._tail_active():
                 if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
+                    self._voice_mark('blocked', gate='tail/echo')
                     return
                 self._tail_until = 0.0
             elif self._echo._hist:
@@ -1477,6 +1493,7 @@ class JarvisLive:
                 if queue.full():
                     queue.get_nowait()
                 queue.put_nowait({"data": packet, "mime_type": "audio/pcm"})
+                self._voice_mark('queued', gate='open')
                 self._audio_ducker.microphone(packet)
             self.ui.set_audio_level(_pcm_level(indata))
 
@@ -1528,8 +1545,23 @@ class JarvisLive:
 
             with _mic_stream:
                 print("[Zaya] 🎤 Mic stream open")
+                health_written = 0.0
                 while True:
                     await asyncio.sleep(0.1)
+                    if time.monotonic() - health_written >= 2 and getattr(self, '_voice_health', None) is not None:
+                        health_written = time.monotonic()
+                        snapshot = {**self._voice_health, 'time': time.time(),
+                                    'speaking': self._is_speaking, 'muted': self.ui.muted,
+                                    'mic_active': bool(_mic_stream.active),
+                                    'selective_audio': getattr(self, '_active_selective_audio', False),
+                                    'input_queue': self.out_queue.qsize(),
+                                    'output_queue': self.audio_in_queue.qsize()}
+                        path = BASE_DIR / 'logs' / 'runtime' / 'voice_status.json'
+                        try:
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            await asyncio.to_thread(path.write_text, json.dumps(snapshot), encoding='utf-8')
+                        except OSError:
+                            pass  # Diagnostic storage must never stop microphone delivery.
         except Exception as e:
             print(f"[Zaya] ❌ Mic: {e}")
             raise
@@ -1584,6 +1616,7 @@ class JarvisLive:
         try:
             while True:
                 async for response in self.session.receive():
+                    self._voice_mark('received')
 
                     sc = response.server_content
                     if sc and sc.interrupted:
@@ -1645,6 +1678,7 @@ class JarvisLive:
                                 self._visemes.feed_text(txt)
 
                         if sc.input_transcription and sc.input_transcription.text:
+                            self._voice_mark('transcription')
                             txt = _clean_transcript(sc.input_transcription.text)
                             if txt:
                                 self._interrupted = False
@@ -2253,6 +2287,7 @@ class JarvisLive:
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session          = session
+                    self._active_selective_audio = bool(config.proactivity and config.proactivity.proactive_audio)
                     self.audio_in_queue   = asyncio.Queue()
                     self.out_queue        = asyncio.Queue(maxsize=16)
                     self._turn_done_event = asyncio.Event()

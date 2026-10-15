@@ -103,3 +103,28 @@ Validation: all 133 local tests passed, including the existing media, audio
 ducking, desktop, browser and WhatsApp tests. Ruff's error checks and
 `git diff --check` passed. No live message was sent. Speaker-to-microphone
 interruption in the owner's room still requires a live listening check.
+
+## Direct replies after the first response
+
+Live counters showed active microphone callbacks, an open input gate, successful
+network sends and subsequent server transcriptions. This rules out a stopped
+microphone or sender for the observed session. The saved/default configuration
+enabled provider-side proactive audio, which allows speech to be ignored as
+irrelevant. It is now opt-in; this owner's local setting was also set to false.
+This is separate from the app's proactive notifications and WhatsApp monitoring.
+
+A live Nika API check streamed two locally synthesized, non-personal spoken
+requests in the same connection with selective audio disabled. Both received
+transcriptions and audio answers (34,560 and 59,042 bytes). This verifies the
+provider's consecutive-turn path; it does not replace a room-acoustics test.
+
+`system_diagnostics` audio checks now include the locally saved voice health:
+callback, queued, sent, received and transcription counts, numeric levels, input
+gate and current playback state. No PCM, text, credentials or transcripts are
+saved. Diagnostic file errors do not stop the microphone. Regression checks
+cover the opt-in default, live config, and microphone-to-network counters.
+
+Validation: 135 local tests and Ruff error checks passed. The restarted desktop
+session reports `selective_audio: false`, active microphone callbacks, successful
+network sends and an open gate after replies. The two-request live provider
+check above used synthesized fixtures rather than recorded owner speech.

@@ -53,6 +53,10 @@ with patch.object(main,'load_memory',return_value={}): config=agent._build_confi
 assert 'built by Sajan Rai' in config.system_instruction
 assert config.speech_config.voice_config.prebuilt_voice_config.voice_name == 'Nika'
 assert not config.thinking_config
+with patch.object(main,'load_memory',return_value={}),patch.object(main,'get_proactive_audio_enabled',return_value=False):
+    assert agent._build_config().proactivity is None
+with patch.object(main,'load_memory',return_value={}),patch.object(main,'get_proactive_audio_enabled',return_value=True):
+    assert agent._build_config().proactivity.proactive_audio is True
 print('Live schema smoke OK')
 '''
         result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True,

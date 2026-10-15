@@ -173,6 +173,12 @@ Listening resumes when playback drains, even if a tool or server turn is still
 open. Speaker volume and room acoustics affect echo separation; microphone mute,
 push-to-talk, and wake-word sleep still apply.
 
+Direct listening is the default. Optional `proactive_audio: true` lets the
+provider decide to ignore speech; enable it only if you want selective replies.
+For a missed reply, audio diagnostics include `logs/runtime/voice_status.json`:
+microphone, queue, network-send and transcription counters plus the current
+gate. This local file contains no recording or transcript.
+
 During your speech or Zaya's speech, background computer audio drops to 20% of
 its previous level by default. Zaya's voice receives mixer priority; previous
 levels return afterward. Poke voices participate too. Windows uses per-session

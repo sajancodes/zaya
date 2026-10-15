@@ -5,6 +5,13 @@ from core import gemini
 
 
 class VoiceTests(unittest.TestCase):
+    def test_direct_listening_defaults_on_and_selective_silence_requires_opt_in(self):
+        for value in [{}, {'proactive_audio': False}, {'proactive_audio': 'false'}, {'proactive_audio': 1}]:
+            with patch.object(config_manager, 'load_api_keys', return_value=value):
+                self.assertFalse(config_manager.get_proactive_audio_enabled())
+        with patch.object(config_manager, 'load_api_keys', return_value={'proactive_audio': True}):
+            self.assertTrue(config_manager.get_proactive_audio_enabled())
+
     def test_nika_is_default_and_supported_option(self):
         with patch.object(config_manager, 'load_api_keys', return_value={}):
             self.assertEqual(config_manager.get_voice(), 'Nika')

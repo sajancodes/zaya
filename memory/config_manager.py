@@ -237,13 +237,11 @@ def get_proactive_audio_enabled() -> bool:
     """Whether the model gets to decide an utterance was not aimed at it and
     stay quiet.
 
-    On by default — it is what stops the assistant answering the room. But it
-    is also the first thing to switch off if replies ever seem to arrive a turn
-    late: what looks like lag is usually the model having judged your previous
-    sentence as not addressed to it, and only changing its mind once the next
-    one arrives.
+    Opt-in: a direct voice assistant must respond to owner speech by default.
+    Selective audio lets the model silently ignore a correctly received
+    utterance, which can appear to the owner as a broken microphone.
     """
-    return bool(load_api_keys().get("proactive_audio", True))
+    return load_api_keys().get("proactive_audio", False) is True
 
 
 def save_proactive_audio_enabled(enabled: bool) -> None:

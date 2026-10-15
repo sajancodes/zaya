@@ -39,6 +39,29 @@ def agent():
 
 
 class ListeningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_health_tracks_mic_queue_and_send_without_recording_speech(self):
+        live = agent()
+        live._voice_health = {}
+        live.session = SimpleNamespace(send_realtime_input=Mock())
+        from unittest.mock import AsyncMock
+        live.session.send_realtime_input = AsyncMock()
+        task = asyncio.create_task(live._send_realtime())
+        try:
+            live._microphone_input(np.ones((1024, 1), dtype=np.int16), asyncio.get_running_loop())
+            for _ in range(4):
+                await asyncio.sleep(0)
+            self.assertEqual(live._voice_health['microphone_count'], 1)
+            self.assertEqual(live._voice_health['queued_count'], 1)
+            self.assertEqual(live._voice_health['sent_count'], 1)
+            self.assertEqual(live._voice_health['gate'], 'open')
+            self.assertTrue(all(isinstance(value, (str, int, float)) for value in live._voice_health.values()))
+            self.assertNotIn('data', live._voice_health)
+            self.assertNotIn('transcript', live._voice_health)
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
     async def test_column_microphone_and_flat_playback_have_same_echo_fingerprint(self):
         pcm = (1500 * np.sin(2 * np.pi * 600 * np.arange(1024) / 16000)).astype(np.int16)
         np.testing.assert_array_equal(band_energies(pcm, 16000), band_energies(pcm.reshape(-1, 1), 16000))
