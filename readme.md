@@ -322,6 +322,14 @@ requiring the owner's judgment remain in the inbox for review. Automatic
 sending requires the complete native live feed; an offline connection is
 reported as incomplete instead of claiming replies are running.
 
+Harmless follow-up questions can receive an honest uncertainty reply. For
+example, “Where is he?” can receive “I don’t know where Sajan is right now,”
+without inventing his location or availability. Consequential decisions,
+commitments and sensitive requests still wait for the owner.
+
+Generic operator-task failures appear in the activity log/runtime status;
+Zaya does not speak the repeated “an operator task has failed” announcement.
+
 Manual owner replies pause automatic handling. Use `stop_auto` to return a chat
 to observation and `mute_alerts` to silence its announcements. Replies identify
 Zaya as the assistant instead of pretending to be you.

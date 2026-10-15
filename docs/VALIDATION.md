@@ -282,3 +282,29 @@ launch is verified as submitted, not as authenticated access to the private page
 All 179 local tests, Ruff error checks and Git whitespace checks passed after
 these changes. Hosted GitHub checks remain blocked by the account's billing
 limit recorded earlier; local results are separate from hosted checks.
+
+## Quiet task failures and ordinary WhatsApp follow-ups
+
+Removed the generic `task.failed` speech subscription and queue from the
+notification manager. Task events, activity labels and durable runtime failures
+remain available. A regression test publishes a failure event, verifies another
+subscriber still receives it, verifies no spoken item is created, and verifies
+normal inbox notifications continue.
+
+The owner's unanswered “Where is he?” was present as a complete native inbound
+message; its chat remained in auto mode. The classifier had marked it
+`needs_owner=true` because the answer required personal knowledge, so the worker
+correctly held it under the previous policy before generating any response.
+Unknown harmless facts now allow a truthful uncertainty response instead of
+mandatory silence. Neither classification nor generation authorizes discovering
+or guessing whereabouts, availability or intentions. Consequential decisions,
+commitments, sensitive disclosures and security/money actions remain held.
+
+A real isolated model check classified the synthetic “Where is he?” fixture as
+normal (score 20, `needs_owner=false`) and generated “I do not know where Sajan
+is right now. You can leave a message for him here.” No transport was constructed
+and no contact message was sent. Regression coverage runs three consecutive
+incoming turns through the real classifier/generator wrappers, reply worker,
+adapter and durable send state with model/transport fixtures. All three receive
+one reply, confirmed native echoes preserve auto mode, and owner decisions or
+classifier outages still produce no send.
