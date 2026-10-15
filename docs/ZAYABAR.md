@@ -118,3 +118,31 @@ Set `enabled` to `false` to run with the controls window only; or set
 `show_main_window_on_start` to `true` to show the controls and companion on startup.
 Your optional artwork can be kept under ignored `assets/zayabar/`. Configuration
 paths are local to your computer; do not stage personal path edits accidentally.
+
+## Speech and background sound
+
+Zaya lowers other Windows apps and her media display while you speak, while she
+speaks, and during poke voices. Her voice mixer level rises to full volume;
+the system master volume and mute buttons remain under your control. Previous
+levels return after speech ends. Microphone mute, wake-word sleep and push-to-talk
+still gate microphone detection. Detection runs locally without extra AI calls.
+
+Optional settings in `zayabar.json` (restart Zaya after changing these):
+
+```json
+"audio_ducking": {
+  "enabled": true,
+  "background_ratio": 0.2,
+  "voice_volume": 1.0,
+  "release_seconds": 0.8
+}
+```
+
+The default background level is 20% of each app's existing level. Newly opened
+audio sessions are included while speech continues, and closing Zaya restores
+the levels. Manual mixer changes are preserved. This controls computer audio,
+not physical room noise. Speech in music or a nearby TV can trigger local voice
+detection; headphones reduce that spill into the microphone. Windows per-app
+mixing requires the installed `pycaw`/`comtypes` dependencies, and microphone
+speech detection uses `webrtcvad-wheels`. Other platforms still duck the built-in
+media display.

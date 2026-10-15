@@ -2944,6 +2944,7 @@ class RemoteKeyOverlay(QWidget):
 class MainWindow(QMainWindow):
     _whatsapp_connect_sig = pyqtSignal()
     _activity_sig   = pyqtSignal(str)
+    _media_duck_sig = pyqtSignal(bool, float)
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
     _applied_state_sig = pyqtSignal(str)
@@ -3227,6 +3228,8 @@ class MainWindow(QMainWindow):
 
         self._whatsapp_connect_sig.connect(self._open_whatsapp_connection)
         self._activity_sig.connect(self._activity_lbl.setText)
+        self._media_duck_saved = {}
+        self._media_duck_sig.connect(self._duck_media)
         from core.event_bus import bus
         self._unsubscribe_runtime = bus.subscribe('*', self._runtime_event)
         self.destroyed.connect(lambda *_: self._unsubscribe_runtime())
@@ -5416,11 +5419,30 @@ class MainWindow(QMainWindow):
         if status:
             self._activity_sig.emit(status[:85])
         name = event["event"]
-        if name in {"tool.started", "tool.completed", "tool.failed"}:
+        if name == 'audio.duck.changed':
+            self._media_duck_sig.emit(event['active'], event['ratio'])
+        elif name in {"tool.started", "tool.completed", "tool.failed"}:
             category = "ERROR" if name == "tool.failed" else "TOOL"
             self._log_sig.emit(f"{category}: {event.get('tool', 'Task')} · {event.get('status', 'working')}")
         elif name == "whatsapp.message.received":
             self._log_sig.emit("WHATSAPP: New message observed in the local inbox.")
+
+    def _duck_media(self, active, ratio):
+        # These outputs share Zaya's process with her voice. Lower their own
+        # levels, while Windows raises only the voice session's mixer level.
+        for output in (self._video_audio, self._video_sound_out):
+            if output is None:
+                continue
+            saved = self._media_duck_saved.get(output)
+            if active:
+                original = saved[0] if saved and abs(output.volume() - saved[1]) < .005 else output.volume()
+                saved = (original, original * ratio)
+                self._media_duck_saved[output] = saved
+                output.setVolume(saved[1])
+            elif saved is not None:
+                if abs(output.volume() - saved[1]) < .005:
+                    output.setVolume(saved[0])
+                self._media_duck_saved.pop(output, None)
 
     def _preview_ui_color(self, hex_color: str):
         """Live preview — paints the whole interface the new colour (does NOT write to config)."""
@@ -5707,6 +5729,8 @@ class JarvisUI:
         self._bar = None
         self.on_companion_reaction = None
         self.on_companion_audio_activity = None
+        self.on_shutdown = None
+        self._app.aboutToQuit.connect(self._shutdown_audio)
         try:
             from core.zayabar_config import load_config
             bar_config = load_config()
@@ -5729,6 +5753,11 @@ class JarvisUI:
     def _bar_reaction(self, text):
         if self.on_companion_reaction:
             self.on_companion_reaction(text)
+
+    def _shutdown_audio(self):
+        if self.on_shutdown:
+            self.on_shutdown()
+        self._win._duck_media(False, 1.0)
 
     def _bar_audio_activity(self, active):
         if self.on_companion_audio_activity:

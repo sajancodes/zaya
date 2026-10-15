@@ -546,6 +546,14 @@ class JarvisLive:
         self._is_speaking         = False
         self._companion_audio_active = False
         self._companion_tail_until = 0.0
+        from core.audio_ducking import AudioDucker
+        from core.zayabar_config import load_config
+        try:
+            duck_config = load_config()['audio_ducking']
+        except (ValueError, OSError):
+            duck_config = None
+        self._audio_ducker = AudioDucker(duck_config).start()
+        self.ui.on_shutdown = self._audio_ducker.close
         import uuid
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = ""
@@ -870,6 +878,9 @@ class JarvisLive:
     def set_speaking(self, value: bool):
         with self._speaking_lock:
             self._is_speaking = value
+        ducker = getattr(self, '_audio_ducker', None)
+        if ducker:
+            ducker.voice('speech', value, tail=self._out_latency + _TAIL_MARGIN)
         if value:
             self._tail_until = 0.0
         else:
@@ -1332,6 +1343,9 @@ class JarvisLive:
 
     def companion_audio_activity(self, active):
         self._companion_audio_active = active
+        ducker = getattr(self, '_audio_ducker', None)
+        if ducker:
+            ducker.voice('poke', active, tail=.5)
         if not active:
             self._companion_tail_until = time.monotonic() + .5
 
@@ -1457,6 +1471,7 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
+                self._audio_ducker.microphone(data)
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
                     {"data": data, "mime_type": "audio/pcm"}
@@ -2100,6 +2115,7 @@ class JarvisLive:
                 speaking = self._is_speaking
             if not speaking and not self.ui.muted:
                 try:
+                    self._audio_ducker.microphone(chunk['data'])
                     self.out_queue.put_nowait(chunk)
                 except asyncio.QueueFull:
                     pass
@@ -2404,6 +2420,8 @@ def main():
             asyncio.run(jarvis.run())
         except KeyboardInterrupt:
             print("\n🔴 Shutting down...")
+        finally:
+            jarvis._audio_ducker.close()
 
     threading.Thread(target=runner, daemon=True).start()
     ui.root.mainloop()

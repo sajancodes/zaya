@@ -50,5 +50,11 @@
   "bubble_max_characters": 140,
   "bubble_duration_ms": 6500,
   "bubble_max_width": 300,
-  "poke_audio_enabled": true
+  "poke_audio_enabled": true,
+  "audio_ducking": {
+    "enabled": true,
+    "background_ratio": 0.2,
+    "voice_volume": 1.0,
+    "release_seconds": 0.8
+  }
 }

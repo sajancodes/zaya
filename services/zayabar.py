@@ -139,7 +139,7 @@ class ZayaBar(QWidget):
                     pass
                 sound = QSoundEffect(self)
                 sound.setLoopCount(1)
-                sound.setVolume(.8)
+                sound.setVolume(1.0)
                 sound.setSource(QUrl.fromLocalFile(str(path.resolve())))
                 sound.playingChanged.connect(self.sound_activity)
                 self.sounds[index] = sound
