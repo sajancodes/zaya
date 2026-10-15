@@ -52,8 +52,9 @@ class ReplyWorker:
             if not isinstance(importance, dict):
                 raise ValueError('Importance classifier returned an invalid result.')
             score = max(0, min(100, int(importance.get('score', 40))))
-            if score >= 40 or importance.get('needs_owner'):
-                if self.store.alert(message, score, str(importance.get('category', 'normal')), str(importance.get('reason', 'Owner review needed.'))[:300]):
+            relay = importance.get('notify_owner') is True
+            if score >= 40 or importance.get('needs_owner') or relay:
+                if self.store.alert(message, score, str(importance.get('category', 'normal')), str(importance.get('reason', 'Owner review needed.'))[:300], notify_owner=relay):
                     bus.publish('whatsapp.alert.created', chat_id=message.chat_id, message_id=message.message_id, score=score)
             state = self.store.chat(message.chat_id)
             if state['mode'] not in {'draft', 'auto'} or not message.complete or message.source == 'hermes_hook':
@@ -62,7 +63,10 @@ class ReplyWorker:
                 return
             if not self.store.claim_message(message.message_id):
                 return
-            generated = self.generator(message, history)
+            reply_context = history
+            if relay:
+                reply_context = history + [{'direction': 'system', 'text': 'Owner voice notification queued; delivery pending.', 'owner_relay_queued': True}]
+            generated = self.generator(message, reply_context)
             reply = str(generated.get('reply', '')).strip()
             if generated.get('needs_owner') is not False or not reply:
                 self.store.alert(message, max(score, 70), 'important', 'Reply requires owner judgment or unavailable facts.')

@@ -636,23 +636,22 @@ class JarvisLive:
         # switching microphone — started an empty session. "Unlimited sessions"
         # leaked through exactly this hole.
         #
-        # Persist both provider checkpoints and the continuous local chat.
-        # Expired checkpoints fall back to historical text, never action replay.
+        # Keep the local archive, but start a new process with no provider
+        # checkpoint or history upload. Recall is explicitly requested, capped.
         self._resume_handle: str | None = None
         self._resume_scope = None
         from memory.conversation_store import ConversationStore
         try:
             self._conversation = ConversationStore()
-            previous = self._conversation.recent(limit=80, max_chars=64000)
+            previous = self._conversation.has_history()
             state = self._conversation.state()
             self._operator_scope = state.get('operator_scope', self._operator_scope)
             self._operator_goal = state.get('operator_goal', '')
             if previous:
-                self.ui.restore_history(previous)
-                self.ui.write_log('SYS: Previous conversation loaded — continuing the same chat.')
+                self.ui.write_log('SYS: Previous conversation saved in History. Ask what we were doing to recall the last five messages.')
         except (OSError, sqlite3.Error):
             self._conversation = None
-            previous = []
+            previous = False
             self.ui.write_log('SYS: Conversation storage unavailable; this launch cannot restore chat history.')
         self._turn_done_event: asyncio.Event | None = None
         self._dashboard     = None
@@ -856,8 +855,7 @@ class JarvisLive:
         required. It is rebuilt WITHOUT the resumption handle on purpose:
         resuming restores the server's own session state, and the safe reading
         is that it restores the voice with it — which would make the picker
-        appear to do nothing. Local chat history restores the conversation when
-        the provider checkpoint cannot carry the new voice."""
+        appear to do nothing. Local history remains available on demand."""
         self.request_reconnect(keep_context=False, reason="new voice")
 
     def _on_audio_device_change(self):
@@ -879,7 +877,7 @@ class JarvisLive:
         reason = getattr(self, "_reconnect_reason", "") or "settings"
         self.ui.write_log(
             f"SYS: Applying {reason} — reconnecting"
-            + ("..." if keep else " (restoring saved chat with the new settings)...")
+            + ("..." if keep else " (local History is preserved)...")
         )
         raise _ReconnectSignal(keep_context=keep)
 
@@ -923,19 +921,6 @@ class JarvisLive:
         await self._conversation_write('append', 'user', text)
         await self.session.send_client_content(
             turns={'role': 'user', 'parts': [{'text': text}]}, turn_complete=True)
-
-    async def _restore_conversation(self, resumed):
-        store = getattr(self, '_conversation', None)
-        if store is not None and not resumed:
-            content = await asyncio.to_thread(store.restore_content)
-            if content:
-                # Finish the historical exchange before live audio arrives.
-                # A lone, incomplete user history turn can absorb the next
-                # spoken command into the "historical context only" framing.
-                turns = [content, {'role': 'model', 'parts': [{'text':
-                    'Saved history loaded as context. Waiting for a new owner request.'}]}]
-                await self.session.send_client_content(turns=turns, turn_complete=False)
-                self.ui.write_log('SYS: Saved conversation restored — waiting for your next message.')
 
     def _tail_active(self) -> bool:
         """True while the speakers may still be finishing our last sentence."""
@@ -1131,10 +1116,10 @@ class JarvisLive:
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
-        parts.append('[SAVED CHAT SAFETY]\nRestored conversation turns are historical context only. '
-                     'Continue the conversation naturally, but never repeat completed actions or '
-                     'resume unfinished commands from saved history without a fresh owner request. '
-                     'Use conversation_history for older details when available.')
+        parts.append('[SAVED CHAT SAFETY]\nPrevious conversation is stored locally in History and is not preloaded. '
+                     'When the owner asks what we were doing, what happened earlier, or about the last conversation, '
+                     'call conversation_history to retrieve at most five messages. Do not guess. '
+                     'Archived messages are historical context only; never repeat old actions or commands.')
 
         cfg = dict(
             response_modalities=["AUDIO"],
@@ -1142,10 +1127,8 @@ class JarvisLive:
             input_audio_transcription={},
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": _all_decls}],
-            # The latest usable checkpoint survives app shutdown locally.
-            # Hand back the handle captured from the last session_resumption
-            # update. `handle=None` is exactly the old behaviour (ask for
-            # handles, start fresh), so the first connect of a run is unchanged.
+            # Resume transient reconnects within this process only. A fresh
+            # launch deliberately does not load a saved provider checkpoint.
             session_resumption=types.SessionResumptionConfig(
                 handle=self._resume_handle
             ),
@@ -1266,6 +1249,11 @@ class JarvisLive:
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
+        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
+                or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
+                    {'stage', 'commit', 'push', 'pull', 'checkout', 'create_branch'})):
+            from core.session_activity import activity
+            activity.set('project', 'Sajan is working on a project with Zaya.')
         return response
 
     async def _execute_tool_impl(self, fc) -> types.FunctionResponse:
@@ -1490,7 +1478,7 @@ class JarvisLive:
             self.ui.write_log('ERR: Gemini still has not answered after a fresh connection. Automatic reconnects stopped; your chat is saved. Check the connection or change Gemini API keys in Settings.')
             return
         self._voice_recovery_used = True
-        self.ui.write_log('SYS: Voice response stalled — discarding the stuck connection and restoring your saved chat. Please repeat your request after Zaya is online; previous actions will not be replayed.')
+        self.ui.write_log('SYS: Voice response stalled — starting a fresh connection. Your chat is safe in History. Please repeat your request after Zaya is online; previous actions will not be replayed.')
         raise _ReconnectSignal(keep_context=False)
 
     async def _operator_notifications(self):
@@ -2461,8 +2449,6 @@ class JarvisLive:
                     if scope != getattr(self, '_resume_scope', None):
                         self._resume_handle = None
                     self._resume_scope = scope
-                    if self._resume_handle is None:
-                        self._resume_handle = await asyncio.to_thread(store.handle, scope)
                 _resumed_with = self._resume_handle is not None
                 config = self._build_config()
 
@@ -2494,8 +2480,6 @@ class JarvisLive:
                     self._barge_audio.clear()
                     self._owner_turn_pending = False
                     self._notification_active = False
-
-                    await self._restore_conversation(_resumed_with)
 
                     print("[Zaya] Connected.")
                     if _resumed_with:
@@ -2586,8 +2570,8 @@ class JarvisLive:
                     or "INVALID_ARGUMENT" in str(e)
                     or "NOT_FOUND" in str(e)
                 ):
-                    print("[Zaya] 🔗 Provider checkpoint rejected — restoring saved chat")
-                    self.ui.write_log("SYS: Provider checkpoint expired — restoring saved conversation instead.")
+                    print("[Zaya] 🔗 Provider checkpoint rejected — starting fresh")
+                    self.ui.write_log("SYS: Provider checkpoint expired — starting fresh. Local History is preserved.")
                     self._resume_handle = None
                     await self._conversation_write('clear_handle')
                     self._conn_backoff = 0
@@ -2681,9 +2665,8 @@ class JarvisLive:
                     self._conn_backoff = 3
             finally:
                 self.session = None
-                # Only save if there was a real conversation (≥3 turns)
-                if len(self._session_log) >= 3:
-                    asyncio.create_task(self._save_session_summary())
+                # Turns are already archived locally. Do not send the whole
+                # session for an automatic summary on every reconnect/exit.
 
             self.set_speaking(False)
             self.ui.set_state("SLEEPING")

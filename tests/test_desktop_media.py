@@ -30,6 +30,7 @@ class DesktopMediaTests(unittest.TestCase):
 from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication,QPushButton
 from ui import JarvisUI
+from core.session_activity import activity
 app=QApplication([])
 ui=JarvisUI('face.png');w=ui._win
 assert w._desktop_mode
@@ -49,6 +50,9 @@ with patch.object(w._video_player,'setSource'),patch.object(w._video_player,'pla
     app.processEvents()
     assert w._media_window.isVisible() and w._video_cont.isVisible()
     assert not w._muted and not w._video_audio.isMuted() and not w._video_sound_out.isMuted()
+    from PyQt6.QtMultimedia import QMediaPlayer
+    w._video_player.playbackStateChanged.emit(QMediaPlayer.PlaybackState.PlayingState)
+    assert 'Test media' in str(activity.snapshot())
     w._set_video_muted(True)
     assert not w._muted
     w._set_video_muted(False)
@@ -58,6 +62,7 @@ with patch.object(w._video_player,'setSource'),patch.object(w._video_player,'pla
     assert w._media_window.isVisible()
     w._media_window.close()
     assert not w.video_is_playing() and not w._media_window.isVisible()
+    assert not activity.snapshot()
 ui._bar.shutdown();w._unsubscribe_runtime();w.close()
 print('Desktop media integration OK')
 '''

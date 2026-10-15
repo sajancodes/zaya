@@ -98,7 +98,7 @@ key_one, key_two, key_three
 ```
 
 The field stays masked. Saving preserves voice, WhatsApp and other preferences,
-then reconnects with the saved chat. On a `429` rate-limit response, Zaya tries
+then reconnects while preserving local History. On a `429` rate-limit response, Zaya tries
 the next available configured key. Provider retry delays are respected; when
 all keys are cooling down, Zaya waits and shows the reason. Helper generations
 also use key failover. Credentials remain in ignored local configuration.
@@ -209,7 +209,7 @@ local announcement stops it and returns the speaker to your conversation.
 The microphone sender supplies a short generated quiet tail when echo filtering
 pauses capture, so the provider can finish detecting your sentence. This quiet
 padding contains no recorded microphone audio. A stalled voice reply discards
-the stuck provider checkpoint and restores the same saved chat once. If that
+the stuck provider checkpoint and starts a fresh connection once. If that
 fresh connection also stalls, recovery stops with a visible error. Repeat your
 request after reconnecting; old actions are never replayed automatically.
 
@@ -234,19 +234,22 @@ from songs or a nearby TV can trigger detection.
 
 ## Continue the same chat after closing Zaya
 
-Zaya keeps one continuous private conversation in `memory/conversation.db`.
-Closing and reopening `main.py` loads its recent messages in the chat and resumes
-the provider session when its checkpoint is still valid. An existing conversation
-opens without another morning briefing. Voice and dashboard text are saved as
-they arrive; typed messages are saved before being sent.
+Zaya saves the continuous private conversation in `memory/conversation.db`.
+Voice and dashboard text are saved as they arrive; typed messages are saved
+before sending. The archive and chat ID survive restarts.
 
-Provider checkpoints expire, so an expired/rejected checkpoint or a voice/model
-change restores recent saved text as context instead. The local chat ID and full
-text archive remain the same. Zaya can use `conversation_history` to find older
-details beyond the recent context window. Saved history never automatically
-repeats old commands, tools, or messages. Audio/video files are not archived by
-this feature. The database includes the private provider checkpoint and stays
-excluded from Git; this begins saving conversations with this update.
+Startup opens a fresh provider session. It does **not** upload previous messages,
+replay old speech bubbles, restore a saved provider checkpoint, or send the whole
+conversation for an automatic summary. An existing archive skips another morning
+briefing. Transient reconnects inside the same running process can still resume.
+
+Open **Settings & Controls → Last Conversation History** to view saved messages
+locally, loaded in one batch when the window is requested. The current live
+conversation has its own history window. Ask **“what were we doing?”** to have
+Zaya fetch **at most five messages**, with a small text budget, through the
+owner-only `conversation_history` tool. Search uses the same limit. This reduces
+startup context usage; it does not create extra Gemini quota. Old requests and
+actions are never replayed automatically. Audio/video recordings are not archived.
 
 ## Full Access and command permissions
 
@@ -312,7 +315,7 @@ Announcements describe newly observed messages and wait for a quiet interval.
 
 Say **“WhatsApp auto”**, **“WhatsApp auto mode”**, or **“enable WhatsApp auto
 replies”** to turn on quiet assistant replies for current and future direct
-chats. Zaya does not read those messages aloud. Groups and explicitly paused
+chats. Ordinary messages and replies stay silent. Groups and explicitly paused
 chats are excluded. No old messages are automatically answered. Say **“stop
 WhatsApp auto”** to return direct chats to observation and spoken notifications
 for new messages. Name a contact to change only that conversation instead.
@@ -322,10 +325,21 @@ requiring the owner's judgment remain in the inbox for review. Automatic
 sending requires the complete native live feed; an offline connection is
 reported as incomplete instead of claiming replies are running.
 
-Harmless follow-up questions can receive an honest uncertainty reply. For
-example, “Where is he?” can receive “I don’t know where Sajan is right now,”
-without inventing his location or availability. Consequential decisions,
-commitments and sensitive requests still wait for the owner.
+Replies use relevant **current session activity**: for example, that Sajan is
+listening to Sanam or working on a project. Display playback is shared only
+after the player reports it is playing and cleared when paused/stopped. Project
+work and explicit owner activity summaries expire rather than becoming permanent
+facts. The owner can update/clear them through `session_activity`. No full live
+conversation, private profile, command arguments or file paths are supplied to
+the contact reply model. Unknown details receive an honest uncertainty reply;
+location and availability are never inferred.
+
+If someone asks Zaya to **pass a message to Sajan**, or sends an **urgent** update,
+the sender and message are queued durably for a spoken owner notice, even in
+quiet auto mode. Zaya waits for the voice session to be free, then announces it
+once. A reply may say the message is queued; that is not proof the owner heard
+it. Consequential decisions, commitments and sensitive requests still wait for
+the owner. Ordinary chat and generic task failures do not trigger auto-mode speech.
 
 Generic operator-task failures appear in the activity log/runtime status;
 Zaya does not speak the repeated “an operator task has failed” announcement.

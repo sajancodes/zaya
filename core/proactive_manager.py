@@ -24,6 +24,15 @@ class ProactiveManager:
             return None
         muted = self.store.rows('SELECT value FROM wa_settings WHERE key=?', ('alerts_muted_until',))
         if not muted or float(muted[0]['value']) <= now:
+            relays = self.store.rows("SELECT a.alert_id,m.text,c.title FROM wa_alerts a JOIN wa_messages m ON m.message_id=a.message_id JOIN wa_chats c ON c.chat_id=a.chat_id WHERE a.notify_owner=1 AND a.delivered_at IS NULL AND a.acknowledged_at IS NULL AND c.mode!='paused' ORDER BY a.score DESC,a.created_at LIMIT 5")
+            if relays:
+                return {'kind': 'relay', 'ids': [row['alert_id'] for row in relays],
+                        'summary': f"You have {len(relays)} WhatsApp messages to pass along or urgent updates.",
+                        'announcement': '\n'.join(f"{row['title']} sent a message for Sajan or an urgent update: {row['text'][:900]}" for row in relays)}
+            # Global auto is quiet even if the owner manually took over one chat.
+            # Only explicit pass-along requests and urgency reach the voice path.
+            if self.store.global_mode() == 'auto':
+                return None
             # Auto mode handles the conversation quietly. Mark those previews
             # consumed locally so stopping auto cannot announce an old backlog.
             with self.store.lock, self.store.db:
@@ -53,3 +62,7 @@ class ProactiveManager:
         elif item['kind'] == 'whatsapp':
             with self.store.lock, self.store.db:
                 self.store.db.executemany('UPDATE wa_alerts SET delivered_at=? WHERE alert_id=?', [(self.clock(), alert_id) for alert_id in item['ids']])
+        elif item['kind'] == 'relay':
+            with self.store.lock, self.store.db:
+                self.store.db.executemany('UPDATE wa_alerts SET delivered_at=? WHERE alert_id=?', [(self.clock(), alert_id) for alert_id in item['ids']])
+                self.store.db.executemany('UPDATE wa_messages SET notified_at=? WHERE message_id=(SELECT message_id FROM wa_alerts WHERE alert_id=?)', [(self.clock(), alert_id) for alert_id in item['ids']])

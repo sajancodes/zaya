@@ -43,7 +43,8 @@ class WhatsAppStore:
         CREATE TABLE IF NOT EXISTS wa_chat_aliases (alias TEXT PRIMARY KEY, chat_id TEXT NOT NULL);
         ''')
         for table, column, declaration in [('wa_contacts', 'name_verified', 'INTEGER DEFAULT 0'),
-                                            ('wa_messages', 'notified_at', 'REAL')]:
+                                            ('wa_messages', 'notified_at', 'REAL'),
+                                            ('wa_alerts', 'notify_owner', 'INTEGER DEFAULT 0')]:
             if column not in {row[1] for row in self.db.execute(f'PRAGMA table_info({table})')}:
                 self.db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {declaration}')
         self.db.commit()
@@ -191,10 +192,10 @@ class WhatsAppStore:
         with self.lock, self.db:
             self.db.execute('UPDATE wa_messages SET draft=? WHERE message_id=?', (text, message_id))
 
-    def alert(self, message: Message, score: int, category: str, reason: str) -> bool:
+    def alert(self, message: Message, score: int, category: str, reason: str, notify_owner: bool = False) -> bool:
         with self.lock, self.db:
-            cursor = self.db.execute('INSERT OR IGNORE INTO wa_alerts(alert_id,chat_id,message_id,score,category,reason,created_at) VALUES(?,?,?,?,?,?,?)',
-                                     ('alert-' + message.message_id, message.chat_id, message.message_id, score, category, reason, time.time()))
+            cursor = self.db.execute('INSERT OR IGNORE INTO wa_alerts(alert_id,chat_id,message_id,score,category,reason,created_at,notify_owner) VALUES(?,?,?,?,?,?,?,?)',
+                                     ('alert-' + message.message_id, message.chat_id, message.message_id, score, category, reason, time.time(), int(notify_owner)))
             return cursor.rowcount == 1
 
     def reserve_send(self, request_id: str, chat_id: str, text: str) -> bool:

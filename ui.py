@@ -2965,6 +2965,7 @@ class MainWindow(QMainWindow):
     _media_duck_sig = pyqtSignal(bool, float)
     _log_sig        = pyqtSignal(str)
     _history_sig    = pyqtSignal(object)
+    _archive_history_sig = pyqtSignal(object)
     _state_sig      = pyqtSignal(str)
     _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
@@ -3163,6 +3164,7 @@ class MainWindow(QMainWindow):
             self._video_item.nativeSizeChanged.connect(self._fit_video)
             self._video_player.setAudioOutput(self._video_audio)
             self._video_player.errorOccurred.connect(self._on_video_error)
+            self._video_player.playbackStateChanged.connect(self._on_video_activity)
 
             # A SECOND player, for sound that arrives separately.
             #
@@ -3255,6 +3257,7 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(lambda *_: self._unsubscribe_runtime())
         self._log_sig.connect(self._log.append_log)
         self._history_sig.connect(self._log.restore_history)
+        self._archive_history_sig.connect(self._show_saved_history)
         self._state_sig.connect(self._apply_state)
         self._content_sig.connect(self._show_content)
         self._reconfig_sig.connect(self._show_setup)
@@ -3326,6 +3329,12 @@ class MainWindow(QMainWindow):
         self._history_window = DisplayWindow('Zaya — Conversation', self._log, self)
         history.clicked.connect(self._history_window.show)
         self._ctrl_drawer.layout().addWidget(history)
+        saved_history = QPushButton('LAST CONVERSATION HISTORY')
+        self._saved_history_log = LogWidget()
+        self._saved_history_window = DisplayWindow('Zaya — Last Conversation History', self._saved_history_log, self)
+        self._archive_loading = False
+        saved_history.clicked.connect(self._open_saved_history)
+        self._ctrl_drawer.layout().addWidget(saved_history)
         close_zaya = QPushButton('CLOSE ZAYA')
         close_zaya.clicked.connect(QApplication.instance().quit)
         self._ctrl_drawer.layout().addWidget(close_zaya)
@@ -3448,6 +3457,7 @@ class MainWindow(QMainWindow):
         # A video and the live camera cannot share the centre of the HUD.
         self._cam_stop.set()
 
+        self._shared_media_title = title or 'media'
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
         self._set_video_muted(False)
@@ -3474,6 +3484,31 @@ class MainWindow(QMainWindow):
             self._video_sound.play()
             self._video_sync.start()
 
+    def _open_saved_history(self):
+        self._saved_history_window.show()
+        if self._archive_loading:
+            return
+        self._archive_loading = True
+        def load():
+            from memory.conversation_store import ConversationStore
+            try:
+                turns = ConversationStore().recent(limit=100, max_chars=100000)
+            except Exception:
+                turns = []
+            self._archive_history_sig.emit(turns)
+        threading.Thread(target=load, daemon=True, name='ZayaHistory').start()
+
+    def _show_saved_history(self, turns):
+        self._archive_loading = False
+        self._saved_history_log.clear()
+        self._saved_history_log.restore_history(turns)
+        self._saved_history_log.setPlaceholderText('No saved messages.' if not turns else '')
+
+    def _on_video_activity(self, state):
+        from core.session_activity import activity
+        activity.media(getattr(self, '_shared_media_title', 'media'),
+                       state == QMediaPlayer.PlaybackState.PlayingState)
+
     def _fit_video(self, *_a) -> None:
         """Size the picture to the panel, keeping its shape."""
         if not (self._video_item and self._video_widget):
@@ -3493,6 +3528,8 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_video_close(self) -> None:
+        from core.session_activity import activity
+        activity.clear('media')
         if getattr(self, '_desktop_mode', False):
             self._media_window.hide()
         if self._video_sync:

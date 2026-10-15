@@ -5,6 +5,24 @@ import unittest
 
 
 class HistoryDisplayTests(unittest.TestCase):
+    def test_saved_history_has_a_separate_view_and_never_enters_live_log(self):
+        script = '''
+from PyQt6.QtWidgets import QApplication,QPushButton
+from PyQt6.QtTest import QSignalSpy
+from ui import JarvisUI
+app=QApplication([]);ui=JarvisUI('face.png');w=ui._win
+assert any('LAST CONVERSATION HISTORY' in b.text() for b in w.findChildren(QPushButton))
+live=QSignalSpy(w._log_sig)
+w._show_saved_history([{'role':'user','text':'Old saved question'}])
+assert 'Old saved question' in w._saved_history_log.toPlainText()
+assert 'Old saved question' not in w._log.toPlainText()
+assert len(live)==0
+ui._bar.shutdown();w._unsubscribe_runtime();w.close()
+'''
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True,
+                                encoding='utf-8', timeout=30, env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_history_is_batched_without_typing_queue_or_live_bubbles(self):
         script = '''
 from PyQt6.QtWidgets import QApplication

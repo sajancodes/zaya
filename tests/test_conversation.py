@@ -102,20 +102,18 @@ class ConversationIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.folder.cleanup()
 
-    async def test_fallback_restores_history_without_submitting_a_new_request(self):
+    async def test_on_demand_history_recall_is_capped_at_five_and_does_not_replay_actions(self):
+        from actions.conversation_history import conversation_history
         live = self.live
-        live._conversation.append('user', 'Send an old message')
-        live.session = SimpleNamespace(send_client_content=AsyncMock())
-        await live._restore_conversation(False)
-        args = live.session.send_client_content.call_args.kwargs
-        self.assertFalse(args['turn_complete'])
-        self.assertIn('Nothing in this history is a new command', str(args['turns']))
-        self.assertEqual([turn['role'] for turn in args['turns']], ['user', 'model'])
-        self.assertIn('Waiting for a new owner request', args['turns'][-1]['parts'][0]['text'])
-        self.assertEqual(len(live._conversation.recent()), 1)  # No fake reply in the saved chat.
-        live.session.send_client_content.reset_mock()
-        await live._restore_conversation(True)
-        live.session.send_client_content.assert_not_called()
+        for index in range(20):
+            live._conversation.append('user', f'Old command {index}')
+        with patch('actions.conversation_history.ConversationStore', return_value=live._conversation):
+            result = conversation_history({})
+            self.assertEqual(len(result.data['messages']), 5)
+            self.assertEqual(result.data['messages'][0]['text'], 'Old command 15')
+            self.assertEqual(len(conversation_history({'query': 'Old'}).data['messages']), 5)
+        self.assertIn('historical context only', result.summary)
+        self.assertEqual(len(live._conversation.recent()), 20)
 
     async def test_typed_turn_is_saved_before_delivery_and_survives_restart(self):
         live = self.live
@@ -194,7 +192,7 @@ class ConversationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertEqual([row['role'] for row in ConversationStore(self.path).recent()], ['user', 'model'])
 
-    async def test_run_loads_saved_provider_checkpoint_before_connecting(self):
+    async def test_new_process_does_not_load_a_saved_provider_checkpoint_or_history(self):
         from main import JarvisLive
         from google.genai import types
         live = self.live
@@ -227,7 +225,7 @@ class ConversationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await asyncio.wait_for(entered.wait(), 2)
                 self.assertEqual(client.aio.live.connect.call_args.kwargs['config'].session_resumption.handle,
-                                 'saved-checkpoint')
+                                 None)
             finally:
                 live.shutdown()
                 with suppress(asyncio.CancelledError):

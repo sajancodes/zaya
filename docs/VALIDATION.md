@@ -2,6 +2,11 @@
 
 **Created and developed by Sajan Rai.** See [creator credits](../CREDITS.md).
 
+Current behavior after the October 15 owner updates: conversation storage remains
+continuous, but startup is fresh and history recall is on demand (five messages).
+This supersedes earlier automatic provider-checkpoint/text-restoration behavior
+described in the historical validation entries below.
+
 Baseline: `a7daf25` on `zaya-updates`; inherited application baseline: `54733d5`.
 The baseline had no automated tests. Core PyQt6, Google GenAI and sounddevice
 imports passed on Windows. Live audio and external messaging require separate
@@ -308,3 +313,39 @@ incoming turns through the real classifier/generator wrappers, reply worker,
 adapter and durable send state with model/transport fixtures. All three receive
 one reply, confirmed native echoes preserve auto mode, and owner decisions or
 classifier outages still produce no send.
+
+## Current activity, selective owner relays, and on-demand History
+
+The WhatsApp reply model now receives a small `shared_current_activity` list:
+current display playback after Qt reports PlayingState, verified project work,
+or an explicit owner activity set through the owner-only `session_activity` tool.
+Media clears on pause/stop; other activity expires. State is in memory and never
+imports old conversation turns, private profiles, files, commands or credentials.
+Private path/link/credential values are rejected or reduced to generic media.
+Contacts cannot alter this state or reach privileged tools.
+
+Semantic classification adds `notify_owner` for pass-along requests and urgent
+messages. A durable alert is queued before any acknowledgment. Its separate
+delivery flag is independent of ordinary auto-chat preview suppression, so
+quiet mode cannot consume the owner relay. The isolated tool-free voice reads
+the sender/context after owner speech finishes. Delivery is marked once;
+retries and restarts retain pending relays. Normal auto conversations, manual
+takeover chatter under global auto, and generic operator failures remain silent.
+
+Live isolated generation checks used synthetic activity and messages, without
+a messaging transport: Sanam playback produced a listening-to-Sanam reply;
+project activity produced a working-on-a-project reply; a dinner pass-along
+request classified `notify_owner=true` and acknowledged only queued status.
+Worker tests cover durable relay recovery, quiet ordinary chat, urgent owner
+decisions without commitments, and task failures without generic speech. Qt
+integration verifies media state updates and clearing.
+
+Fresh startup now checks only whether the local archive exists; it neither
+loads old message bodies nor sends history to Gemini. A saved provider handle is
+not loaded into a new process, and reconnect/exit no longer uploads the whole
+session for automatic summarization. In-process transient reconnects can still
+resume the current provider session. Last Conversation History is a separate,
+on-demand local view with batch insertion. Owner-requested recall/search returns
+at most five messages and 4,000 text characters, always labeled historical data.
+Regression tests verify the cap, unchanged full archive, no saved-token loading,
+and history views without typing queues or live bubbles.

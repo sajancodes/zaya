@@ -47,6 +47,10 @@ class ConversationStore:
     def chat_id(self):
         return self.state()['chat_id']
 
+    def has_history(self):
+        with self.connect() as db:
+            return db.execute('SELECT 1 FROM messages LIMIT 1').fetchone() is not None
+
     def update(self, **values):
         with self.connect() as db:
             db.executemany('INSERT OR REPLACE INTO state VALUES (?, ?)',
