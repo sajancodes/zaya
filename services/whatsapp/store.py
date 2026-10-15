@@ -110,8 +110,11 @@ class WhatsAppStore:
             self.db.execute('INSERT OR IGNORE INTO wa_contacts(contact_id,display_name,first_seen_at,last_seen_at) VALUES(?,?,?,?)',
                             (message.sender_id, message.display_name if message.direction == 'incoming' else message.sender_id, message.timestamp, message.timestamp))
             self.db.execute('UPDATE wa_contacts SET last_seen_at=? WHERE contact_id=?', (message.timestamp, message.sender_id))
-            self.db.execute('INSERT OR IGNORE INTO wa_chats(chat_id,title,chat_type) VALUES(?,?,?)',
-                            (message.chat_id, (message.display_name if message.direction == 'incoming' else '') or message.chat_id, 'group' if message.chat_id.endswith('@g.us') else 'dm'))
+            group = message.chat_id.endswith('@g.us')
+            mode = 'auto' if not group and self.global_mode() == 'auto' else 'observe'
+            self.db.execute('INSERT OR IGNORE INTO wa_chats(chat_id,title,chat_type,mode,ai_active) VALUES(?,?,?,?,?)',
+                            (message.chat_id, (message.display_name if message.direction == 'incoming' else '') or message.chat_id,
+                             'group' if group else 'dm', mode, int(mode == 'auto')))
             if message.direction == 'incoming' and message.display_name:
                 contact = self.db.execute('SELECT display_name,name_verified FROM wa_contacts WHERE contact_id=?', (message.chat_id,)).fetchone()
                 title = contact['display_name'] if contact and contact['name_verified'] else message.display_name
@@ -123,6 +126,9 @@ class WhatsAppStore:
                             (*[m[k] for k in fields], time.time()))
             self.db.execute('UPDATE wa_chats SET last_message_at=MAX(COALESCE(last_message_at,0),?), unread_count=unread_count+? WHERE chat_id=?',
                             (message.timestamp, int(message.direction == 'incoming'), message.chat_id))
+            if message.direction == 'incoming':
+                self.db.execute("UPDATE wa_messages SET notified_at=? WHERE message_id=? AND EXISTS(SELECT 1 FROM wa_chats WHERE chat_id=? AND mode='auto')",
+                                (time.time(), message.message_id, message.chat_id))
             if message.direction == 'outgoing':
                 if message.ai_generated:
                     self.db.execute('UPDATE wa_chats SET last_ai_message_at=? WHERE chat_id=?', (message.timestamp, message.chat_id))
@@ -139,7 +145,33 @@ class WhatsAppStore:
             self.db.execute('UPDATE wa_chats SET mode=?,ai_active=?,started_at=?,paused_at=? WHERE chat_id=?',
                             (mode, int(mode == 'auto'), time.time() if mode == 'auto' else None,
                              time.time() if mode in {'manual', 'paused'} else None, chat_id))
+            if mode == 'auto':
+                self.db.execute('UPDATE wa_messages SET notified_at=? WHERE chat_id=? AND notified_at IS NULL', (time.time(), chat_id))
         return self.chat(chat_id)
+
+    def global_mode(self) -> str:
+        rows = self.rows('SELECT value FROM wa_settings WHERE key=?', ('default_dm_mode',))
+        return rows[0]['value'] if rows else 'observe'
+
+    def set_global_mode(self, mode: str) -> dict:
+        """Fresh owner delegation for direct chats; never replay old messages.
+
+        An owner message still takes over its chat. Explicitly paused chats and
+        groups keep their own modes. Future direct chats inherit this setting.
+        """
+        if mode not in {'auto', 'observe'}:
+            raise ValueError('Global WhatsApp mode must be auto or observe.')
+        with self.lock, self.db:
+            self.db.execute('INSERT OR REPLACE INTO wa_settings VALUES(?,?)', ('default_dm_mode', mode))
+            if mode == 'auto':
+                changed = self.db.execute("UPDATE wa_chats SET mode='auto',ai_active=1,started_at=? WHERE chat_type='dm' AND mode!='paused'", (time.time(),)).rowcount
+                # Auto mode starts with the next incoming message. Old pending
+                # previews must not all be read aloud when auto is later stopped.
+                self.db.execute("UPDATE wa_messages SET notified_at=? WHERE notified_at IS NULL AND chat_id IN (SELECT chat_id FROM wa_chats WHERE chat_type='dm' AND mode='auto')", (time.time(),))
+            else:
+                changed = self.db.execute("UPDATE wa_chats SET mode='observe',ai_active=0 WHERE chat_type='dm' AND mode='auto'").rowcount
+        return {'scope': 'direct_chats', 'mode': mode, 'updated_chats': changed,
+                'group_chats_included': False, 'replays_history': False}
 
     def conversation(self, chat_id: str, limit: int = 20) -> list[dict]:
         chat_id = self.canonical_chat(chat_id)

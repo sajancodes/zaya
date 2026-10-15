@@ -227,3 +227,21 @@ connection also stalls, automatic recovery stops with a visible error instead
 of reconnecting forever. Successful model output or an explicit settings
 reconnect resets this recovery allowance. The owner then confirmed voice replies
 were working. Owner-only command enforcement and confirmation remain unchanged.
+
+## Quiet WhatsApp auto mode
+
+The owner may enable `start_auto` without a chat via “WhatsApp auto” and related
+requests. Current non-paused direct chats and future direct chats inherit auto;
+groups keep their own mode. The setting persists locally. Switching modes never
+enqueues old messages. Auto previews are consumed locally without spoken text,
+including messages arriving while announcements are busy, so turning auto off
+cannot read an old backlog. `stop_auto` returns direct auto chats to observation.
+The existing complete-feed, deduplication, sensitive-reply and manual-takeover
+checks remain. In-flight generations recheck mode before sending. Every reply
+has an explicit Zaya/Sajan Rai assistant label; external text receives no tools.
+
+Eight added integration tests cover the real action/store/worker/announcer path,
+new contacts, restart persistence, quiet previews, global stop, group/paused
+exclusion, manual takeover, mode changes during generation, exact-chat scope,
+offline reporting and rejection of non-owner mode changes. Transport is mocked;
+these tests send no actual WhatsApp messages.

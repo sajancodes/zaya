@@ -68,6 +68,7 @@ class ReplyWorker:
                 self.store.alert(message, max(score, 70), 'important', 'Reply requires owner judgment or unavailable facts.')
                 bus.publish('whatsapp.alert.created', chat_id=message.chat_id, message_id=message.message_id, score=max(score, 70))
                 return
+            reply = 'Zaya · Sajan Rai’s AI assistant:\n' + reply
             self.store.save_draft(message.message_id, reply)
             # Owner may pause or reply while the model is generating. Re-read
             # authoritative mode immediately before any transport side effect.

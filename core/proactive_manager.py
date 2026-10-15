@@ -32,7 +32,11 @@ class ProactiveManager:
             return None
         muted = self.store.rows('SELECT value FROM wa_settings WHERE key=?', ('alerts_muted_until',))
         if not muted or float(muted[0]['value']) <= now:
-            messages = self.store.rows("SELECT m.message_id,m.text,c.title FROM wa_messages m JOIN wa_chats c ON c.chat_id=m.chat_id WHERE m.direction='incoming' AND m.notified_at IS NULL ORDER BY m.received_at LIMIT 10")
+            # Auto mode handles the conversation quietly. Mark those previews
+            # consumed locally so stopping auto cannot announce an old backlog.
+            with self.store.lock, self.store.db:
+                self.store.db.execute("UPDATE wa_messages SET notified_at=? WHERE direction='incoming' AND notified_at IS NULL AND chat_id IN (SELECT chat_id FROM wa_chats WHERE mode='auto')", (now,))
+            messages = self.store.rows("SELECT m.message_id,m.text,c.title FROM wa_messages m JOIN wa_chats c ON c.chat_id=m.chat_id WHERE m.direction='incoming' AND m.notified_at IS NULL AND c.mode IN ('observe','manual') ORDER BY m.received_at LIMIT 10")
             if messages:
                 # Preview goes ONLY to the isolated, tool-free announcer.
                 notices = [f"{m['title']} messaged: {m['text'][:240]}" for m in messages]

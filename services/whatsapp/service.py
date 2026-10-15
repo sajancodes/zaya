@@ -125,6 +125,7 @@ class WhatsAppService:
                     'manual_outgoing_scope': 'direct chats only',
                     'complete_live_events_available': native_ready,
                     'automatic_reply_feed_ready': native_ready,
+                    'default_direct_chat_mode': self.store.global_mode(),
                     'handling': self.store.rows("SELECT chat_id,title,mode,ai_active FROM wa_chats WHERE mode IN ('auto','draft','paused')"),
                     'message_count': self.store.rows('SELECT COUNT(*) AS count FROM wa_messages')[0]['count']}
             return ToolResult('success', 'WhatsApp state inspected. Hook observations do not establish complete inbox coverage or gateway connectivity.',
