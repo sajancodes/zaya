@@ -130,6 +130,21 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
+def get_auto_execute_enabled() -> bool:
+    """Only a saved boolean opt-in enables automatic owner operations."""
+    return load_api_keys().get('auto_execute_owner', False) is True
+
+
+def save_auto_execute_enabled(enabled: bool) -> None:
+    """Local settings control; never exposed as a model tool parameter."""
+    from core.execution_policy import trust_context, TRUST_LOCAL_OWNER
+    if trust_context.get() != TRUST_LOCAL_OWNER:
+        raise PermissionError('Only the local owner can change command permissions.')
+    if not isinstance(enabled, bool):
+        raise ValueError('Automatic execution must be true or false.')
+    _save_flag('auto_execute_owner', enabled)
+
+
 HUD_STYLES = ("face", "core")
 
 

@@ -1,8 +1,14 @@
 import unittest
+from unittest.mock import patch
 from core.execution_policy import classify, trust_context, TRUST_EXTERNAL_MESSAGE
 
 
 class PolicyTests(unittest.TestCase):
+    def setUp(self):
+        mode = patch('memory.config_manager.get_auto_execute_enabled', return_value=False)
+        mode.start()
+        self.addCleanup(mode.stop)
+
     def test_ordinary_operations(self):
         for command in ['git status', 'git diff --cached', 'git commit -m "test"', 'git push origin main', 'python -m unittest', 'Write-Output "git reset --hard"']:
             self.assertIn(classify(command).level, {'read', 'normal'}, command)

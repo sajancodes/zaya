@@ -119,6 +119,16 @@ Set `enabled` to `false` to run with the controls window only; or set
 Your optional artwork can be kept under ignored `assets/zayabar/`. Configuration
 paths are local to your computer; do not stage personal path edits accidentally.
 
+## Command permissions
+
+**Full Access** in Settings & Controls runs your requests automatically,
+including terminal commands and actions that otherwise show a confirmation.
+It uses your existing Windows account permissions; it does not bypass UAC.
+The choice is saved locally and can be turned off at any time. Fresh installs
+start with it off. External contacts, websites and tool output cannot enable
+this setting or gain access to local tools. Commands still retain timeouts,
+process cancellation, output, exit codes and task evidence.
+
 ## Closing and repeated launches
 
 Right-click Zaya's body or tray icon to choose **Settings & Controls** or

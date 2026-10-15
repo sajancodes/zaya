@@ -4309,6 +4309,17 @@ class MainWindow(QMainWindow):
         audio_btn.clicked.connect(self._open_audio_devices)
         lay.addWidget(audio_btn)
 
+        from memory.config_manager import get_auto_execute_enabled
+        self._auto_execute_btn = QPushButton()
+        self._auto_execute_btn.setFixedHeight(26)
+        self._auto_execute_btn.setFont(QFont('Courier New', 7))
+        self._auto_execute_btn.setCheckable(True)
+        self._auto_execute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._auto_execute_btn.setToolTip('Run your requests automatically using your Windows account permissions. Contact messages cannot enable this.')
+        self._auto_execute_btn.clicked.connect(self._toggle_auto_execute)
+        self._set_auto_execute_button(get_auto_execute_enabled())
+        lay.addWidget(self._auto_execute_btn)
+
         mem_btn = QPushButton("🧠  MEMORY")
         mem_btn.setFixedHeight(26)
         mem_btn.setFont(QFont("Courier New", 7))
@@ -4335,6 +4346,23 @@ class MainWindow(QMainWindow):
 
         w.adjustSize()
         return w
+
+    def _set_auto_execute_button(self, enabled):
+        self._auto_execute_btn.setChecked(enabled)
+        self._auto_execute_btn.setText('FULL ACCESS: ON' if enabled else 'FULL ACCESS: OFF')
+        self._auto_execute_btn.setStyleSheet(self._BTN_PRI if enabled else self._BTN_DIM)
+
+    def _toggle_auto_execute(self, enabled):
+        from memory.config_manager import save_auto_execute_enabled, get_auto_execute_enabled
+        try:
+            save_auto_execute_enabled(bool(enabled))
+        except (ValueError, OSError, PermissionError) as error:
+            self._set_auto_execute_button(get_auto_execute_enabled())
+            self._log_sig.emit(f'ERR: Could not change command permissions: {error}')
+            return
+        self._set_auto_execute_button(enabled)
+        self._log_sig.emit('SYS: Full Access on — your commands run automatically.' if enabled
+                           else 'SYS: Full Access off — sensitive commands require approval.')
 
     def _build_controls_drawer(self) -> QWidget:
         """The switches that get flicked every day, in their own panel."""

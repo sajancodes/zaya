@@ -14,7 +14,7 @@ THE PROBLEM WITH THE OLD GATE
     coverage was two actions, so deleting files and switching off the WiFi the
     assistant is talking over went through with no gate at all.
 
-THE DESIGN HERE
+THE DESIGN HERE (WHEN FULL ACCESS IS OFF)
     The confirmation token is issued by the *interface*, never by the model:
 
       1. An action calls `request(...)` with a callable that does the real work.
@@ -31,6 +31,9 @@ WHAT BELONGS HERE AND WHAT DOES NOT
     Only genuinely irreversible things. Anything that can be reversed should be
     done at once and pushed onto core/undo.py instead — undo is faster than a
     question, and an assistant that asks before every action is one nobody uses.
+
+    The owner's saved Full Access setting opts out of the confirmation step for
+    owner requests. External execution contexts are rejected in both modes.
 """
 
 from __future__ import annotations
@@ -88,6 +91,14 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
     instruction so the assistant asks the user out loud in their own language,
     rather than reading an English string verbatim."""
     global _pending
+
+    from core.execution_policy import require_owner
+    from memory.config_manager import get_auto_execute_enabled
+    require_owner()
+    if get_auto_execute_enabled():
+        result = run() or 'Done.'
+        _log(f'SYS: Automatically executed owner request — {title}. {result}')
+        return result
 
     if _show_cb is None:
         # No interface bound (headless, or a very early call). Refuse rather

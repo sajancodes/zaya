@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from core.shell_session import ShellSessions
 from actions.terminal_exec import terminal_exec
@@ -10,6 +11,11 @@ from core import confirm
 
 
 class TerminalTests(unittest.TestCase):
+    def setUp(self):
+        mode = patch('memory.config_manager.get_auto_execute_enabled', return_value=False)
+        mode.start()
+        self.addCleanup(mode.stop)
+
     def test_real_exit_stdout_stderr_and_cwd(self):
         with tempfile.TemporaryDirectory() as folder:
             s = ShellSessions()

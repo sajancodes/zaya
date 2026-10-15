@@ -25,6 +25,15 @@ class Decision:
 
 
 def classify(command: str, cwd: str = '') -> Decision:
+    require_owner()
+    decision = _classify_command(command, cwd)
+    from memory.config_manager import get_auto_execute_enabled
+    if decision.level == 'confirm' and get_auto_execute_enabled():
+        return Decision('normal', 'The owner enabled automatic command execution in local settings.')
+    return decision
+
+
+def _classify_command(command: str, cwd: str = '') -> Decision:
     """Allow known ordinary operations; gate destructive and opaque shell programs.
 
     This is a local owner confirmation policy, not a sandbox for hostile code.

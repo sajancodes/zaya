@@ -9,6 +9,11 @@ from actions.terminal_exec import terminal_exec
 
 
 class ConfirmationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        mode = patch('memory.config_manager.get_auto_execute_enabled', return_value=False)
+        mode.start()
+        self.addCleanup(mode.stop)
+
     async def test_model_cannot_confirm_and_real_cancel_updates_runtime(self):
         runtime = TaskRuntime()
         confirm.bind(lambda *_: None, lambda: None)

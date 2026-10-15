@@ -56,7 +56,7 @@ def terminal_exec(parameters: dict, **_kwargs) -> ToolResult:
     return result
 
 
-TOOL = {'name': 'terminal_exec', 'description': 'Execute real owner-requested shell commands with cwd, timeout, output and exit evidence. Use instead of GUI typing. Destructive or opaque commands require HUD approval.',
+TOOL = {'name': 'terminal_exec', 'description': 'Execute real owner-requested shell commands with cwd, timeout, output and exit evidence. Use instead of GUI typing. The owner\'s saved Full Access setting controls whether approval is needed; always call the tool and follow its actual result.',
         'parameters': {'type': 'OBJECT', 'properties': {
             'action': {'type': 'STRING', 'enum': ['run', 'which', 'pwd', 'cd', 'session_status', 'cancel']},
             'command': {'type': 'STRING'}, 'cwd': {'type': 'STRING'}, 'session_id': {'type': 'STRING'},
