@@ -1046,6 +1046,24 @@ class LogWidget(QTextEdit):
     def append_log(self, text: str):
         self._sig.emit(text)
 
+    def restore_history(self, turns):
+        """Insert saved turns immediately, without live typing or character cues."""
+        self.setUpdatesEnabled(False)
+        cursor = self.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.beginEditBlock()
+        try:
+            for turn in turns:
+                speaker = 'You' if turn['role'] == 'user' else 'Zaya'
+                fmt = cursor.charFormat()
+                fmt.setForeground(QBrush(qcol(C.WHITE if speaker == 'You' else C.PRI)))
+                cursor.insertText(f"{speaker}: {turn['text']}\n", fmt)
+        finally:
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setUpdatesEnabled(True)
+            self.ensureCursorVisible()
+
     def _enqueue(self, text: str):
         self._queue.append(text)
         if not self._typing:
@@ -2946,6 +2964,7 @@ class MainWindow(QMainWindow):
     _activity_sig   = pyqtSignal(str)
     _media_duck_sig = pyqtSignal(bool, float)
     _log_sig        = pyqtSignal(str)
+    _history_sig    = pyqtSignal(object)
     _state_sig      = pyqtSignal(str)
     _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
@@ -3235,6 +3254,7 @@ class MainWindow(QMainWindow):
         self._unsubscribe_runtime = bus.subscribe('*', self._runtime_event)
         self.destroyed.connect(lambda *_: self._unsubscribe_runtime())
         self._log_sig.connect(self._log.append_log)
+        self._history_sig.connect(self._log.restore_history)
         self._state_sig.connect(self._apply_state)
         self._content_sig.connect(self._show_content)
         self._reconfig_sig.connect(self._show_setup)
@@ -5978,6 +5998,9 @@ class JarvisUI:
 
     def write_log(self, text: str):
         self._win._log_sig.emit(text)
+
+    def restore_history(self, turns):
+        self._win._history_sig.emit(turns)
 
     def wait_for_api_key(self, stop_event=None):
         while not self._win._ready:

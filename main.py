@@ -647,10 +647,8 @@ class JarvisLive:
             state = self._conversation.state()
             self._operator_scope = state.get('operator_scope', self._operator_scope)
             self._operator_goal = state.get('operator_goal', '')
-            for turn in previous:
-                speaker = 'You' if turn['role'] == 'user' else 'Zaya'
-                self.ui.write_log(f"{speaker}: {turn['text']}")
             if previous:
+                self.ui.restore_history(previous)
                 self.ui.write_log('SYS: Previous conversation loaded — continuing the same chat.')
         except (OSError, sqlite3.Error):
             self._conversation = None
