@@ -10,10 +10,10 @@ during that gap is how an assistant hears its own last sentence and answers
 itself. This module lets the tail drop our own voice while still passing a user
 who replies instantly, instead of blanket-muting.
 
-Interrupting mid-sentence by voice is the other thing it can do, and everything
-needed for it is here and tested — but it depends on the listener's room, so it
-stays switched off until it can be tried on real hardware. See the note in
-`_listen_audio` for how little it takes to turn back on.
+Mid-sentence voice interruption uses sustained positive blocks from this guard.
+The microphone retains these initial blocks so the server hears the whole
+interruption. Separation still depends on speaker volume and room acoustics;
+the microphone mute, wake-word and push-to-talk gates apply first.
 
 The problem with a level test
 -----------------------------
@@ -99,7 +99,9 @@ def band_energies(pcm, sr: int) -> np.ndarray:
     Left unnormalised on purpose: the decision below projects one of these onto
     another, and a projection needs real magnitudes.
     """
-    x = np.asarray(pcm, dtype=np.float32)
+    # PortAudio callbacks supply (frames, 1); playback supplies flat PCM. Both
+    # must use the same 1-D spectrum, rather than broadcasting into a matrix.
+    x = np.asarray(pcm, dtype=np.float32).reshape(-1)
     if x.size < 64:
         return np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
     x = x - x.mean()

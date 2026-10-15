@@ -167,6 +167,12 @@ Media opens in a separate resizable display with sound on. Opening or muting
 media does not automatically mute the microphone. Closing playback stops both
 the video and a separate soundtrack.
 
+You can interrupt Zaya while she speaks. A local echo filter checks sustained
+owner speech and retains its opening audio before stopping the queued reply.
+Listening resumes when playback drains, even if a tool or server turn is still
+open. Speaker volume and room acoustics affect echo separation; microphone mute,
+push-to-talk, and wake-word sleep still apply.
+
 During your speech or Zaya's speech, background computer audio drops to 20% of
 its previous level by default. Zaya's voice receives mixer priority; previous
 levels return afterward. Poke voices participate too. Windows uses per-session

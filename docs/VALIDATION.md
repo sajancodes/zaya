@@ -70,3 +70,36 @@ redacted exception evidence in the runtime log, instead of legacy `partial` text
 sessions, local HTTP navigation after closure, tab reuse and concurrent launch,
 plus bounded failure recovery, non-replayed clicks and error-result evidence.
 No personal browser profile or signed-in account is used by these tests.
+
+## Listening during media requests
+
+Created and developed by Sajan Rai. The playback tool returned in 14–17 ms in
+the local audit, but microphone audio was explicitly discarded while the voice
+speaking flag was true. Playback cleared that flag only after a server turn
+marker, so a tool pause could leave the microphone gated after sound ended.
+An output-device RuntimeError also silently stopped only the playback worker.
+Both regression tests fail against the previous committed playback code.
+
+Playback now releases the speaking gate after 350 ms without queued audio,
+retaining the device echo tail. Sustained owner speech can interrupt a reply;
+its initial blocks are retained and queue mutations run on the session loop.
+Server interruption events discard old queued sound and accept the next answer.
+The live input queue retains at most sixteen blocks (about one second) instead of twelve seconds of
+stale speech. Output failures propagate to the existing session recovery path.
+This follows [Google's interruption protocol](https://ai.google.dev/gemini-api/docs/live-api/best-practices).
+
+PortAudio input has shape `(frames, 1)`, while speaker PCM is flat. The echo
+fingerprint now flattens both, avoiding a broadcast matrix and failed spectral
+comparison. Tests cover real synthetic echo versus a distinct voice, retained
+speech, privacy gates, congestion, session replacement, missing turn markers,
+output failure, and server interruption. Room acoustics still affect separation.
+
+The Windows microphone transport probe now allows one extra second for device
+startup, rather than rejecting a working input after 350 ms. A live local probe
+received 18 callbacks / 18,432 frames in 1.5 seconds; no audio was saved. A
+delayed-stream fixture verifies the picker accepts this startup behavior.
+
+Validation: all 133 local tests passed, including the existing media, audio
+ducking, desktop, browser and WhatsApp tests. Ruff's error checks and
+`git diff --check` passed. No live message was sent. Speaker-to-microphone
+interruption in the owner's room still requires a live listening check.

@@ -152,19 +152,25 @@ def _transport_works(idx: int, kind: str, api_key) -> bool:
         else:
             # main.py reads through a callback — count what arrives.
             frames = [0]
+            ready = threading.Event()
 
             def _cb(indata, n, *_a):
                 frames[0] += n
+                if frames[0] > rate * secs * 0.3:
+                    ready.set()
 
             st = sd.InputStream(samplerate=rate, channels=1, dtype="int16",
                                 blocksize=1024, device=idx, callback=_cb)
             st.start()
-            time.sleep(secs)
+            # Windows input can spend the original 350 ms just starting its
+            # device buffers. Wait for actual transport, with a bounded startup
+            # allowance, instead of hiding a working microphone from settings.
+            ready.wait(secs + 1.0)
             st.stop(); st.close()
             ok = frames[0] > rate * secs * 0.3
             if not ok:
                 print(f"[Audio] input: host API delivered {frames[0]} frames in "
-                      f"{secs*1000:.0f} ms — skipping it")
+                      f"{(secs + 1.0)*1000:.0f} ms — skipping it")
     except Exception as e:
         print(f"[Audio] {kind} transport probe failed: {e}")
         ok = False

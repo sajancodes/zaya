@@ -42,6 +42,7 @@ import time
 import json
 import sys
 import traceback
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -576,6 +577,7 @@ class JarvisLive:
         self._ptt                  = None    # core.hotkey.PushToTalk
         self._out_level            = 0.0     # level of the audio being played right now
         self._echo                 = EchoGuard()
+        self._barge_audio          = deque(maxlen=12)
         # `stream.write()` returns when the buffer accepts the audio, not when the
         # speaker has finished with it, so sound is still in the room after the
         # speaking flag drops. Streaming the microphone during that gap is how an
@@ -1418,84 +1420,77 @@ class JarvisLive:
                 )
             )
 
+    def _microphone_input(self, indata, loop):
+        """Filter echo locally and deliver owner speech, including interruptions.
+
+        Called by PortAudio. Queue and playback mutations belong to the event
+        loop; retain the initial speech blocks until the echo guard agrees.
+        """
+        if self._wake_enabled and not self._awake:
+            self._barge_audio.clear()
+            if self._wake_detector is not None:
+                self._wake_detector.feed(indata)
+            return
+        if self.ui.muted or self._phone_active or (self._ptt_enabled and not self._ptt_held):
+            self._barge_audio.clear()
+            return
+        if self._companion_audio_active or time.monotonic() < self._companion_tail_until:
+            self._barge_audio.clear()
+            return
+        with self._speaking_lock:
+            speaking = self._is_speaking
+        data = indata.tobytes()
+        packets = [data]
+        barge_in = False
+        if speaking:
+            if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
+                self._barge_audio.clear()
+                return
+            self._barge_audio.append(data)
+            if len(self._barge_audio) < self._echo.required_blocks:
+                return
+            packets = list(self._barge_audio)
+            self._barge_audio.clear()
+            barge_in = True
+        else:
+            self._barge_audio.clear()
+            if self._tail_active():
+                if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
+                    return
+                self._tail_until = 0.0
+            elif self._echo._hist:
+                self._echo.reset()
+        queue = self.out_queue
+
+        def deliver():
+            if queue is not self.out_queue:
+                return  # A callback from a closed session must not feed its replacement.
+            if self.ui.muted or self._phone_active or (self._wake_enabled and not self._awake):
+                return
+            if self._ptt_enabled and not self._ptt_held:
+                return
+            if barge_in:
+                self.interrupt()
+                self._tail_until = 0.0
+            for packet in packets:
+                # Realtime speech must never accumulate seconds of stale audio.
+                if queue.full():
+                    queue.get_nowait()
+                queue.put_nowait({"data": packet, "mime_type": "audio/pcm"})
+                self._audio_ducker.microphone(packet)
+            self.ui.set_audio_level(_pcm_level(indata))
+
+        try:
+            loop.call_soon_threadsafe(deliver)
+        except RuntimeError:
+            pass  # The session closed while PortAudio was finishing its callback.
+
     async def _listen_audio(self):
         print("[Zaya] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
         def callback(indata, frames, time_info, status):
-            # ── Wake-word gate ───────────────────────────────────────────────
-            # While asleep, the mic audio NEVER goes to Gemini (nothing is
-            # streamed, so JARVIS can't respond to speech not addressed to it and
-            # nothing leaves the machine). Frames are instead handed to the local
-            # detector, which runs its model in ITS OWN thread — the cost here is
-            # only a queue push, so the audio path is never slowed. When wake word
-            # is off (default) or we're awake, this is a single boolean check.
-            if self._wake_enabled and not self._awake:
-                det = self._wake_detector
-                if det is not None:
-                    det.feed(indata)
-                return
-            with self._speaking_lock:
-                jarvis_speaking = self._is_speaking
-
-            # ── Barge-in ─────────────────────────────────────────────────────
-            # While JARVIS talks the mic is not streamed, but it is still worth
-            # listening to locally: if the user starts speaking, cut the answer
-            # short the way a person would stop when interrupted.
-            #
-            # The whole difficulty is echo — on speakers the mic hears JARVIS.
-            # So the test is not "is the mic loud" but "is the mic louder than
-            # the echo of what we are playing right now", sustained long enough
-            # that a cough or a keystroke cannot trigger it.
-            if jarvis_speaking or self._companion_audio_active or time.monotonic() < self._companion_tail_until:
-                # Nothing is streamed while JARVIS talks.
-                #
-                # Interrupting by voice used to live here: `EchoGuard` can pick a
-                # user out from under our own echo, and `core/echo.py` still does
-                # that for the tail below. Re-enabling is small — classify each
-                # block here and call interrupt() after `required_blocks` of
-                # agreement — but it depends on the listener's room, so it stays
-                # out until it can be tried on real hardware.
-                return
-
-            # ── Echo tail ────────────────────────────────────────────────────
-            # The speaking flag has dropped but the speakers have not finished.
-            # Sending this to the model is how an assistant hears itself, decides
-            # it was addressed, and answers its own last sentence. The microphone
-            # stays OPEN — the guard only drops blocks that are our own voice, so
-            # replying the instant it stops still works.
-            if self._tail_active():
-                try:
-                    if not self._echo.is_user_speech(
-                            indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
-                        return
-                    self._tail_until = 0.0      # a real voice ends the tail early
-                except Exception:
-                    return
-            elif self._echo._hist:
-                self._echo.reset()
-
-            # ── Push-to-talk ─────────────────────────────────────────────────
-            # When it is on the microphone is closed by default and the chord
-            # opens it, which is the whole point: nothing leaves the machine
-            # unless you are holding the key.
-            if self._ptt_enabled and not self._ptt_held:
-                return
-            
-            if not self.ui.muted and not self._phone_active:
-                data = indata.tobytes()
-                self._audio_ducker.microphone(data)
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
-                # Feed the live mic level to the HUD so the waveform reacts to
-                # the user's actual voice while listening. Purely cosmetic — any
-                # failure here must never disturb the mic.
-                try:
-                    self.ui.set_audio_level(_pcm_level(indata))
-                except Exception:
-                    pass
+            self._microphone_input(indata, loop)
 
         try:
             def _open_mic(dev):
@@ -1590,6 +1585,17 @@ class JarvisLive:
             while True:
                 async for response in self.session.receive():
 
+                    sc = response.server_content
+                    if sc and sc.interrupted:
+                        # The server cancelled this response after owner speech.
+                        # Drop queued sound immediately, then allow the next
+                        # response instead of waiting for an old turn marker.
+                        self.interrupt()
+                        self._interrupted = False
+                        out_buf = []
+                        self._tail_until = 0.0
+                        continue
+
                     # ── Session resumption ───────────────────────────────────
                     # The server sends this periodically. `resumable` goes false
                     # while a turn is mid-flight — replaying a handle from that
@@ -1641,6 +1647,7 @@ class JarvisLive:
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
                             if txt:
+                                self._interrupted = False
                                 in_buf.append(txt)
                                 self._begin_owner_goal(" ".join(in_buf))
                                 self._last_user_speech = time.monotonic()
@@ -1758,6 +1765,7 @@ class JarvisLive:
         except Exception:
             pass
 
+        last_audio = time.monotonic()
         try:
             while True:
                 try:
@@ -1766,12 +1774,15 @@ class JarvisLive:
                         timeout=0.1
                     )
                 except asyncio.TimeoutError:
-                    if (
-                        self._turn_done_event
-                        and self._turn_done_event.is_set()
-                        and self.audio_in_queue.empty()
-                    ):
+                    # Tool calls and delayed server turn markers can leave a
+                    # response open after its sound has drained. Only actual
+                    # playback owns the speaking gate; the echo tail still
+                    # covers the device buffer after releasing it.
+                    if self._is_speaking and time.monotonic() - last_audio >= 0.35:
                         self.set_speaking(False)
+                    if self._turn_done_event and self._turn_done_event.is_set():
+                        if self._is_speaking:
+                            self.set_speaking(False)
                         self._turn_done_event.clear()
                     continue
 
@@ -1839,8 +1850,9 @@ class JarvisLive:
 
                 try:
                     await asyncio.to_thread(stream.write, bytes(batch))
-                except (RuntimeError, asyncio.CancelledError):
-                    break   # executor shutting down — exit cleanly
+                    last_audio = time.monotonic()
+                except asyncio.CancelledError:
+                    raise
         except Exception as e:
             print(f"[Zaya] ❌ Play: {e}")
             raise
@@ -2242,7 +2254,7 @@ class JarvisLive:
                 ):
                     self.session          = session
                     self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
+                    self.out_queue        = asyncio.Queue(maxsize=16)
                     self._turn_done_event = asyncio.Event()
 
                     # Reset transient state that must not carry over from a previous session
@@ -2252,6 +2264,7 @@ class JarvisLive:
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
+                    self._barge_audio.clear()
 
                     print("[Zaya] Connected.")
                     if _resumed_with:

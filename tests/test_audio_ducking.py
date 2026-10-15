@@ -241,6 +241,8 @@ class MicrophoneIntegrationTests(unittest.IsolatedAsyncioTestCase):
         live._ptt_enabled = live._ptt_held = live._phone_active = False
         live._out_latency = .2
         live._echo = EchoGuard()
+        from collections import deque
+        live._barge_audio = deque(maxlen=12)
         live.out_queue = asyncio.Queue()
         pcm = np.ones((1024, 1), dtype=np.int16)
         with patch('main.sd.InputStream', return_value=MagicMock()) as stream, \
@@ -250,6 +252,7 @@ class MicrophoneIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
                 callback = stream.call_args.kwargs['callback']
                 callback(pcm, 1024, None, None)
+                await asyncio.sleep(0)
                 live._audio_ducker.microphone.assert_called_once_with(pcm.tobytes())
                 live._audio_ducker.reset_mock()
                 for key in ['_is_speaking', '_companion_audio_active', '_phone_active', '_ptt_enabled']:
