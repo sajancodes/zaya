@@ -61,6 +61,8 @@ class ZayaBar(QWidget):
         self.load_media()
         self.preload_reactions()
         self.context_menu = QMenu(self)
+        self.context_menu.addAction('Zaya · Created by Sajan Rai').setEnabled(False)
+        self.context_menu.addSeparator()
         self.context_menu.addAction('Settings & Controls', self.open_main_window)
         self.context_menu.addAction('Character configuration…', self.open_config)
         self.context_menu.addAction('Reload zayabar.json', self.reload_config)
@@ -73,11 +75,11 @@ class ZayaBar(QWidget):
             icon = QPixmap(40, 40)
             icon.fill(QColor('#42d5cb'))
             self.tray = QSystemTrayIcon(QIcon(icon), self)
-            self.tray.setToolTip('Zaya — Settings & Controls')
+            self.tray.setToolTip('Zaya — Created by Sajan Rai — Settings & Controls')
             self.tray.setContextMenu(self.context_menu)
             self.tray.activated.connect(lambda reason: self.open_main_window() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
             self.tray.show()
-        self.setToolTip('Zaya • right-click: settings or close • double-click: poke • drag: move')
+        self.setToolTip('Zaya • Created by Sajan Rai • right-click: settings or close • double-click: poke • drag: move')
 
     def open_main_window(self):
         self.main_window.showNormal()

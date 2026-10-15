@@ -1,5 +1,7 @@
 # Zaya validation and rollback
 
+**Created and developed by Sajan Rai.** See [creator credits](../CREDITS.md).
+
 Baseline: `a7daf25` on `zaya-updates`; inherited application baseline: `54733d5`.
 The baseline had no automated tests. Core PyQt6, Google GenAI and sounddevice
 imports passed on Windows. Live audio and external messaging require separate

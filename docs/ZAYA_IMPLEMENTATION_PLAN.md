@@ -1,7 +1,7 @@
 # ZAYA — MASTER IMPLEMENTATION PLAN
 
 **Repository:** `sajancodes/zaya`  
-**Development branch:** `zaya-updates`  
+**Current development and delivery branch:** `main` (earlier phases: `zaya-updates`)<br>
 **Baseline commit:** `54733d58ef69d2b9d3eebc3b25b75d86fb1bc616`  
 **Creator and primary operator:** **Sajan Rai**  
 **Assistant identity:** **Zaya**  

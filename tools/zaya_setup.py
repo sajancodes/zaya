@@ -1,10 +1,10 @@
-"""Install the observation hook and import explicit private profile data."""
+"""Zaya by Sajan Rai: install the observation hook and import private profile data."""
 import argparse
 from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Zaya private setup')
+    parser = argparse.ArgumentParser(description='Zaya private setup — created by Sajan Rai')
     parser.add_argument('--install-hermes-hook', action='store_true')
     parser.add_argument('--hermes-home', type=Path)
     parser.add_argument('--profile', type=Path)

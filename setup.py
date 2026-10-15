@@ -1,5 +1,5 @@
 """
-MARK LIV — one-time setup.
+Zaya — one-time setup. Created by Sajan Rai.
 
 Installs the Python dependencies for THIS operating system only: the OS-specific
 packages in requirements.txt carry `sys_platform` markers, so a macOS or Linux
@@ -67,7 +67,7 @@ def _check_assets() -> None:
 
 
 def main() -> None:
-    print(f"⚙  MARK LIV setup — detected OS: {OS or 'unknown'}, "
+    print(f"⚙  Zaya setup — created by Sajan Rai — detected OS: {OS or 'unknown'}, "
           f"Python {sys.version_info[0]}.{sys.version_info[1]}")
     _check_python()
 
@@ -119,9 +119,9 @@ def main() -> None:
             "    For Safari automation only: python -m playwright install webkit"
         )
 
-    print("\n✅ Setup complete!")
+    print("\n✅ Zaya setup complete — created by Sajan Rai!")
     print("   1) Launch it:  python main.py")
-    print("   2) Paste your free Gemini API key when the setup screen appears.")
+    print("   2) Paste your Gemini API key when the setup screen appears.")
     print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
 
 

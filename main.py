@@ -1,3 +1,4 @@
+"""Zaya desktop assistant — created and developed by Sajan Rai."""
 import platform as _platform
 import subprocess as _subprocess
 

@@ -1,10 +1,12 @@
 # Zaya taskbar companion
 
+**Created and developed by Sajan Rai.** See [creator credits](../CREDITS.md).
+
 Run `python main.py` as usual. The taskbar character loads alongside the existing
-assistant, audio, WhatsApp, tools and reminders. Right-click the character to
-open the combined Settings & Controls window. The previous dashboard/head
+assistant, audio, WhatsApp, tools and reminders. Right-click the character and
+choose Settings & Controls. The previous dashboard/head
 interface is no longer displayed. Closing the controls window leaves the companion
-running; choose **Exit Zaya** from the tray icon to quit the application.
+running; choose **Close Zaya** from the character or tray menu to quit.
 First-time API setup opens in the controls window. Media opens in its own
 resizable display, with sound on and the microphone active. Media playback
 never automatically mutes the microphone. Closing playback stops both video
@@ -12,8 +14,8 @@ and its soundtrack. Camera, results and conversation history use their own
 windows when requested.
 
 Edit the root `zayabar.json` file to supply your own images. Blank paths display
-a small Zaya placeholder until your artwork is ready. There is no bundled anime
-character. Paths can be absolute or relative to this configuration file:
+a small Zaya placeholder when no fallback artwork is available. Replace the
+configured example artwork as desired. Paths can be absolute or relative to this file:
 
 ```json
 "assets": {
