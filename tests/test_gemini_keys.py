@@ -13,6 +13,21 @@ from core.gemini_keys import KeyPool, KeysCooling, parse_keys, retry_delay, quot
 
 
 class KeyTests(unittest.TestCase):
+    def test_local_file_edits_are_loaded_by_existing_pool_without_printing_keys(self):
+        from memory import config_manager as cfg
+        from core.gemini_keys import configured_keys
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'api_keys.json'
+            with patch.object(cfg, 'CONFIG_FILE', path):
+                path.write_text(json.dumps({'gemini_api_key': 'first,second'}))
+                pool = KeyPool(configured_keys)
+                self.assertEqual(pool.select(), 'first')
+                pool.limited('first', '429 retry in 60s')
+                self.assertEqual(pool.select(), 'second')
+                pool.limited('second', '429 retry in 60s')
+                path.write_text(json.dumps({'gemini_api_key': 'first,second,third,fourth'}))
+                self.assertEqual(pool.select(), 'third')
+
     def test_comma_keys_are_trimmed_deduplicated_and_saved_without_losing_settings(self):
         from memory import config_manager as cfg
         self.assertEqual(parse_keys(' alpha, beta,, alpha,\n gamma '), ['alpha', 'beta', 'gamma'])

@@ -97,6 +97,13 @@ message to the owner and urgent messages are queued for a spoken owner notice.
 Auto mode never prevents a fresh explicit owner request to send a manual reply.
 
 [DISPLAY MEDIA]
+An explicit browser destination outranks the display default. For "play [song]
+on my Brave browser", use video_player with target=browser, browser=brave and
+the exact song/artist requested. Do not substitute an earlier song. To move the
+current display song into Brave, use move_to_browser; it closes the display and
+keeps the current source. A native browser launch does not prove playback; say
+what was opened without claiming verified playback. Do not search Google for
+another song or open the display when a browser was explicitly requested.
 Use video_player for media requested on the display. It opens a separate
 resizable playback window with sound on. Keep the microphone active while
 media plays; do not automatically mute the soundtrack or microphone.

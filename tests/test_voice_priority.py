@@ -13,6 +13,7 @@ class OwnerPriorityTests(unittest.IsolatedAsyncioTestCase):
     def live(self):
         live = agent()
         live._owner_turn_pending = False
+        live._owner_request_pending = False
         live._owner_epoch = 0
         live._notification_active = False
         live._last_user_speech = time.monotonic() - 30
@@ -22,11 +23,13 @@ class OwnerPriorityTests(unittest.IsolatedAsyncioTestCase):
         live = self.live()
         self.assertFalse(live._notifications_busy())
         live._owner_turn_pending = True
+        live._owner_request_pending = True
         self.assertTrue(live._notifications_busy())
 
     async def test_unanswered_voice_reconnects_but_active_tools_and_new_server_progress_do_not(self):
         live = self.live()
         live._owner_turn_pending = True
+        live._owner_request_pending = True
         live._owner_turn_started = 100
         live._last_user_speech = 100
         live._voice_health = {'received_at': 101}
@@ -40,19 +43,26 @@ class OwnerPriorityTests(unittest.IsolatedAsyncioTestCase):
         live._last_tool_end = 120
         self.assertFalse(live._voice_reply_stalled(125))
 
-    async def test_stall_discards_native_checkpoint_and_does_not_loop(self):
-        from main import _ReconnectSignal
+    async def test_stall_keeps_the_session_and_task_instead_of_restarting(self):
         live = self.live()
-        with self.assertRaises(_ReconnectSignal) as raised:
-            live._recover_stalled_voice()
-        self.assertFalse(raised.exception.keep_context)
-        self.assertTrue(live._voice_recovery_used)
-        live._owner_turn_pending = True
+        live.session = object()
+        original = live.session
+        live._operator_scope = 'same-request'
+        live._owner_request_pending = True
         live._recover_stalled_voice()
-        self.assertTrue(live._voice_recovery_exhausted)
+        self.assertIs(live.session, original)
+        self.assertEqual(live._operator_scope, 'same-request')
+        self.assertFalse(live._owner_request_pending)
         self.assertFalse(live._owner_turn_pending)
         live._owner_turn_pending = True
         self.assertFalse(live._voice_reply_stalled(10000))
+
+    async def test_local_noise_is_not_a_confirmed_unanswered_request(self):
+        live = self.live()
+        live._owner_turn_pending = True
+        live._owner_turn_started = 100
+        live._last_user_speech = 100
+        self.assertFalse(live._voice_reply_stalled(200))
 
     async def test_local_speech_blocks_notice_before_server_transcribes_it(self):
         live = self.live()

@@ -577,8 +577,9 @@ class JarvisLive:
         except ImportError:
             self._owner_detector = None
         self._owner_turn_pending = False
-        self._voice_recovery_used = False
-        self._voice_recovery_exhausted = False
+        self._owner_request_pending = False
+        self._turn_input_enabled = self._owner_detector is not None
+        self._input_turn_active = False
         self._owner_epoch = 0
         self._notification_active = False
         self.ui.on_shutdown = self.shutdown
@@ -872,8 +873,6 @@ class JarvisLive:
         await self._reconnect_event.wait()
         self._reconnect_event.clear()
         keep   = self._reconnect_keep
-        self._voice_recovery_used = False
-        self._voice_recovery_exhausted = False
         reason = getattr(self, "_reconnect_reason", "") or "settings"
         self.ui.write_log(
             f"SYS: Applying {reason} — reconnecting"
@@ -1158,6 +1157,12 @@ class JarvisLive:
         if self._tuned_live:
             cfg.update(self._tuning_config())
 
+        if getattr(self, '_turn_input_enabled', False):
+            # Explicit boundaries avoid a server VAD turn remaining open after
+            # tools. The local detector retains opening audio before starting.
+            cfg['realtime_input_config'] = types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True))
+
         return types.LiveConnectConfig(**cfg)
 
     def _tuning_config(self) -> dict:
@@ -1215,6 +1220,7 @@ class JarvisLive:
 
     def _begin_owner_goal(self, text: str) -> None:
         self._owner_activity()
+        self._owner_request_pending = True
         import uuid
         from core.audit import redact
         self._operator_scope = uuid.uuid4().hex
@@ -1226,7 +1232,7 @@ class JarvisLive:
             except (OSError, sqlite3.Error):
                 self.ui.write_log('SYS: Could not save the current command identity.')
 
-    async def _execute_tool(self, fc) -> types.FunctionResponse:
+    async def _execute_tool(self, fc, *, owner_scope=None, owner_goal=None) -> types.FunctionResponse:
         from core.operator import Operator
         from core.task_runtime import get_runtime
         from core.tool_result import normalize
@@ -1234,15 +1240,16 @@ class JarvisLive:
         response = None
         async def invoke():
             nonlocal response
-            response = await self._execute_tool_impl(fc)
+            response = await self._execute_tool_impl(fc, owner_goal=owner_goal)
             return normalize(response.response.get("result"))
         signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
-        scope = getattr(self, "_operator_scope", fc.id or "")
+        scope = owner_scope if owner_scope is not None else getattr(self, "_operator_scope", fc.id or "")
+        goal = owner_goal if owner_goal is not None else getattr(self, '_operator_goal', '')
         request_id = f"{scope}:{fc.name}:{signature}" if scope else ""
         self._tools_active = getattr(self, '_tools_active', 0) + 1
         try:
             result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
-                                                           goal=getattr(self, "_operator_goal", "") or fc.name)
+                                                           goal=goal or fc.name)
         finally:
             self._tools_active -= 1
             self._last_tool_end = time.monotonic()
@@ -1256,9 +1263,15 @@ class JarvisLive:
             activity.set('project', 'Sajan is working on a project with Zaya.')
         return response
 
-    async def _execute_tool_impl(self, fc) -> types.FunctionResponse:
+    async def _execute_tool_impl(self, fc, *, owner_goal=None) -> types.FunctionResponse:
         name = fc.name
         args = dict(fc.args or {})
+
+        if name == 'video_player' and args.get('action', 'play') in {'play', 'move_to_browser'}:
+            from actions.video_player import requested_browser
+            destination = requested_browser(owner_goal if owner_goal is not None else getattr(self, '_operator_goal', ''))
+            if destination:
+                args.update(target='browser', browser=destination)
 
         print(f"[Zaya] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
@@ -1446,7 +1459,8 @@ class JarvisLive:
                 self.interrupt()
 
     def _notifications_busy(self):
-        return (getattr(self, '_owner_turn_pending', False) or self._is_speaking
+        return (getattr(self, '_owner_request_pending', False) or self._is_speaking
+                or getattr(self, '_tools_active', 0) or getattr(self, '_input_turn_active', False)
                 or time.monotonic() - self._last_user_speech < 10
                 or not self.audio_in_queue.empty()
                 or (self._wake_enabled and not self._awake))
@@ -1455,8 +1469,8 @@ class JarvisLive:
         return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy()
 
     def _voice_reply_stalled(self, now):
-        if (getattr(self, '_voice_recovery_exhausted', False)
-                or not getattr(self, '_owner_turn_pending', False) or self._is_speaking
+        if (not getattr(self, '_owner_request_pending', False) or self._is_speaking
+                or getattr(self, '_input_turn_active', False)
                 or not self.audio_in_queue.empty() or getattr(self, '_tools_active', 0)):
             return False
         health = getattr(self, '_voice_health', {})
@@ -1471,15 +1485,13 @@ class JarvisLive:
                 self._recover_stalled_voice()
 
     def _recover_stalled_voice(self):
-        if getattr(self, '_voice_recovery_used', False):
-            self._voice_recovery_exhausted = True
-            self._owner_turn_pending = False
-            self.ui.set_state('LISTENING')
-            self.ui.write_log('ERR: Gemini still has not answered after a fresh connection. Automatic reconnects stopped; your chat is saved. Check the connection or change Gemini API keys in Settings.')
-            return
-        self._voice_recovery_used = True
-        self.ui.write_log('SYS: Voice response stalled — starting a fresh connection. Your chat is safe in History. Please repeat your request after Zaya is online; previous actions will not be replayed.')
-        raise _ReconnectSignal(keep_context=False)
+        # Missing speech is not evidence of a broken connection. In particular,
+        # never discard a task's context or replay actions because of a timeout.
+        self._owner_request_pending = False
+        self._owner_turn_pending = False
+        self._voice_mark('reply_timeout')
+        self.ui.set_state('LISTENING')
+        self.ui.write_log('SYS: No spoken answer received yet. I am still listening in the same session; your task will not be restarted.')
 
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service
@@ -1531,6 +1543,10 @@ class JarvisLive:
             health.update(fields)
 
     async def _send_realtime(self):
+        turns = None
+        if getattr(self, '_turn_input_enabled', False):
+            from core.voice_turns import VoiceTurns
+            turns = VoiceTurns()
         streamed = False
         quiet_blocks = 0
         while True:
@@ -1549,8 +1565,14 @@ class JarvisLive:
                         quiet_blocks += 1
                         self._voice_mark('quiet_padding')
                     else:
-                        await self.session.send_realtime_input(audio_stream_end=True)
+                        if turns is not None:
+                            await self.session.send_realtime_input(activity_end=types.ActivityEnd())
+                        else:
+                            await self.session.send_realtime_input(audio_stream_end=True)
                         streamed = False
+                        if turns is not None:
+                            turns.reset()
+                        self._input_turn_active = False
                         self._voice_mark('stream_end')
                 continue
             # Gemini 3.x Live rejects the old realtime_input.media_chunks field
@@ -1561,15 +1583,26 @@ class JarvisLive:
             mime_type = msg.get('mime_type', 'audio/pcm')
             if mime_type == 'audio/pcm':
                 mime_type = f'audio/pcm;rate={SEND_SAMPLE_RATE}'
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=mime_type,
-                )
-            )
-            self._voice_mark('sent')
+            chunks, ended = ([msg['data']], False)
+            if turns is not None:
+                was_active = turns.active
+                chunks, ended = turns.feed(msg['data'], time.monotonic())
+                self._input_turn_active = turns.active
+                if not chunks:
+                    self._voice_mark('idle_input')
+                    continue
+                if not was_active:
+                    await self.session.send_realtime_input(activity_start=types.ActivityStart())
+                    self._voice_mark('stream_start')
+            for chunk in chunks:
+                await self.session.send_realtime_input(audio=types.Blob(data=chunk, mime_type=mime_type))
+                self._voice_mark('sent')
             streamed = True
             quiet_blocks = 0
+            if ended:
+                await self.session.send_realtime_input(activity_end=types.ActivityEnd())
+                streamed = False
+                self._voice_mark('stream_end')
 
     def _microphone_input(self, indata, loop):
         """Filter echo locally and deliver owner speech, including interruptions.
@@ -1700,6 +1733,8 @@ class JarvisLive:
                                     'mic_active': bool(_mic_stream.active),
                                     'selective_audio': getattr(self, '_active_selective_audio', False),
                                     'owner_pending': getattr(self, '_owner_turn_pending', False),
+                                    'request_pending': getattr(self, '_owner_request_pending', False),
+                                    'input_turn_active': getattr(self, '_input_turn_active', False),
                                     'notification_audio': getattr(self, '_notification_active', False),
                                     'input_queue': self.out_queue.qsize(),
                                     'output_queue': self.audio_in_queue.qsize()}
@@ -1757,14 +1792,40 @@ class JarvisLive:
         return True
 
     async def _receive_audio(self):
+        # Tool execution must not hold up incoming speech/interruption events.
+        # The group owns workers so closing the connection also closes them.
+        async with asyncio.TaskGroup() as workers:
+            await self._receive_messages(workers)
+
+    async def _run_tool_batch(self, calls, canceled, owner_scope, owner_goal):
+        responses = []
+        for fc in calls:
+            if fc.id in canceled:
+                continue
+            result = await self._execute_tool(fc, owner_scope=owner_scope, owner_goal=owner_goal)
+            if fc.id not in canceled:
+                responses.append(result)
+        # Cancellation means the model no longer wants this response. Retain
+        # durable execution evidence; never replay or resend a canceled action.
+        responses = [result for result in responses if result.id not in canceled]
+        if responses:
+            await self.session.send_tool_response(function_responses=responses)
+            await self._flush_pending_vision()
+
+    async def _receive_messages(self, workers):
         print("[Zaya] 👂 Recv started")
         out_buf, in_buf = [], []
         input_row = None
+        canceled, seen_calls = set(), set()
 
         try:
             while True:
                 async for response in self.session.receive():
                     self._voice_mark('received')
+
+                    cancellation = getattr(response, 'tool_call_cancellation', None)
+                    if cancellation:
+                        canceled.update(cancellation.ids or [])
 
                     sc = response.server_content
                     if sc and sc.interrupted:
@@ -1815,8 +1876,6 @@ class JarvisLive:
                         sc = response.server_content
 
                         if sc.output_transcription and sc.output_transcription.text:
-                            self._voice_recovery_used = False
-                            self._voice_recovery_exhausted = False
                             txt = _clean_transcript(sc.output_transcription.text)
                             # A turn that involves a tool call passes through
                             # several turn_completes, and the API re-sends the
@@ -1845,9 +1904,14 @@ class JarvisLive:
                                 self._begin_owner_goal(" ".join(in_buf))
                                 self._last_user_speech = time.monotonic()
 
+                        if getattr(sc, 'generation_complete', False) or getattr(sc, 'waiting_for_input', False):
+                            self._owner_request_pending = False
+                            self._owner_turn_pending = False
+
                         if sc.turn_complete:
                             if not self._interrupted:
                                 self._owner_turn_pending = False
+                                self._owner_request_pending = False
                             if self._turn_done_event:
                                 self._turn_done_event.set()
 
@@ -1906,15 +1970,18 @@ class JarvisLive:
 
                     if response.tool_call:
                         self._owner_turn_pending = True
-                        fn_responses = []
+                        calls = []
                         for fc in response.tool_call.function_calls:
+                            if fc.id and fc.id in seen_calls:
+                                continue
+                            if fc.id:
+                                seen_calls.add(fc.id)
                             print(f"[Zaya] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
-                        )
-                        await self._flush_pending_vision()
+                            calls.append(fc)
+                        if calls:
+                            workers.create_task(self._run_tool_batch(calls, canceled,
+                                                getattr(self, '_operator_scope', None),
+                                                getattr(self, '_operator_goal', '')))
         except Exception as e:
             print(f"[Zaya] ❌ Recv: {e}")
             traceback.print_exc()
@@ -2479,6 +2546,8 @@ class JarvisLive:
                     self._interrupted          = False
                     self._barge_audio.clear()
                     self._owner_turn_pending = False
+                    self._owner_request_pending = False
+                    self._input_turn_active = False
                     self._notification_active = False
 
                     print("[Zaya] Connected.")

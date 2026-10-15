@@ -31,6 +31,39 @@ _YT = re.compile(r"(youtube\.com/|youtu\.be/)", re.I)
 # anyway a second later. Bumping the number abandons whatever is in flight.
 _open_lock = threading.Lock()
 _open_seq = 0
+_last_source = ''
+
+
+def requested_browser(text):
+    """Honor an explicit destination in the current owner request."""
+    pattern = r'\b(?:on|in|using)\s+(?:(?:my|the|existing|real)\s+)*(brave|chrome|firefox|edge)\b'
+    matches = list(re.finditer(pattern, text or '', re.I))
+    for match in reversed(matches):
+        before = text[max(0, match.start() - 25):match.start()]
+        if re.search(r"\b(?:not|never|don't|do not)\s+(?:(?:play|open|it|this)\s+)*$", before, re.I):
+            continue
+        if re.search(r'\b(?:on|in)\s+(?:(?:my|the)\s+)*(?:display|display window)\b', text[match.end():], re.I):
+            return None
+        return match.group(1).lower()
+    return None
+
+
+def _browser_video_url(source):
+    if _is_url(source):
+        return source
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'extract_flat': True,
+                              'skip_download': True, 'socket_timeout': 8, 'retries': 0,
+                              'extractor_retries': 0}) as search:
+            info = search.extract_info('ytsearch1:' + source, download=False)
+        entry = next(iter(info.get('entries') or []), {})
+        video_id = entry.get('id', '')
+        if re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
+            return 'https://www.youtube.com/watch?v=' + video_id + '&autoplay=1'
+    except Exception:
+        pass
+    return _search_page(source)
 
 
 def _begin_open() -> int:
@@ -163,9 +196,32 @@ def _search_page(query: str) -> str:
 
 def video_player(parameters: dict = None, response=None, player=None,
                  session_memory=None) -> str:
+    from core.execution_policy import require_owner
+    require_owner()
+    global _last_source
     params = parameters or {}
     action = (params.get("action") or "play").strip().lower()
     source = (params.get("source") or "").strip()
+
+    if (params.get('target') == 'browser' and action == 'play') or action == 'move_to_browser':
+        with _open_lock:
+            source = source or _last_source
+        if not source:
+            return 'What should I open in your browser?'
+        token = _begin_open()  # Cancel a display open before switching destinations.
+        if player is not None:
+            player.stop_video()
+        from actions.browser_control import browser_control
+        url = _browser_video_url(source)
+        if not _still_wanted(token):
+            from core.tool_result import ToolResult
+            return ToolResult('partial', 'Media request canceled before the browser opened.', {'canceled': True})
+        result = browser_control({'action': 'go_to', 'url': url,
+                                  'browser': params.get('browser') or '', 'mode': 'native'}, player=player)
+        with _open_lock:
+            _last_source = source
+        result.data.update(media_source=source, target='browser', playback_verified=False)
+        return result
 
     if player is None:
         return "There is no display to play a video on."
@@ -192,6 +248,8 @@ def video_player(parameters: dict = None, response=None, player=None,
     # ---- play -------------------------------------------------------------
     if not source:
         return "What should I play?"
+    with _open_lock:
+        _last_source = source
 
     local = _local_path(source)
     if local:
@@ -269,6 +327,10 @@ def _say(player, instruction: str) -> None:
 TOOL = {
     "name": "video_player",
     "description": (
+        "Honor the owner's destination: for 'play ... on my Brave browser', use target='browser', browser='brave', and the exact requested song as source. "
+        "For 'remove from display and play it in Brave', use action='move_to_browser'; it reuses the last song if source is omitted and closes the display. "
+        "Browser playback opens an exact YouTube watch page when resolvable in the regular signed-in browser, otherwise YouTube search results; native playback is unverified. "
+        "Use target='display' only when display playback is wanted or no browser destination was specified. "
         "If user wants to open a video on YouTube, he will tell you that specifically"
         "If user wants to play a video, then he wants to call this feature"
         "Plays a VIDEO in a separate resizable display window with sound on "
@@ -293,8 +355,10 @@ TOOL = {
                 "type": "STRING",
                 "description": ("'play' (default), 'stop' to close it, 'unmute' "
                                 "to turn the sound on, 'mute' to silence it."),
-                "enum": ["play", "stop", "mute", "unmute"],
+                "enum": ["play", "stop", "mute", "unmute", "move_to_browser"],
             },
+            "target": {"type": "STRING", "enum": ["display", "browser"]},
+            "browser": {"type": "STRING", "description": "Installed browser, e.g. brave. Uses the saved preferred browser when omitted."},
             "source": {
                 "type": "STRING",
                 "description": (

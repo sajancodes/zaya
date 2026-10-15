@@ -6,6 +6,9 @@ Current behavior after the October 15 owner updates: conversation storage remain
 continuous, but startup is fresh and history recall is on demand (five messages).
 This supersedes earlier automatic provider-checkpoint/text-restoration behavior
 described in the historical validation entries below.
+Reply timeouts now keep the same live session and never replay actions. Explicit
+local speech boundaries replace server end-of-speech detection when WebRTC VAD
+is available. This also supersedes the historical stall-reconnect policy below.
 
 Baseline: `a7daf25` on `zaya-updates`; inherited application baseline: `54733d5`.
 The baseline had no automated tests. Core PyQt6, Google GenAI and sounddevice
@@ -349,3 +352,53 @@ on-demand local view with batch insertion. Owner-requested recall/search returns
 at most five messages and 4,000 text characters, always labeled historical data.
 Regression tests verify the cap, unchanged full archive, no saved-token loading,
 and history views without typing queues or live bubbles.
+
+## Speech turns and tool continuity: October 15 follow-up
+
+The owner's latest local history contained consecutive owner wake/greeting
+messages with no following assistant response. Health still showed a live
+microphone. A fresh live probe reproduced the failure with the full production
+configuration (42 tools): the server reported speech start but no transcription
+or response after local silence and `audio_stream_end`. Explicit local activity
+start/end markers with automatic server VAD disabled produced responses.
+This is a supported [Gemini Live input mode](https://ai.google.dev/gemini-api/docs/live-api/capabilities#disable-automatic-vad).
+
+The microphone keeps capturing. Local WebRTC detection retains six blocks of
+opening audio, closes each turn after 900 ms without detected speech, and sends
+explicit activity boundaries. Idle silence does not occupy an input turn.
+If captured packets pause, generated quiet closes the open turn. Without the
+local detector dependency, the existing server VAD input path remains available.
+Room acoustics and quiet speech still affect detection; synthetic audio does
+not establish performance for every microphone or background song.
+
+Tool batches run in session-owned workers while the receive loop processes new
+speech, interrupts, and cancellation messages. Workers keep the initiating owner
+scope/goal, skip canceled pending calls, discard canceled results, and reject
+duplicate call IDs. Closing the connection cancels workers. Already executing
+threaded side effects cannot be undone by cancellation; durable operation IDs
+remain authoritative and actions are never automatically replayed on timeout.
+
+The final live probe sent three synthetic spoken requests through the real
+microphone callback, sender, and receiver with continuous silence callbacks
+between phrases. It used the production configuration, no history upload, and
+stubbed external actions. The media request selected the exact Darshan Raval
+song with native Brave as destination; the next spoken answer recalled that
+song; the third answered two plus two. All three completed in one connection,
+with 441 microphone callbacks and four explicit input turns. No real media
+launch or message send occurred in this probe.
+
+Browser dispatch also enforces an explicit owner browser destination even when
+the model omits it. Moving display media reuses the current source. Browser
+lookup resolves a YouTube watch page or falls back to matching YouTube results;
+native launch is still reported as unverified playback. Superseded resolutions
+do not open the canceled browser request.
+
+The owner's ignored local key file contains four effective Gemini keys. Existing
+key selection reloads that file on each selection and rotates on provider quota
+errors, respecting cooldowns for live, helper, and notification requests. Tests
+use fake keys to verify rotation and newly edited keys without exposing secrets.
+Multiple keys cannot bypass shared project quota.
+
+Validation: 207 regression/integration tests passed in 73.881 seconds. Ruff
+error checks and `git diff --check` passed. The live three-request probe passed
+separately; actual speaker-room microphone behavior remains an owner check.

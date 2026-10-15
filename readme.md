@@ -102,6 +102,10 @@ then reconnects while preserving local History. On a `429` rate-limit response, 
 the next available configured key. Provider retry delays are respected; when
 all keys are cooling down, Zaya waits and shows the reason. Helper generations
 also use key failover. Credentials remain in ignored local configuration.
+Direct edits to `config/api_keys.json` are read when a key is selected: use
+`gemini_api_key` with comma-separated values, or `gemini_api_keys` with a list.
+If both exist, the plural list takes precedence. An already connected voice
+session keeps its current key until it needs a new connection.
 
 Google applies quota per project, so multiple keys from one project can share
 the same limit. Failover provides access to already available quota; it does
@@ -206,12 +210,16 @@ gate. This local file contains no recording or transcript.
 Your active request takes priority over spoken WhatsApp announcements. Incoming
 messages remain queued until your request and reply finish; speaking during a
 local announcement stops it and returns the speaker to your conversation.
-The microphone sender supplies a short generated quiet tail when echo filtering
-pauses capture, so the provider can finish detecting your sentence. This quiet
-padding contains no recorded microphone audio. A stalled voice reply discards
-the stuck provider checkpoint and starts a fresh connection once. If that
-fresh connection also stalls, recovery stops with a visible error. Repeat your
-request after reconnecting; old actions are never replayed automatically.
+Local speech detection retains the start of your sentence and explicitly marks
+speech start and end for Gemini. Capture stays open during silence and tools;
+slow tools run separately from incoming speech and interruption handling.
+When capture pauses, a short generated quiet tail finishes the open input turn
+without adding a recording. A reply timeout shows a listening status in the
+same session; it does not restart Zaya, discard the conversation, or replay
+actions. Actual connection failures still use normal connection recovery.
+An explicit request to play media in Brave opens the exact requested song in
+your regular browser and closes the display player. Native launch cannot verify
+that the browser actually started playback.
 
 During your speech or Zaya's speech, background computer audio drops to 20% of
 its previous level by default. Zaya's voice receives mixer priority; previous
