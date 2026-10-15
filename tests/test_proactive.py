@@ -5,6 +5,23 @@ from core.proactive_manager import ProactiveManager
 
 
 class ProactiveTests(unittest.TestCase):
+    def test_failed_tasks_stay_on_event_bus_without_spoken_generic_warning(self):
+        from core.event_bus import bus
+        store = WhatsAppStore()
+        manager = ProactiveManager(store)
+        seen = []
+        unsubscribe = bus.subscribe('task.failed', seen.append)
+        try:
+            bus.publish('task.failed', task={'state': 'failed', 'goal': 'Fixture task'})
+            self.assertEqual(len(seen), 1)
+            self.assertIsNone(manager.next())
+            store.ingest(Message('fresh', '123@s.whatsapp.net', 'contact', 'Hello', 1))
+            self.assertEqual(manager.next()['kind'], 'inbox')
+        finally:
+            unsubscribe()
+            manager.close()
+            store.db.close()
+
     def test_mute_busy_dedup_and_no_external_text(self):
         store = WhatsAppStore()
         now = [1000.0]
