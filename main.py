@@ -577,6 +577,8 @@ class JarvisLive:
         except ImportError:
             self._owner_detector = None
         self._owner_turn_pending = False
+        self._voice_recovery_used = False
+        self._voice_recovery_exhausted = False
         self._owner_epoch = 0
         self._notification_active = False
         self.ui.on_shutdown = self.shutdown
@@ -874,6 +876,8 @@ class JarvisLive:
         await self._reconnect_event.wait()
         self._reconnect_event.clear()
         keep   = self._reconnect_keep
+        self._voice_recovery_used = False
+        self._voice_recovery_exhausted = False
         reason = getattr(self, "_reconnect_reason", "") or "settings"
         self.ui.write_log(
             f"SYS: Applying {reason} — reconnecting"
@@ -1460,7 +1464,8 @@ class JarvisLive:
         return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy()
 
     def _voice_reply_stalled(self, now):
-        if (not getattr(self, '_owner_turn_pending', False) or self._is_speaking
+        if (getattr(self, '_voice_recovery_exhausted', False)
+                or not getattr(self, '_owner_turn_pending', False) or self._is_speaking
                 or not self.audio_in_queue.empty() or getattr(self, '_tools_active', 0)):
             return False
         health = getattr(self, '_voice_health', {})
@@ -1472,8 +1477,18 @@ class JarvisLive:
         while True:
             await asyncio.sleep(1)
             if self._voice_reply_stalled(time.monotonic()):
-                self.ui.write_log('SYS: Voice response stalled — reconnecting with saved chat. Your request is retained; old actions will not be replayed.')
-                raise _ReconnectSignal(keep_context=True)
+                self._recover_stalled_voice()
+
+    def _recover_stalled_voice(self):
+        if getattr(self, '_voice_recovery_used', False):
+            self._voice_recovery_exhausted = True
+            self._owner_turn_pending = False
+            self.ui.set_state('LISTENING')
+            self.ui.write_log('ERR: Gemini still has not answered after a fresh connection. Automatic reconnects stopped; your chat is saved. Check the connection or change Gemini API keys in Settings.')
+            return
+        self._voice_recovery_used = True
+        self.ui.write_log('SYS: Voice response stalled — discarding the stuck connection and restoring your saved chat. Please repeat your request after Zaya is online; previous actions will not be replayed.')
+        raise _ReconnectSignal(keep_context=False)
 
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service
@@ -1809,6 +1824,8 @@ class JarvisLive:
                         sc = response.server_content
 
                         if sc.output_transcription and sc.output_transcription.text:
+                            self._voice_recovery_used = False
+                            self._voice_recovery_exhausted = False
                             txt = _clean_transcript(sc.output_transcription.text)
                             # A turn that involves a tool call passes through
                             # several turn_completes, and the API re-sends the

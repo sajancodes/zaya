@@ -11,6 +11,19 @@ from memory.conversation_store import ConversationStore, HANDLE_SECONDS, resume_
 
 
 class ConversationTests(unittest.TestCase):
+    def test_pre_recovery_provider_checkpoint_is_ignored_without_losing_chat(self):
+        import hashlib
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            store = ConversationStore(Path(folder) / 'chat.db')
+            chat_id = store.chat_id
+            store.append('user', 'Keep this conversation.')
+            old_scope = hashlib.sha256(json.dumps(['model', 'Nika', 'key']).encode()).hexdigest()
+            store.save_handle('stuck-provider-handle', old_scope)
+            self.assertIsNone(store.handle(resume_scope('model', 'Nika', 'key')))
+            self.assertEqual(store.chat_id, chat_id)
+            self.assertEqual(len(store.recent()), 1)
+
     def test_reopening_keeps_same_chat_and_full_archive(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'chat.db'

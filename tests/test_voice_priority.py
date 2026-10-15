@@ -40,6 +40,20 @@ class OwnerPriorityTests(unittest.IsolatedAsyncioTestCase):
         live._last_tool_end = 120
         self.assertFalse(live._voice_reply_stalled(125))
 
+    async def test_stall_discards_native_checkpoint_and_does_not_loop(self):
+        from main import _ReconnectSignal
+        live = self.live()
+        with self.assertRaises(_ReconnectSignal) as raised:
+            live._recover_stalled_voice()
+        self.assertFalse(raised.exception.keep_context)
+        self.assertTrue(live._voice_recovery_used)
+        live._owner_turn_pending = True
+        live._recover_stalled_voice()
+        self.assertTrue(live._voice_recovery_exhausted)
+        self.assertFalse(live._owner_turn_pending)
+        live._owner_turn_pending = True
+        self.assertFalse(live._voice_reply_stalled(10000))
+
     async def test_local_speech_blocks_notice_before_server_transcribes_it(self):
         live = self.live()
         live._owner_detector = Mock()

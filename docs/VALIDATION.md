@@ -200,8 +200,8 @@ two synthetic spoken requests against Nika. Both produced owner/assistant turns;
 the second interrupted a local notification fixture and received an answer.
 No contact message was sent and no owner's speech was saved by these checks.
 This proves the streaming path; actual speaker/microphone room separation still
-depends on acoustics. A 20-second no-progress watchdog reconnects a stalled reply
-without replaying actions; running tools and fresh server progress prevent it.
+depends on acoustics. The watchdog behavior was corrected below after the owner
+reported that the earlier reconnects still did not restore replies.
 
 Final validation: all 162 local tests passed, plus the live spoken-input,
 notification-interruption, provider-resume and text-fallback checks described
@@ -209,3 +209,21 @@ above. Ruff error checks and whitespace checks passed. Real rate-limit failover
 was simulated with injected provider errors; no account quota was deliberately
 exhausted. The owner's configuration currently contains one key, so additional
 credentials must be entered in the masked editor to use cross-key failover.
+
+## Stalled provider checkpoint: October 15 follow-up
+
+The real saved checkpoint reproduced the owner's failure: with the full
+production prompt and 41 tools, the provider accepted and transcribed a spoken
+fixture but produced no reply within 25 seconds, even after trailing quiet and
+an audio-stream-end marker. A fresh connection with the same production config
+and the same restored local history answered both spoken fixtures. Diagnostic
+tool responses were stubbed; no contact messages or computer actions ran.
+
+Provider checkpoint scope is now versioned so pre-fix handles cannot reopen the
+stuck provider state. Local chat history and its ID remain intact. If another
+reply stalls, the watchdog discards the native handle and restores saved text
+once, asking for a fresh request rather than replaying an action. If the fresh
+connection also stalls, automatic recovery stops with a visible error instead
+of reconnecting forever. Successful model output or an explicit settings
+reconnect resets this recovery allowance. The owner then confirmed voice replies
+were working. Owner-only command enforcement and confirmation remain unchanged.

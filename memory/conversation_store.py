@@ -11,10 +11,13 @@ from contextlib import contextmanager
 
 DEFAULT_PATH = Path(__file__).resolve().parent / 'conversation.db'
 HANDLE_SECONDS = 2 * 60 * 60
+# Checkpoints made before the stalled-session recovery fix can accept input
+# forever without answering. Keep the local chat, but never reopen those handles.
+RESUME_PROTOCOL = 'zaya-live-2'
 
 
 def resume_scope(model, voice, api_key):
-    return hashlib.sha256(json.dumps([model, voice, api_key]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([RESUME_PROTOCOL, model, voice, api_key]).encode()).hexdigest()
 
 
 class ConversationStore:
