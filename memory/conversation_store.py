@@ -13,7 +13,7 @@ DEFAULT_PATH = Path(__file__).resolve().parent / 'conversation.db'
 HANDLE_SECONDS = 2 * 60 * 60
 # Checkpoints made before the stalled-session recovery fix can accept input
 # forever without answering. Keep the local chat, but never reopen those handles.
-RESUME_PROTOCOL = 'zaya-live-2'
+RESUME_PROTOCOL = 'zaya-live-3'
 
 
 def resume_scope(model, voice, api_key):

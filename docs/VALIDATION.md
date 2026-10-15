@@ -246,6 +246,17 @@ exclusion, manual takeover, mode changes during generation, exact-chat scope,
 offline reporting and rejection of non-owner mode changes. Transport is mocked;
 these tests send no actual WhatsApp messages.
 
+A subsequent full-config live spoken-command comparison found another context
+boundary problem: restoring a lone historical `user` turn with
+`turn_complete=False` could transcribe "WhatsApp auto mode" without invoking
+the tool or answering. Ending the restored exchange with a model acknowledgment
+before accepting new audio made both spoken "WhatsApp auto mode" and "Stop
+WhatsApp auto mode" invoke `start_auto` / `stop_auto` without a chat argument.
+The same production prompt, 41 tools, saved history, and audio fixtures were used.
+The acknowledgment is provider context only, not a saved chat reply or an action.
+Checkpoint scope was advanced to avoid reopening the old unfinished history
+state. The live transport was stubbed for tools; no WhatsApp messages were sent.
+
 ## Regular Brave profile for ordinary links
 
 The owner supplied a Brave screenshot showing GitHub signed out and a 404 for

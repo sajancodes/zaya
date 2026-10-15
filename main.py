@@ -931,7 +931,12 @@ class JarvisLive:
         if store is not None and not resumed:
             content = await asyncio.to_thread(store.restore_content)
             if content:
-                await self.session.send_client_content(turns=content, turn_complete=False)
+                # Finish the historical exchange before live audio arrives.
+                # A lone, incomplete user history turn can absorb the next
+                # spoken command into the "historical context only" framing.
+                turns = [content, {'role': 'model', 'parts': [{'text':
+                    'Saved history loaded as context. Waiting for a new owner request.'}]}]
+                await self.session.send_client_content(turns=turns, turn_complete=False)
                 self.ui.write_log('SYS: Saved conversation restored — waiting for your next message.')
 
     def _tail_active(self) -> bool:

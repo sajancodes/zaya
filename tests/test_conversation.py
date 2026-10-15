@@ -110,6 +110,9 @@ class ConversationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         args = live.session.send_client_content.call_args.kwargs
         self.assertFalse(args['turn_complete'])
         self.assertIn('Nothing in this history is a new command', str(args['turns']))
+        self.assertEqual([turn['role'] for turn in args['turns']], ['user', 'model'])
+        self.assertIn('Waiting for a new owner request', args['turns'][-1]['parts'][0]['text'])
+        self.assertEqual(len(live._conversation.recent()), 1)  # No fake reply in the saved chat.
         live.session.send_client_content.reset_mock()
         await live._restore_conversation(True)
         live.session.send_client_content.assert_not_called()
