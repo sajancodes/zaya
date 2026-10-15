@@ -208,8 +208,10 @@ messages remain queued until your request and reply finish; speaking during a
 local announcement stops it and returns the speaker to your conversation.
 The microphone sender supplies a short generated quiet tail when echo filtering
 pauses capture, so the provider can finish detecting your sentence. This quiet
-padding contains no recorded microphone audio. A stalled voice reply reconnects
-with saved context; active tools are allowed to finish and are never replayed.
+padding contains no recorded microphone audio. A stalled voice reply discards
+the stuck provider checkpoint and restores the same saved chat once. If that
+fresh connection also stalls, recovery stops with a visible error. Repeat your
+request after reconnecting; old actions are never replayed automatically.
 
 During your speech or Zaya's speech, background computer audio drops to 20% of
 its previous level by default. Zaya's voice receives mixer priority; previous
@@ -266,10 +268,18 @@ blindly repeated; safe recoverable failures have a bounded retry policy.
 
 ## Browser automation and recovery
 
-Simple open/search requests can launch your normal browser with its existing
-profile. Interactive actions use Playwright. For verified navigation, Zaya
-compares the observed URL with the requested destination; a redirect to login
-is not proof that the intended page opened.
+Simple open/search/new-tab requests launch your normal browser with its existing
+profile and sign-ins. Set `"preferred_browser": "brave"` in local
+`config/api_keys.json` to prefer Brave; a spoken request for another browser
+overrides it. Without a preference, the system default is used. A running
+automation session or a request to verify the URL cannot redirect an ordinary
+open request into a separate profile. `git_control open_remote` also opens the
+exact repository in your regular browser.
+
+Native launch is reported as unverified because it cannot inspect the browser's
+page or login. Interactive website tasks use explicit `mode: "automation"` and
+Playwright. There, Zaya compares the observed URL with the requested destination;
+a redirect to login is not proof that the intended page opened.
 
 When an automation window closes, Zaya invalidates the cached context and can
 relaunch it on the next request. Surviving tabs are reused, simultaneous page
@@ -299,6 +309,18 @@ Announcements describe newly observed messages and wait for a quiet interval.
 | Observation/monitoring | Announce and inspect observed messages; do not automatically send replies. |
 | Draft | Prepare replies for owner review. |
 | Auto | Handle an explicitly enabled chat as Zaya; uncertain or important replies can be held for review. |
+
+Say **“WhatsApp auto”**, **“WhatsApp auto mode”**, or **“enable WhatsApp auto
+replies”** to turn on quiet assistant replies for current and future direct
+chats. Zaya does not read those messages aloud. Groups and explicitly paused
+chats are excluded. No old messages are automatically answered. Say **“stop
+WhatsApp auto”** to return direct chats to observation and spoken notifications
+for new messages. Name a contact to change only that conversation instead.
+
+Every automatic reply is labeled **Zaya · Sajan Rai’s AI assistant**. Requests
+requiring the owner's judgment remain in the inbox for review. Automatic
+sending requires the complete native live feed; an offline connection is
+reported as incomplete instead of claiming replies are running.
 
 Manual owner replies pause automatic handling. Use `stop_auto` to return a chat
 to observation and `mute_alerts` to silence its announcements. Replies identify

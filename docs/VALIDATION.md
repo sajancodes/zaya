@@ -245,3 +245,29 @@ new contacts, restart persistence, quiet previews, global stop, group/paused
 exclusion, manual takeover, mode changes during generation, exact-chat scope,
 offline reporting and rejection of non-owner mode changes. Transport is mocked;
 these tests send no actual WhatsApp messages.
+
+## Regular Brave profile for ordinary links
+
+The owner supplied a Brave screenshot showing GitHub signed out and a 404 for
+the private repository. Navigation previously switched to Playwright whenever
+`verify=true` or a cached automation session existed; `git_control open_remote`
+always set `verify=true`. That could silently select the separate automation
+profile after a regular-profile lock failure.
+
+Opening, searching and new tabs now default to native launch, independent of
+cached sessions and `verify`. Only explicit `mode=automation` navigates a
+controlled profile. A saved `preferred_browser` is honored, with explicit owner
+browser choices overriding it. Repository opening passes the exact URL to the
+native route. Native launches do not claim verified navigation or authentication.
+No cookies are read/copied and no regular browser is closed or relaunched with
+debugging flags. Seven tests cover native routing with a cached session and
+verify flag, preferred/explicit browsers, the actual Brave launch argument list,
+explicit automation, launch failure, Git remote routing and non-owner rejection.
+
+The local preferred browser was set to Brave while preserving the other private
+settings. A real native launch of the exact GitHub repository used the installed
+Brave executable with only the URL, without automation/profile/debug flags. The
+launch is verified as submitted, not as authenticated access to the private page.
+All 179 local tests, Ruff error checks and Git whitespace checks passed after
+these changes. Hosted GitHub checks remain blocked by the account's billing
+limit recorded earlier; local results are separate from hosted checks.

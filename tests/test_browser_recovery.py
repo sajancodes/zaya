@@ -167,7 +167,7 @@ class BrowserRecoveryTests(unittest.IsolatedAsyncioTestCase):
         registry.has.return_value = True
         registry.get.return_value = session
         with patch('actions.browser_control._registry', registry):
-            result = browser_control({'action': 'go_to', 'url': 'https://example.com'})
+            result = browser_control({'action': 'go_to', 'url': 'https://example.com', 'mode': 'automation'})
         self.assertEqual(result.status, 'failed')
         self.assertIn(CLOSED, result.evidence[0]['error'])
         self.assertFalse(result.retryable)

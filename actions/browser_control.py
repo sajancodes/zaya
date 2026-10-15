@@ -1014,9 +1014,12 @@ def browser_control(
     player=None,
     session_memory=None,
 ) -> str:
+    from core.execution_policy import require_owner
+    require_owner()
+    from memory.config_manager import load_api_keys
     params  = parameters or {}
     action  = params.get("action", "").lower().strip()
-    browser = params.get("browser", "").lower().strip() or None
+    browser = (params.get("browser") or load_api_keys().get('preferred_browser') or '').lower().strip() or None
     result  = "Unknown action."
 
     if action == "switch":
@@ -1041,14 +1044,14 @@ def browser_control(
         _log(player, result)
         return result
 
-    # ── Navigation is ALWAYS native ──────────────────────────────────────────
-    # go_to / search / new_tab open the site in the user's own browser —
-    # their own profile, logged-in accounts and start page; exactly as if the
-    # user had opened it themselves. A controlled window with about:blank never
-    # opens here. The only exception: if an automation flow is already running,
-    # navigation continues in that window (so multi-step tasks aren't split).
+    # Opening a site must not silently switch profiles because an automation
+    # session exists or the caller wants verification. Only an explicit
+    # automation workflow navigates the controlled profile.
     if action in ("go_to", "search", "new_tab"):
-        if params.get("verify") or _registry.has(browser):
+        mode = params.get('mode', 'native')
+        if mode not in {'native', 'automation'}:
+            return _browser_failure(action, 'Browser mode must be native or automation.', browser)
+        if mode == 'automation':
             sess = _registry.get(browser)
             try:
                 if action == "search":
@@ -1072,13 +1075,19 @@ def browser_control(
         else:
             nav_url = params.get("url", "").strip()
 
-        result = _open_native(nav_url, browser)
+        try:
+            result = _open_native(nav_url, browser)
+        except (ValueError, OSError) as error:
+            return _browser_failure(action, error, browser)
         if result.startswith("Opened") and nav_url:
             _registry.note_native_url(_normalize_url(nav_url))
         _log(player, result)
         from core.tool_result import ToolResult
-        return ToolResult("partial", str(result), {"requested_url": nav_url, "verified": False},
-                          [{"browser_launch_requested": True}], side_effect=True)
+        opened = result.startswith('Opened')
+        return ToolResult("partial" if opened else 'failed', str(result),
+                          {"requested_url": nav_url, "verified": False, 'mode': 'native', 'browser': browser or 'system_default',
+                           'profile': 'regular browser profile', 'launch_requested': opened},
+                          [{"browser_launch_requested": opened}], side_effect=opened)
 
     # ── Interactive actions (click/type/read…) ───────────────────────────────
     # These require a physically controllable browser; the automation window
@@ -1150,11 +1159,12 @@ def _log(player, text: str):
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "browser_control",
-    "description": "Controls any web browser. Use for: opening websites, searching the web, clicking elements, filling forms, scrolling, screenshots, navigation, any web-based task. Simple open/search requests launch the user's own browser normally (their real profile and logged-in accounts); interactive actions (click, type, fill_form...) attach an automation browser. Always pass the 'browser' parameter when the user specifies a browser (e.g. 'open in Edge', 'use Firefox', 'open Chrome'). Multiple browsers can run simultaneously.",
+    "description": "Controls browsers. Ordinary open/search/new-tab requests use mode native (default), launching the installed browser with its regular profile and existing sign-ins, even if an automation session already exists. The saved preferred browser applies unless the owner specifies another. Native launch reports unverified destination; do not open automation merely to verify an ordinary open request. Use mode automation explicitly only for a requested interactive website task that needs Playwright click/type/read/form actions. Automation may use a separate signed-out profile; never claim it shares the owner's login. Always pass browser when the owner specifies it.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "verify": {"type": "BOOLEAN", "description": "Use an automation session and verify exact destination URL."},
+            "verify": {"type": "BOOLEAN", "description": "Verify URL within an explicitly selected automation session. Does not change the browser mode or profile."},
+            "mode": {"type": "STRING", "enum": ["native", "automation"], "description": "Default native opens the user's regular signed-in browser. Explicit automation selects the controlled browser for interactive website work."},
             "action": {
                 "type": "STRING",
                 "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
