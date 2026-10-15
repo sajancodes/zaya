@@ -17,9 +17,25 @@ from playwright.async_api import (
     BrowserContext,
     Page,
     Playwright,
+    Error as PlaywrightError,
     TimeoutError as PlaywrightTimeout,
 )
 _OS = platform.system()   # "Windows" | "Darwin" | "Linux"
+
+
+def _closed_target(error) -> bool:
+    return isinstance(error, PlaywrightError) and any(text in str(error).lower() for text in (
+        'target page, context or browser has been closed', 'browser has been closed'))
+
+
+def _browser_failure(action, error, browser=None):
+    from core.audit import redact
+    from core.tool_result import ToolResult
+    detail = redact(str(error))
+    evidence = {'action': action, 'browser': browser, 'error': detail}
+    return ToolResult('failed', f'Browser {action} failed: {detail}', evidence, [dict(evidence)],
+                      side_effect=action in {'go_to', 'search', 'new_tab', 'click', 'type', 'press',
+                                             'smart_click', 'smart_type', 'fill_form'})
 
 def _normalize_url(url: str) -> str:
     from core.site_registry import resolve_url
@@ -446,6 +462,7 @@ class _BrowserSession:
         self._pw:      Playwright     | None = None
         self._context: BrowserContext | None = None
         self._page:    Page           | None = None
+        self._launch_lock = None
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -479,17 +496,35 @@ class _BrowserSession:
             asyncio.run_coroutine_threadsafe(self._async_close(), self._loop).result(10)
 
     async def _async_close(self):
-        if self._context:
+        context, driver = self._context, self._pw
+        self._forget_context(context)
+        self._pw = None
+        if context:
             try:
-                await self._context.close()
+                await context.close()
             except Exception:
                 pass
-        if self._pw:
+        if driver:
             try:
-                await self._pw.stop()
+                await driver.stop()
             except Exception:
                 pass
-        self._context = self._page = None
+
+    def _forget_context(self, context):
+        # A delayed close event from an old window must not clear its replacement.
+        if self._context is context:
+            self._context = self._page = None
+            from core.site_registry import browser_state
+            if browser_state.get('browser') == self.browser_name:
+                browser_state.update(verified=False, connected=False)
+
+    async def _discard_context(self, context):
+        self._forget_context(context)
+        if context:
+            try:
+                await context.close()
+            except PlaywrightError:
+                pass
 
     async def _adopt_page(self) -> Page:
         """
@@ -497,11 +532,32 @@ class _BrowserSession:
         Instead of opening a new blank tab (about:blank), it adopts that tab —
         so the user never sees an extra blank tab.
         """
+        context = self._context
+        context.on('close', lambda *_: self._forget_context(context))
+        if context.browser:
+            context.browser.on('disconnected', lambda *_: self._forget_context(context))
         await asyncio.sleep(0.3)
-        pages = self._context.pages
-        return pages[0] if pages else await self._context.new_page()
+        pages = [page for page in context.pages if not page.is_closed()]
+        return pages[0] if pages else await context.new_page()
 
     async def _launch(self):
+        if self._launch_lock is None:
+            self._launch_lock = asyncio.Lock()
+        async with self._launch_lock:
+            if self._context is not None:
+                browser = self._context.browser
+                if browser is None or browser.is_connected():
+                    return
+                self._forget_context(self._context)
+            if self._pw is None:
+                await self._async_init()
+            try:
+                await self._launch_context()
+            except Exception:
+                await self._discard_context(self._context)
+                raise
+
+    async def _launch_context(self):
         """
         Launches the browser with the real user profile.
         Does nothing if the context is already open.
@@ -613,46 +669,55 @@ class _BrowserSession:
 
 
     async def _get_page(self) -> Page:
-        await self._launch()
-        # If somehow page got closed, open a fresh one
-        if self._page is None or self._page.is_closed():
-            self._page = await self._context.new_page()
-            await asyncio.sleep(0.2)
-        return self._page
+        # Recovery here happens before any click/type/submit can take effect.
+        for attempt in range(2):
+            context = None
+            try:
+                await self._launch()
+                context = self._context
+                if context is None:
+                    raise PlaywrightError('Target page, context or browser has been closed')
+                if self._page is None or self._page.is_closed():
+                    pages = [page for page in context.pages if not page.is_closed()]
+                    self._page = pages[-1] if pages else await context.new_page()
+                return self._page
+            except PlaywrightError as error:
+                if not _closed_target(error) or attempt:
+                    raise
+                await self._discard_context(context)
 
     async def go_to(self, url: str) -> str:
-
-        url      = _normalize_url(url)
-        page     = await self._get_page()
-        prev_url = page.url
-
-        async def _do_goto(p: Page) -> str:
-            """Attempt navigation and return the resulting URL (may still be blank)."""
+        url = _normalize_url(url)
+        result_url = ''
+        for attempt in range(2):
+            page = await self._get_page()
             try:
-                await p.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                await asyncio.sleep(0.3)
-            except PlaywrightTimeout:
-                pass   # page may have partially loaded — check URL below
-            except Exception as e:
-                print(f"[Browser] goto exception (non-fatal): {e}")
-            return p.url
-
-        result_url = await _do_goto(page)
-
-        if result_url in ("about:blank", "", None, prev_url) and prev_url in ("about:blank", "", None):
-            print(f"[Browser] Still blank after goto — retrying on new tab: {url}")
-            try:
-                new_page   = await self._context.new_page()
-                self._page = new_page
-                result_url = await _do_goto(new_page)
-            except Exception as e:
-                print(f"[Browser] New-tab retry failed: {e}")
+                try:
+                    await page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+                    await asyncio.sleep(.3)
+                except PlaywrightTimeout:
+                    pass  # Verify the resulting URL even after a slow load.
+                if page.is_closed():
+                    raise PlaywrightError('Target page, context or browser has been closed')
+                result_url = page.url
+                if result_url not in ('about:blank', '', None) or attempt:
+                    break
+                self._page = await page.context.new_page()
+            except PlaywrightError as error:
+                if not _closed_target(error) or attempt:
+                    return _browser_failure('go_to', error, self.browser_name)
+                # Only explicit navigation is repeated, never a click or form.
+                context = page.context
+                if self._context is context and any(not p.is_closed() for p in context.pages):
+                    self._page = None  # Reuse surviving tabs; do not close them.
+                else:
+                    await self._discard_context(context)
 
         from core.site_registry import matches, browser_state
         from core.tool_result import ToolResult
         verified = matches(url, result_url or "")
         browser_state.update(browser=self.browser_name, current_url=result_url,
-                             last_exact_navigation=url, verified=verified)
+                             last_exact_navigation=url, verified=verified, connected=True)
         return ToolResult("success" if verified else "failed",
                           "Navigation verified." if verified else "Browser URL does not match requested destination.",
                           dict(browser_state), [{"expected_url": url, "current_url": result_url}],
@@ -675,6 +740,8 @@ class _BrowserSession:
         except PlaywrightTimeout:
             return "Element not found (timeout)."
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Click error: {e}"
 
     async def type_text(self, selector: str = None, text: str = "",
@@ -687,6 +754,8 @@ class _BrowserSession:
             await el.type(text, delay=50)
             return "Text typed."
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Type error: {e}"
 
     async def scroll(self, direction: str = "down", amount: int = 500) -> str:
@@ -696,6 +765,8 @@ class _BrowserSession:
             await page.mouse.wheel(0, y)
             return f"Scrolled {direction}."
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Scroll error: {e}"
 
     async def press(self, key: str) -> str:
@@ -704,6 +775,8 @@ class _BrowserSession:
             await page.keyboard.press(key)
             return f"Pressed: {key}"
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Key error: {e}"
 
     async def get_text(self) -> str:
@@ -712,6 +785,8 @@ class _BrowserSession:
             text = await page.inner_text("body")
             return text[:4_000]
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Could not get page text: {e}"
 
     async def get_url(self) -> str:
@@ -728,6 +803,8 @@ class _BrowserSession:
                 await el.type(str(value), delay=40)
                 results.append(f"✓ {selector}")
             except Exception as e:
+                if _closed_target(e):
+                    raise
                 results.append(f"✗ {selector}: {e}")
         return "Form filled: " + ", ".join(results)
 
@@ -739,7 +816,9 @@ class _BrowserSession:
                 if await loc.count() > 0:
                     await loc.first.click(timeout=5_000)
                     return f"Clicked ({role}): '{description}'"
-            except Exception:
+            except Exception as error:
+                if _closed_target(error):
+                    raise
                 pass
         for attempt in (
             lambda: page.get_by_text(description, exact=False).first.click(timeout=5_000),
@@ -752,7 +831,9 @@ class _BrowserSession:
             try:
                 await attempt()
                 return f"Clicked: '{description}'"
-            except Exception:
+            except Exception as error:
+                if _closed_target(error):
+                    raise
                 pass
         return f"Could not find element: '{description}'"
 
@@ -773,7 +854,9 @@ class _BrowserSession:
                 await el.clear()
                 await el.type(text, delay=50)
                 return f"Typed into ({method}): '{description}'"
-            except Exception:
+            except Exception as error:
+                if _closed_target(error):
+                    raise
                 continue
         return f"Could not find input: '{description}'"
 
@@ -803,6 +886,8 @@ class _BrowserSession:
             await page.screenshot(path=save_path, full_page=False)
             return f"Screenshot saved: {save_path}"
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Screenshot error: {e}"
 
     async def back(self) -> str:
@@ -811,6 +896,8 @@ class _BrowserSession:
             await page.go_back(timeout=10_000)
             return f"Navigated back: {page.url}"
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Back error: {e}"
 
     async def forward(self) -> str:
@@ -819,6 +906,8 @@ class _BrowserSession:
             await page.go_forward(timeout=10_000)
             return f"Navigated forward: {page.url}"
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Forward error: {e}"
 
     async def reload(self) -> str:
@@ -827,6 +916,8 @@ class _BrowserSession:
             await page.reload(timeout=15_000)
             return f"Page reloaded: {page.url}"
         except Exception as e:
+            if _closed_target(e):
+                raise
             return f"Reload error: {e}"
 
     async def close_browser(self) -> str:
@@ -968,9 +1059,9 @@ def browser_control(
                 else:
                     result = sess.run(sess.go_to(params.get("url", "")))
             except concurrent.futures.TimeoutError:
-                result = f"Browser action '{action}' timed out (60s)."
+                result = _browser_failure(action, 'Timed out after 60s.', browser)
             except Exception as e:
-                result = f"Browser error ({action}): {e}"
+                result = _browser_failure(action, e, browser)
             _log(player, result)
             return result
 
@@ -996,7 +1087,7 @@ def browser_control(
     try:
         sess = _registry.get(browser)
     except Exception as e:
-        result = f"Could not start browser session: {e}"
+        result = _browser_failure(action, e, browser)
         _log(player, result)
         return result
 
@@ -1041,9 +1132,9 @@ def browser_control(
             result = f"Unknown browser action: '{action}'"
 
     except concurrent.futures.TimeoutError:
-        result = f"Browser action '{action}' timed out (60s)."
+        result = _browser_failure(action, 'Timed out after 60s.', browser)
     except Exception as e:
-        result = f"Browser error ({action}): {e}"
+        result = _browser_failure(action, e, browser)
 
     _log(player, result)
     return result

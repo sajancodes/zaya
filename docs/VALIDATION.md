@@ -48,3 +48,23 @@ Before repairing the private inbox, a SQLite backup was saved under the ignored
 `memory/backups/` directory. To restore it, close Zaya and its owned bridge,
 preserve the current database, and restore the chosen backup together with a
 compatible source version. Never remove or replace Hermes pairing credentials.
+
+## Browser closed-context recovery
+
+The attached audit excerpt recorded browser errors as `partial`, without error
+evidence. Closing an isolated persistent Chromium context and calling
+`_get_page()` reproduced `BrowserContext.new_page: Target page, context or
+browser has been closed`: `_launch()` reused the non-null but dead context.
+
+Context-close and browser-disconnect events now invalidate that context. Page
+acquisition and explicit navigation have bounded recovery; surviving tabs are
+reused and concurrent acquisitions share one launch. Delayed close events cannot
+clear a replacement context. Explicit close also clears the stopped Playwright
+driver so reopening can initialize it again. Clicks, typing and form submissions
+are never replayed by this recovery. Closed-target failures return `failed` with
+redacted exception evidence in the runtime log, instead of legacy `partial` text.
+
+`tests/test_browser_recovery.py` exercises real isolated persistent Chromium
+sessions, local HTTP navigation after closure, tab reuse and concurrent launch,
+plus bounded failure recovery, non-replayed clicks and error-result evidence.
+No personal browser profile or signed-in account is used by these tests.
