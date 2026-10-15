@@ -1,10 +1,6 @@
 """
-Play a video where the avatar normally is.
-
-The HUD already had a surface for this — the live camera takes the centre of
-the screen and gives it back — so a video is the same idea with a different
-source, and it shares the same stack rather than inventing a second one. That
-means the avatar, the camera and a video can never be on screen together.
+Play media in a dedicated desktop display window alongside the companion.
+Settings and the taskbar character remain available during playback.
 
 WHAT IT ACCEPTS
     a local file        C:\\Users\\me\\clip.mp4, ~/Videos/holiday.mkv
@@ -16,11 +12,9 @@ WHAT IT ACCEPTS
     to something playable first, which is what yt-dlp does; without it, this
     says so and offers to open the video in the browser instead of failing.
 
-SOUND IS OFF UNTIL ASKED FOR
-    A soundtrack talking over the assistant is the one way this feature could
-    make JARVIS worse rather than better, and the microphone is open while it
-    plays. So it starts muted, and the user turns sound on — from the button in
-    the video header, or by saying so. Closing it works both ways too.
+SOUND AND MICROPHONE
+    Playback opens in its own window with sound on. The microphone remains
+    active; media does not automatically mute either the sound or the mic.
 """
 from __future__ import annotations
 
@@ -201,13 +195,13 @@ def video_player(parameters: dict = None, response=None, player=None,
 
     local = _local_path(source)
     if local:
-        player.show_video(local, Path(local).name, muted=True)
-        return f"Playing {Path(local).name} on the display, muted."
+        player.show_video(local, Path(local).name, muted=False)
+        return f"Playing {Path(local).name} in its own display window with sound on."
 
     # A direct media URL can go straight to the player; a YouTube page cannot.
     if _is_url(source) and not _YT.search(source):
-        player.show_video(source, source.rsplit("/", 1)[-1][:44], muted=True)
-        return "Playing that on the display, muted."
+        player.show_video(source, source.rsplit("/", 1)[-1][:44], muted=False)
+        return "Playing that in its own display window with sound on."
 
     # ANSWER FIRST, OPEN SECOND.
     #
@@ -242,7 +236,7 @@ def _play_youtube(player, source: str, token: int) -> None:
 
     if url:
         try:
-            player.show_video(url, title or source, muted=True,
+            player.show_video(url, title or source, muted=False,
                               audio_source=audio_url)
             return
         except Exception as e:                              # noqa: BLE001
@@ -277,15 +271,14 @@ TOOL = {
     "description": (
         "If user wants to open a video on YouTube, he will tell you that specifically"
         "If user wants to play a video, then he wants to call this feature"
-        "Plays a VIDEO on the assistant's own display, where the avatar "
-        "normally is — and stops it, mutes it or unmutes it. Use whenever the "
+        "Plays a VIDEO in a separate resizable display window with sound on "
+        "and Zaya's microphone active. Can stop or explicitly mute/unmute it. Use whenever the "
         "user wants to WATCH something on screen: 'play the new Dune trailer', "
         "'şu videoyu oynat', 'play C:/clips/holiday.mp4', 'put that YouTube "
         "video on the screen', 'stop the video', 'videoyu kapat', 'turn the "
         "sound on', 'sesi aç', 'mute it'. Accepts a local file path, a direct "
         "video URL, a YouTube link, or a description to search YouTube for. "
-        "Video always starts MUTED — only call action='unmute' when the user "
-        "actually asks to hear it. "
+        "Video always starts UNMUTED. Do not automatically mute media or the microphone. "
         "This returns the moment it is asked, before the picture appears: when "
         "it answers 'status=opening', say in one short sentence that you are "
         "putting it on the display, and do not wait or call it again. "

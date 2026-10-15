@@ -46,8 +46,9 @@ is for owner-authorized execution; it is not an operating-system sandbox.
 ## Taskbar character
 
 Running `main.py` also starts a transparent taskbar companion. Set your PNG/GIF
-paths in `zayabar.json`; right-click the character to open the existing full
-window. Standby GIFs, thinking pictures, response expressions and double-click
+paths in `zayabar.json`; right-click the character to open combined Settings &
+Controls. Media uses its own resizable window with sound on and the microphone
+active. Standby GIFs, thinking pictures, response expressions and double-click
 Nika reactions are supported. Until images are supplied, a small placeholder
 appears. See [character configuration](docs/ZAYABAR.md) for paths and controls.
 

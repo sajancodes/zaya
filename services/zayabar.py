@@ -65,9 +65,9 @@ class ZayaBar(QWidget):
             icon = QPixmap(40, 40)
             icon.fill(QColor('#42d5cb'))
             self.tray = QSystemTrayIcon(QIcon(icon), self)
-            self.tray.setToolTip('Zaya — right-click character to open your window')
+            self.tray.setToolTip('Zaya — Settings & Controls')
             menu = QMenu()
-            menu.addAction('Open Zaya', self.open_main_window)
+            menu.addAction('Settings & Controls', self.open_main_window)
             menu.addAction('Character configuration…', self.open_config)
             menu.addAction('Reload zayabar.json', self.reload_config)
             menu.addAction('Mute / unmute microphone', main_window._toggle_mute)
@@ -76,7 +76,7 @@ class ZayaBar(QWidget):
             self.tray.setContextMenu(menu)
             self.tray.activated.connect(lambda reason: self.open_main_window() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
             self.tray.show()
-        self.setToolTip('Zaya • right-click: full window • double-click: poke • drag: move')
+        self.setToolTip('Zaya • right-click: settings & controls • double-click: poke • drag: move')
 
     def open_main_window(self):
         self.main_window.showNormal()

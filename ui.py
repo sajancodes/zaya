@@ -3100,10 +3100,7 @@ class MainWindow(QMainWindow):
             """)
             return b
 
-        # Muted is the default and the button says so, because a soundtrack
-        # talking over JARVIS is the one way this feature could make the
-        # assistant worse rather than better.
-        self._video_mute_btn = _vid_btn("🔇  SOUND OFF")
+        self._video_mute_btn = _vid_btn("🔊  SOUND ON")
         self._video_mute_btn.clicked.connect(self._toggle_video_mute)
         _vid_hdr.addWidget(self._video_mute_btn)
 
@@ -3138,7 +3135,7 @@ class MainWindow(QMainWindow):
             _vid_v.addWidget(self._video_widget, stretch=1)
 
             self._video_audio = QAudioOutput()
-            self._video_audio.setMuted(True)
+            self._video_audio.setMuted(False)
             self._video_player = QMediaPlayer()
             self._video_player.setVideoOutput(self._video_item)
             # Keep the picture filling the view as the window is resized.
@@ -3159,7 +3156,7 @@ class MainWindow(QMainWindow):
             # alone: one stream, one player, nothing to synchronise.
             self._video_sound = QMediaPlayer()
             self._video_sound_out = QAudioOutput()
-            self._video_sound_out.setMuted(True)
+            self._video_sound_out.setMuted(False)
             self._video_sound.setAudioOutput(self._video_sound_out)
 
             self._video_sync = QTimer(self)
@@ -3273,8 +3270,65 @@ class MainWindow(QMainWindow):
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
 
+    def configure_desktop_interface(self):
+        """Reuse existing settings/control handlers without displaying the HUD."""
+        from services.desktop_windows import DisplayWindow
+        self._desktop_mode = True
+        legacy = self.takeCentralWidget()
+        legacy.hide()
+        legacy.setParent(self)
+        self._legacy_surface = legacy
+        self.setWindowTitle('Zaya — Settings & Controls')
+        self.setMinimumSize(520, 440)
+        self.resize(640, min(600, self.screen().availableGeometry().height() - 60))
+        panel = QWidget()
+        outer = QVBoxLayout(panel)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        columns = QHBoxLayout(body)
+        columns.addWidget(self._quick_drawer, alignment=Qt.AlignmentFlag.AlignTop)
+        columns.addWidget(self._ctrl_drawer, alignment=Qt.AlignmentFlag.AlignTop)
+        self._quick_drawer.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._ctrl_drawer.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._quick_drawer.show()
+        self._ctrl_drawer.show()
+        self._hud_btn.hide()
+        self._ctrl_drawer.layout().addWidget(self._mute_btn)
+        stop_speech = QPushButton('STOP SPEAKING')
+        stop_speech.clicked.connect(self._do_interrupt)
+        self._ctrl_drawer.layout().addWidget(stop_speech)
+        history = QPushButton('CONVERSATION HISTORY')
+        self._history_window = DisplayWindow('Zaya — Conversation', self._log, self)
+        history.clicked.connect(self._history_window.show)
+        self._ctrl_drawer.layout().addWidget(history)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(self._drop_zone)
+        outer.addLayout(self._build_input_row())
+        self.setCentralWidget(panel)
+        panel.setStyleSheet(f'background: {C.BG}; color: {C.TEXT};')
+        self._media_window = DisplayWindow('Zaya — Media Display', self._video_cont, self, self._fit_video)
+        self._media_window.closed.connect(self._on_video_close)
+        self._camera_window = DisplayWindow('Zaya — Camera', self._hud_cam_stack.widget(1), self)
+        self._camera_window.closed.connect(self.stop_camera_stream)
+        results = QWidget()
+        results_layout = QVBoxLayout(results)
+        results_layout.addWidget(self._content_panel)
+        results_layout.addWidget(self._quiz_panel)
+        self._results_window = DisplayWindow('Zaya — Display', results, self)
+        if not self._ready:
+            if self._overlay:
+                self._overlay.hide()
+                self._overlay.deleteLater()
+            self._show_setup()
+
     def _show_camera_frame(self, img_bytes: bytes):
         """Slot — display camera preview overlay (main thread)."""
+        if getattr(self, '_desktop_mode', False):
+            self._camera_window.show()
+            self._on_cam_frame(img_bytes)
+            return
         self._cam_preview.show_frame(img_bytes)
         cw = self.centralWidget()
         pw = _CameraPreview._W
@@ -3287,6 +3341,11 @@ class MainWindow(QMainWindow):
 
     # --- Live camera stream in HUD area ------------------------------------
     def _on_cam_stream(self, start: bool) -> None:
+        if getattr(self, '_desktop_mode', False):
+            self._camera_window.setVisible(bool(start))
+            if not start:
+                self._cam_live_lbl.clear()
+            return
         if start:
             self._hud_cam_stack.setCurrentIndex(1)
         else:
@@ -3364,14 +3423,21 @@ class MainWindow(QMainWindow):
 
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
-        self._set_video_muted(bool(muted))
+        self._set_video_muted(False)
+        self._video_auto_muted = False
+        self._set_muted(False)
 
         url = (QUrl.fromLocalFile(source) if Path(source).exists()
                else QUrl(source))
         self._video_player.setSource(url)
         if self._video_split:
             self._video_sound.setSource(QUrl(audio_source))
-        self._hud_cam_stack.setCurrentIndex(2)
+        if getattr(self, '_desktop_mode', False):
+            self._media_window.setWindowTitle('Zaya — ' + (title or 'Media Display'))
+            self._media_window.show()
+            self._media_window.raise_()
+        else:
+            self._hud_cam_stack.setCurrentIndex(2)
         self._video_on = True
         # Re-run now that the video counts as playing: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
@@ -3400,6 +3466,8 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_video_close(self) -> None:
+        if getattr(self, '_desktop_mode', False):
+            self._media_window.hide()
         if self._video_sync:
             self._video_sync.stop()
         for p in (self._video_player, self._video_sound):
@@ -3427,29 +3495,8 @@ class MainWindow(QMainWindow):
         self._set_video_muted(muted)
 
     def _sync_mic_for_video(self) -> None:
-        """Close the microphone while the video is making sound.
-
-        JARVIS subtracts its OWN output from the microphone — that is what
-        core/echo.py does — but a video plays through a different output
-        entirely, so the guard has never heard of it and the assistant answers
-        the film. There is no arrangement in which an open microphone and a
-        loudspeaker in the same room do not do that.
-
-        So the microphone closes for exactly as long as the sound is on, and
-        opens again by itself the moment it goes off or the video is closed.
-        Only if JARVIS closed it: a microphone the user muted themselves stays
-        muted, and pressing the mute key during a video hands the decision back
-        to them for good.
-        """
-        sound_on = bool(self._video_on and self._video_sound_out
-                        and not self._video_sound_out.isMuted())
-        if sound_on and not self._muted:
-            self._video_auto_muted = True
-            self._set_muted(True, "The video's sound is on — silence it, close "
-                                  "it, or press F4 to talk. Typing still works.")
-        elif not sound_on and self._video_auto_muted:
-            self._video_auto_muted = False
-            self._set_muted(False, "The video is quiet again.")
+        """Media never changes microphone state; the owner keeps control."""
+        self._video_auto_muted = False
 
     def _sync_video_sound(self) -> None:
         """Keep the separate soundtrack in step with the picture.
@@ -4373,18 +4420,24 @@ class MainWindow(QMainWindow):
             self._ctrl_drawer.hide()
 
     def _close_setup(self):
+        if getattr(self, '_desktop_mode', False):
+            return
         if hasattr(self, "_quick_drawer"):
             self._quick_drawer.hide()
         if hasattr(self, "_drawer_btn"):
             self._drawer_btn.setChecked(False)
 
     def _close_controls(self):
+        if getattr(self, '_desktop_mode', False):
+            return
         if hasattr(self, "_ctrl_drawer"):
             self._ctrl_drawer.hide()
         if hasattr(self, "_ctrl_btn"):
             self._ctrl_btn.setChecked(False)
 
     def _place_drawer(self, drawer, left: int):
+        if getattr(self, '_desktop_mode', False):
+            return
         _W = 220
         drawer.setFixedWidth(_W)
         drawer.adjustSize()
@@ -4527,6 +4580,8 @@ class MainWindow(QMainWindow):
         return w
 
     def _show_content(self, title: str, text: str):
+        if getattr(self, '_desktop_mode', False):
+            self._results_window.show()
         """Slot — runs on Qt main thread. Updates and shows the content panel."""
         import time as _time
         # The panel opens below the head, so the head looks down at it. It is a
@@ -4567,6 +4622,8 @@ class MainWindow(QMainWindow):
                 .replace(">", "&gt;").replace("\n", "<br>"))
 
     def _show_review(self, title: str, summary: str, findings, unclear):
+        if getattr(self, '_desktop_mode', False):
+            self._results_window.show()
         """Slot — Qt main thread. Lays a document review into the content panel."""
         e = self._esc
         parts = [f'<div style="color:{C.TEXT}; font-family:Courier New;">']
@@ -4740,6 +4797,8 @@ class MainWindow(QMainWindow):
         return w
 
     def _show_quiz(self, topic: str, questions, grader=None):
+        if getattr(self, '_desktop_mode', False):
+            self._results_window.show()
         """Slot — Qt main thread. Puts a fresh quiz on the board."""
         if not questions:
             return
@@ -5374,7 +5433,7 @@ class MainWindow(QMainWindow):
         """Update all name/theme-dependent UI elements and persist to config."""
         self._assistant_name = "Zaya"
         display = self._assistant_name.upper()
-        self.setWindowTitle(f"{display} — {APP_VERSION}")
+        self.setWindowTitle('Zaya — Settings & Controls' if getattr(self, '_desktop_mode', False) else f"{display} — {APP_VERSION}")
         self._title_lbl.setText(display)
         self._sub_lbl.setText("Built by Sajan Rai")
         self._log._ai_name_lc = self._assistant_name.lower()
@@ -5450,6 +5509,9 @@ class MainWindow(QMainWindow):
     # ── Irreversible-action confirmation ─────────────────────────────────────
 
     def _show_confirm_banner(self, title: str, detail: str):
+        if getattr(self, '_desktop_mode', False):
+            self.showNormal()
+            self.raise_()
         self._hide_confirm_banner()
         ov = ConfirmBanner(title, detail, parent=self.centralWidget())
         ov.answered.connect(self._on_confirm_answered)
@@ -5597,6 +5659,8 @@ class MainWindow(QMainWindow):
             return False
 
     def _show_setup(self):
+        if getattr(self, '_desktop_mode', False):
+            self.showNormal()
         ov = SetupOverlay(self.centralWidget())
         cw = self.centralWidget()
         ow, oh = 460, 390
@@ -5638,6 +5702,7 @@ class JarvisUI:
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
         self._win = MainWindow(face_path)
+        self._win.configure_desktop_interface()
         self.root = _RootShim(self._app)
         self._bar = None
         self.on_companion_reaction = None
@@ -5869,9 +5934,9 @@ class JarvisUI:
         """Thread-safe: show a webcam frame in the small overlay (screen captures)."""
         self._win._camera_sig.emit(img_bytes)
 
-    def show_video(self, source: str, title: str = "", muted: bool = True,
+    def show_video(self, source: str, title: str = "", muted: bool = False,
                    audio_source: str = "") -> None:
-        """Thread-safe: play a video where the avatar normally is.
+        """Thread-safe: play media with sound in a dedicated desktop window.
 
         `source` is a local path or a direct media URL. `audio_source` is for
         the case where the sound arrives as its own stream — YouTube serves no
@@ -5887,7 +5952,7 @@ class JarvisUI:
                                        bool(muted), str(audio_source or ""))
 
     def stop_video(self) -> None:
-        """Thread-safe: close the video and give the HUD back to the avatar."""
+        """Thread-safe: stop playback and close its separate display window."""
         self._win._video_close_sig.emit()
 
     def set_video_muted(self, muted: bool) -> None:

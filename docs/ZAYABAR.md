@@ -2,9 +2,14 @@
 
 Run `python main.py` as usual. The taskbar character loads alongside the existing
 assistant, audio, WhatsApp, tools and reminders. Right-click the character to
-open the original full Zaya window. Closing that window leaves the companion
+open the combined Settings & Controls window. The previous dashboard/head
+interface is no longer displayed. Closing the controls window leaves the companion
 running; choose **Exit Zaya** from the tray icon to quit the application.
-First-time API setup still opens the original setup window.
+First-time API setup opens in the controls window. Media opens in its own
+resizable display, with sound on and the microphone active. Media playback
+never automatically mutes the microphone. Closing playback stops both video
+and its soundtrack. Camera, results and conversation history use their own
+windows when requested.
 
 Edit the root `zayabar.json` file to supply your own images. Blank paths display
 a small Zaya placeholder until your artwork is ready. There is no bundled anime
@@ -100,16 +105,16 @@ requires the configured Gemini API key and network access.
 
 All Zaya replies also appear in a cloud-shaped bubble above the character,
 including streamed speech, WhatsApp announcements and poke text. Long text is
-shortened with `........`; the complete reply remains in the original window.
-Raw tool logs are kept in that window rather than painted over your desktop.
+shortened with `........`; the complete reply remains in Conversation History,
+available from Settings & Controls. Raw tool logs stay in that history window.
 An active task shows a `Thinking...` cloud. The bubble does not capture clicks
 or keyboard focus. Configure `bubble_max_characters` (default 140),
 `bubble_duration_ms` (6500), and `bubble_max_width` (300) in `zayabar.json`.
 
 The app's existing proactive behavior and controls remain available in its
-original window.
+Settings & Controls window.
 
-To restore the original startup behavior, set `enabled` to `false`; or set
-`show_main_window_on_start` to `true` to display both interfaces on startup.
+Set `enabled` to `false` to run with the controls window only; or set
+`show_main_window_on_start` to `true` to show the controls and companion on startup.
 Your optional artwork can be kept under ignored `assets/zayabar/`. Configuration
 paths are local to your computer; do not stage personal path edits accidentally.
