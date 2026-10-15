@@ -553,7 +553,7 @@ class JarvisLive:
         except (ValueError, OSError):
             duck_config = None
         self._audio_ducker = AudioDucker(duck_config).start()
-        self.ui.on_shutdown = self._audio_ducker.close
+        self.ui.on_shutdown = self.shutdown
         import uuid
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = ""
@@ -874,6 +874,18 @@ class JarvisLive:
     def _tail_active(self) -> bool:
         """True while the speakers may still be finishing our last sentence."""
         return time.monotonic() < self._tail_until
+
+    def shutdown(self):
+        if getattr(self, '_shutdown_requested', False):
+            return
+        self._shutdown_requested = True
+        self._audio_ducker.close()
+        task = getattr(self, '_run_task', None)
+        if task and self._loop and not self._loop.is_closed():
+            try:
+                self._loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass  # The runner finished closing between the two checks.
 
     def set_speaking(self, value: bool):
         with self._speaking_lock:
@@ -2160,6 +2172,9 @@ class JarvisLive:
     # ── main loop ───────────────────────────────────────────────────────────
 
     async def run(self):
+        if getattr(self, '_shutdown_requested', False):
+            return
+        self._run_task = asyncio.current_task()
         self._loop = asyncio.get_event_loop()
         self._reconnect_event = asyncio.Event()
 
@@ -2279,6 +2294,8 @@ class JarvisLive:
                         self._briefing_sent = True
                         tg.create_task(self._send_startup_briefing())
 
+            except asyncio.CancelledError:
+                raise  # Close Zaya must stop, rather than enter the reconnect loop.
             except KeyboardInterrupt:
                 raise
             except SystemExit:
@@ -2411,20 +2428,40 @@ class JarvisLive:
             await asyncio.sleep(delay)
 
 def main():
-    ui = JarvisUI("face.png")
+    from PyQt6.QtWidgets import QApplication
+    from core.single_instance import SingleInstance
+    app = QApplication.instance() or QApplication(sys.argv)
+    instance = SingleInstance()
+    if not instance.acquire():
+        return
+    try:
+        ui = JarvisUI("face.png")
+        instance.on_activate = ui.activate_existing
+        stopping = threading.Event()
 
-    def runner():
-        ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
+        def runner():
+            if not ui.wait_for_api_key(stopping):
+                return
+            jarvis = JarvisLive(ui)
+            try:
+                if not stopping.is_set():
+                    asyncio.run(jarvis.run())
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                print("\n🔴 Shutting down...")
+            finally:
+                jarvis._audio_ducker.close()
+
+        worker = threading.Thread(target=runner, daemon=True)
+        worker.start()
         try:
-            asyncio.run(jarvis.run())
-        except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+            ui.root.mainloop()
         finally:
-            jarvis._audio_ducker.close()
-
-    threading.Thread(target=runner, daemon=True).start()
-    ui.root.mainloop()
+            stopping.set()
+            ui._shutdown_audio()
+            worker.join(timeout=2)
+    finally:
+        # Keep the lock until UI shutdown has restored audio and hidden Zaya.
+        instance.close()
 
 if __name__ == "__main__":
     main()

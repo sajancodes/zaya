@@ -60,23 +60,24 @@ class ZayaBar(QWidget):
         self.position_on_taskbar()
         self.load_media()
         self.preload_reactions()
+        self.context_menu = QMenu(self)
+        self.context_menu.addAction('Settings & Controls', self.open_main_window)
+        self.context_menu.addAction('Character configuration…', self.open_config)
+        self.context_menu.addAction('Reload zayabar.json', self.reload_config)
+        self.context_menu.addAction('Mute / unmute microphone', main_window._toggle_mute)
+        self.context_menu.addAction('Show companion', self.show)
+        self.context_menu.addSeparator()
+        self.context_menu.addAction('Close Zaya', QApplication.instance().quit)
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             icon = QPixmap(40, 40)
             icon.fill(QColor('#42d5cb'))
             self.tray = QSystemTrayIcon(QIcon(icon), self)
             self.tray.setToolTip('Zaya — Settings & Controls')
-            menu = QMenu()
-            menu.addAction('Settings & Controls', self.open_main_window)
-            menu.addAction('Character configuration…', self.open_config)
-            menu.addAction('Reload zayabar.json', self.reload_config)
-            menu.addAction('Mute / unmute microphone', main_window._toggle_mute)
-            menu.addAction('Show companion', self.show)
-            menu.addAction('Exit Zaya', QApplication.instance().quit)
-            self.tray.setContextMenu(menu)
+            self.tray.setContextMenu(self.context_menu)
             self.tray.activated.connect(lambda reason: self.open_main_window() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
             self.tray.show()
-        self.setToolTip('Zaya • right-click: settings & controls • double-click: poke • drag: move')
+        self.setToolTip('Zaya • right-click: settings or close • double-click: poke • drag: move')
 
     def open_main_window(self):
         self.main_window.showNormal()
@@ -84,7 +85,7 @@ class ZayaBar(QWidget):
         self.main_window.activateWindow()
 
     def contextMenuEvent(self, event):
-        self.open_main_window()
+        self.context_menu.popup(event.globalPos())
         event.accept()
 
     def position_on_taskbar(self):
@@ -366,6 +367,7 @@ class ZayaBar(QWidget):
         self.config_dialog = dialog
 
     def shutdown(self):
+        self.context_menu.close()
         self.bubble_timer.stop()
         self.bubble.close()
         for sound in self.sounds.values():

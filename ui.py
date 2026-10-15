@@ -3305,6 +3305,9 @@ class MainWindow(QMainWindow):
         self._history_window = DisplayWindow('Zaya — Conversation', self._log, self)
         history.clicked.connect(self._history_window.show)
         self._ctrl_drawer.layout().addWidget(history)
+        close_zaya = QPushButton('CLOSE ZAYA')
+        close_zaya.clicked.connect(QApplication.instance().quit)
+        self._ctrl_drawer.layout().addWidget(close_zaya)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         outer.addWidget(self._drop_zone)
@@ -5759,6 +5762,14 @@ class JarvisUI:
             self.on_shutdown()
         self._win._duck_media(False, 1.0)
 
+    def activate_existing(self):
+        if self._bar:
+            self._bar.show()
+            self._bar.raise_()
+        self._win.showNormal()
+        self._win.raise_()
+        self._win.activateWindow()
+
     def _bar_audio_activity(self, active):
         if self.on_companion_audio_activity:
             self.on_companion_audio_activity(active)
@@ -5919,9 +5930,14 @@ class JarvisUI:
     def write_log(self, text: str):
         self._win._log_sig.emit(text)
 
-    def wait_for_api_key(self):
+    def wait_for_api_key(self, stop_event=None):
         while not self._win._ready:
-            time.sleep(0.1)
+            if stop_event:
+                if stop_event.wait(.1):
+                    return False
+            else:
+                time.sleep(.1)
+        return not (stop_event and stop_event.is_set())
 
     def show_content(self, title: str, text: str):
         """Thread-safe: display content in the panel below the HUD."""

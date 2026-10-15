@@ -119,6 +119,15 @@ Set `enabled` to `false` to run with the controls window only; or set
 Your optional artwork can be kept under ignored `assets/zayabar/`. Configuration
 paths are local to your computer; do not stage personal path edits accidentally.
 
+## Closing and repeated launches
+
+Right-click Zaya's body or tray icon to choose **Settings & Controls** or
+**Close Zaya**. The controls window also has a **CLOSE ZAYA** button. Closing
+only the controls window keeps the companion running. Launching `main.py` again
+shows the existing Zaya and her controls instead of starting another companion,
+microphone or AI session. A crashed process's startup lock is recovered on the
+next launch; the lock is shared across project copies for the same user.
+
 ## Speech and background sound
 
 Zaya lowers other Windows apps and her media display while you speak, while she

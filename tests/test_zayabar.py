@@ -91,6 +91,11 @@ with tempfile.TemporaryDirectory() as folder:
     bar.on_runtime({'event':'task.updated','task':{'id':'one','state':'completed'}})
     assert bar.mode == 'standby'
     bar.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, bar.rect().center()))
+    assert bar.context_menu.isVisible()
+    actions={a.text():a for a in bar.context_menu.actions()}
+    assert 'Close Zaya' in actions
+    actions['Settings & Controls'].trigger()
+    bar.context_menu.close()
     assert main.isVisible()
     path.write_text('{bad json')
     assert bar.reload_config() is False and bar.config['assets']['standby'].endswith('standby.gif')
