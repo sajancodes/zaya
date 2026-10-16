@@ -7,7 +7,7 @@ from core import audit
 from core.event_bus import bus
 from core.task_runtime import TaskRuntime
 from core.tool_result import ToolResult, normalize
-from core.execution_policy import require_owner
+from core.execution_policy import require_owner, trust_context, TRUST_AUTHENTICATED_REMOTE_OWNER
 
 current_task = contextvars.ContextVar('zaya_current_task', default=None)
 current_request = contextvars.ContextVar('zaya_current_request', default='')
@@ -17,12 +17,16 @@ class Operator:
     def __init__(self, runtime: TaskRuntime):
         self.runtime = runtime
 
-    async def execute(self, name: str, invoke, request_id: str = '', goal: str = '') -> ToolResult:
+    async def execute(self, name: str, invoke, request_id: str = '', goal: str = '',
+                      source: str = '', trust_level: str = '') -> ToolResult:
         require_owner()
+        current_trust = trust_context.get()
+        actual_trust = trust_level or current_trust
+        actual_source = source or ('dashboard' if actual_trust == TRUST_AUTHENTICATED_REMOTE_OWNER else 'local_desktop')
         cached = self.runtime.cached(request_id) if request_id else None
         if cached:
             return cached
-        task = self.runtime.create(goal or name)
+        task = self.runtime.create(goal or name, source=actual_source, trust_level=actual_trust)
         task_token, request_token = current_task.set(task.id), current_request.set(request_id)
         started = time.monotonic()
         try:
@@ -47,7 +51,8 @@ class Operator:
                 bus.publish('tool.failed' if result.status == 'failed' else 'tool.completed',
                             tool=name, task_id=task.id, status=result.status)
                 audit.write({'task_id': task.id, 'tool': name, 'status': result.status,
-                             'duration_ms': int((time.monotonic() - started) * 1000), 'evidence': result.evidence})
+                             'duration_ms': int((time.monotonic() - started) * 1000), 'evidence': result.evidence,
+                             'source': actual_source, 'trust_level': actual_trust})
                 return result
         finally:
             current_task.reset(task_token)

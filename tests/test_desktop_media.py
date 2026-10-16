@@ -27,6 +27,8 @@ class MediaActionTests(unittest.TestCase):
 class DesktopMediaTests(unittest.TestCase):
     def test_merged_controls_and_separate_media_keep_microphone_active(self):
         script = '''
+from core.execution_policy import trust_context, TRUST_LOCAL_OWNER
+trust_context.set(TRUST_LOCAL_OWNER)
 from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication,QPushButton
 from ui import JarvisUI

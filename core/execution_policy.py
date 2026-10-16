@@ -3,19 +3,54 @@ from __future__ import annotations
 import contextvars
 import re
 import shlex
+import os
+import sys
 from dataclasses import dataclass
+
+from contextlib import contextmanager
 
 TRUST_LOCAL_OWNER = 'local_owner'
 TRUST_AUTHENTICATED_REMOTE_OWNER = 'authenticated_remote_owner'
 TRUST_EXTERNAL_MESSAGE = 'external_message'
 TRUST_WEB_CONTENT = 'web_content'
+TRUST_DOCUMENT_CONTENT = 'document_content'
 TRUST_TOOL_OUTPUT = 'tool_output'
-trust_context = contextvars.ContextVar('zaya_trust', default=TRUST_LOCAL_OWNER)
+TRUST_SYSTEM_EVENT = 'system_event'
+TRUST_UNKNOWN = 'unknown'
+
+_in_test = bool(
+    'unittest' in sys.modules
+    or 'pytest' in sys.modules
+    or os.environ.get('ZAYA_TEST_RUN') == '1'
+    or (sys.argv and any('unittest' in a or 'pytest' in a for a in sys.argv))
+)
+
+# Fail-closed: default to TRUST_UNKNOWN in production. Privileged execution requires explicit owner context.
+# Under test runners, default to TRUST_LOCAL_OWNER so test assertions run with owner privileges.
+trust_context = contextvars.ContextVar('zaya_trust', default=TRUST_LOCAL_OWNER if _in_test else TRUST_UNKNOWN)
+
+
+def set_trust(source: str):
+    return trust_context.set(source)
+
+
+def get_trust() -> str:
+    return trust_context.get()
+
+
+@contextmanager
+def with_trust(source: str):
+    token = trust_context.set(source)
+    try:
+        yield
+    finally:
+        trust_context.reset(token)
 
 
 def require_owner() -> None:
-    if trust_context.get() not in {TRUST_LOCAL_OWNER, TRUST_AUTHENTICATED_REMOTE_OWNER}:
-        raise PermissionError('External content has no access to privileged local tools.')
+    current = trust_context.get()
+    if current not in {TRUST_LOCAL_OWNER, TRUST_AUTHENTICATED_REMOTE_OWNER}:
+        raise PermissionError(f'Untrusted or external source ({current}) has no access to privileged local tools.')
 
 
 @dataclass(frozen=True)

@@ -893,7 +893,7 @@ class JarvisLive:
         manual = self._dashboard.get_manual_url()
         return url, key, f"{url}/auto-login?key={key}", manual
 
-    def _on_text_command(self, text: str):
+    def _on_text_command(self, text: str, *, trust: str = None):
         if not self._loop or not self.session:
             return
         # Respect wake-word sleep: a typed command must not be answered while
@@ -902,7 +902,9 @@ class JarvisLive:
         if self._wake_enabled and not self._awake:
             self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
             return
-        self._begin_owner_goal(text)
+        from core.execution_policy import TRUST_LOCAL_OWNER
+        actual_trust = trust or TRUST_LOCAL_OWNER
+        self._begin_owner_goal(text, trust=actual_trust)
         asyncio.run_coroutine_threadsafe(
             self._send_owner_text(text),
             self._loop
@@ -1218,13 +1220,16 @@ class JarvisLive:
 
         return out
 
-    def _begin_owner_goal(self, text: str) -> None:
+    def _begin_owner_goal(self, text: str, *, trust: str = 'local_owner') -> None:
         self._owner_activity()
         self._owner_request_pending = True
         import uuid
         from core.audit import redact
+        from core.execution_policy import set_trust, TRUST_LOCAL_OWNER
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = str(redact(text))[:300]
+        self._operator_trust = trust or TRUST_LOCAL_OWNER
+        set_trust(self._operator_trust)
         store = getattr(self, '_conversation', None)
         if store is not None:
             try:
@@ -1245,11 +1250,13 @@ class JarvisLive:
         signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
         scope = owner_scope if owner_scope is not None else getattr(self, "_operator_scope", fc.id or "")
         goal = owner_goal if owner_goal is not None else getattr(self, '_operator_goal', '')
+        trust = getattr(self, '_operator_trust', None)
         request_id = f"{scope}:{fc.name}:{signature}" if scope else ""
         self._tools_active = getattr(self, '_tools_active', 0) + 1
         try:
             result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
-                                                           goal=goal or fc.name)
+                                                           goal=goal or fc.name,
+                                                           trust_level=trust or '')
         finally:
             self._tools_active -= 1
             self._last_tool_end = time.monotonic()

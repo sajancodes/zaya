@@ -4412,8 +4412,10 @@ class MainWindow(QMainWindow):
 
     def _toggle_auto_execute(self, enabled):
         from memory.config_manager import save_auto_execute_enabled, get_auto_execute_enabled
+        from core.execution_policy import with_trust, TRUST_LOCAL_OWNER
         try:
-            save_auto_execute_enabled(bool(enabled))
+            with with_trust(TRUST_LOCAL_OWNER):
+                save_auto_execute_enabled(bool(enabled))
         except (ValueError, OSError, PermissionError) as error:
             self._set_auto_execute_button(get_auto_execute_enabled())
             self._log_sig.emit(f'ERR: Could not change command permissions: {error}')
@@ -5701,7 +5703,11 @@ class MainWindow(QMainWindow):
 
     def _on_clipboard_action(self, cmd: str):
         if self.on_text_command:
-            threading.Thread(target=self.on_text_command, args=(cmd,), daemon=True).start()
+            from core.execution_policy import with_trust, TRUST_LOCAL_OWNER
+            def _run():
+                with with_trust(TRUST_LOCAL_OWNER):
+                    self.on_text_command(cmd)
+            threading.Thread(target=_run, daemon=True).start()
 
     # ────────────────────────────────────────────────────────────────────────────
 
@@ -5754,7 +5760,11 @@ class MainWindow(QMainWindow):
         self._input.clear()
         self._log.append_log(f"You: {txt}")
         if self.on_text_command:
-            threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start()
+            from core.execution_policy import with_trust, TRUST_LOCAL_OWNER
+            def _run():
+                with with_trust(TRUST_LOCAL_OWNER):
+                    self.on_text_command(txt)
+            threading.Thread(target=_run, daemon=True).start()
 
     def _apply_state(self, state: str):
         self.hud.state    = state

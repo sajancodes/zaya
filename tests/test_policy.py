@@ -24,3 +24,12 @@ class PolicyTests(unittest.TestCase):
                 classify('git status')
         finally:
             trust_context.reset(token)
+
+    def test_unknown_source_has_no_shell(self):
+        from core.execution_policy import TRUST_UNKNOWN
+        token = trust_context.set(TRUST_UNKNOWN)
+        try:
+            with self.assertRaises(PermissionError):
+                classify('git status')
+        finally:
+            trust_context.reset(token)
