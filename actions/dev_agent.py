@@ -49,7 +49,7 @@ def _strip_fences(text: str) -> str:
 
 def _is_rate_limit(error: Exception) -> bool:
     msg = str(error).lower()
-    return "429" in msg or "quota" in msg or "resource_exhausted" in msg
+    return bool(re.search(r"\b429\b", msg)) or "quota" in msg or "resource_exhausted" in msg
 
 
 def _parse_traceback(output: str, project_files: list[str]) -> tuple[str | None, int | None]:
@@ -155,6 +155,21 @@ JSON:"""
             raise RateLimitError(str(e))
         raise
 
+def _safe_project_path(project_dir: Path, rel_path) -> Path:
+    """Resolve a model-written file path strictly inside the project folder.
+
+    The plan is model output, not trusted input: a traversal, absolute or
+    UNC path would otherwise let a write escape the project directory before
+    any human sees the file. Reject the write instead of renaming it.
+    """
+    if not isinstance(rel_path, str) or not rel_path.strip():
+        raise ValueError(f"Refusing to write with an empty file path: {rel_path!r}")
+    root = project_dir.resolve()
+    candidate = (root / rel_path.strip()).resolve()
+    if candidate == root or not candidate.is_relative_to(root):
+        raise ValueError(f"Refusing to write outside the project folder: {rel_path}")
+    return candidate
+
 def _write_file(
     file_info: dict,
     project_description: str,
@@ -223,11 +238,12 @@ General rules:
 
 Code for {file_path}:"""
 
+    full_path = _safe_project_path(project_dir, file_path)
+
     try:
         response = model.generate_content(prompt)
         code = _strip_fences(response.text)
 
-        full_path = project_dir / file_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(code, encoding="utf-8")
 
@@ -425,7 +441,7 @@ Fixed code for {fix_path}:"""
             response = model.generate_content(prompt)
             fixed = _strip_fences(response.text)
 
-            full_path = project_dir / fix_path
+            full_path = _safe_project_path(project_dir, fix_path)
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(fixed, encoding="utf-8")
 
