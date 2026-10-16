@@ -62,7 +62,7 @@ screenshots/
 
 # Private operator state
 memory/projects.json
-memory/zayabar_state.json
+memory/*_state.json
 zayabar.tmp
 assets/zayabar/
 memory/backups/
