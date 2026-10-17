@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from core.execution_policy import TRUST_EXTERNAL_MESSAGE, trust_context
+from core.execution_policy import TRUST_EXTERNAL_MESSAGE, TRUST_UNKNOWN, trust_context
 from core.session_activity import SessionActivity
 from core.tool_result import ToolResult
 from services.whatsapp.models import Message
@@ -31,6 +31,17 @@ class ActivityTests(unittest.TestCase):
         activity.media('https://private.example/stream?token=private', True)
         self.assertNotIn('private', str(activity.snapshot()))
 
+    def test_unknown_runtime_context_can_update_media_bookkeeping(self):
+        activity = SessionActivity()
+        token = trust_context.set(TRUST_UNKNOWN)
+        try:
+            activity.media('Sailor', True)
+            self.assertIn('Sailor', str(activity.snapshot()))
+            activity.clear('media')
+            self.assertEqual(activity.snapshot(), [])
+        finally:
+            trust_context.reset(token)
+
     def test_external_contact_cannot_change_activity_but_reply_can_read_allowed_summary(self):
         activity = SessionActivity()
         activity.media('Sanam songs', True)
@@ -43,6 +54,10 @@ class ActivityTests(unittest.TestCase):
                     activity.set('other', 'He is elsewhere.')
                 with self.assertRaises(PermissionError):
                     activity.clear()
+                with self.assertRaises(PermissionError):
+                    activity.clear('media')
+                with self.assertRaises(PermissionError):
+                    activity.media('spoofed media', True)
                 generate_reply(message, [])
             finally:
                 trust_context.reset(token)
