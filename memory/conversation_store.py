@@ -13,11 +13,18 @@ DEFAULT_PATH = Path(__file__).resolve().parent / 'conversation.db'
 HANDLE_SECONDS = 2 * 60 * 60
 # Checkpoints made before the stalled-session recovery fix can accept input
 # forever without answering. Keep the local chat, but never reopen those handles.
-RESUME_PROTOCOL = 'zaya-live-3'
+RESUME_PROTOCOL = 'zaya-live-4'
 
 
 def resume_scope(model, voice, api_key):
-    return hashlib.sha256(json.dumps([RESUME_PROTOCOL, model, voice, api_key]).encode()).hexdigest()
+    # A provider can expire a perfectly recent resumption handle.  The Live
+    # error normalizer increments this epoch for that exact 1008 failure; adding
+    # it to the scope makes main.py reject only that dead checkpoint on the next
+    # reconnect while leaving the local conversation history untouched.
+    from core.gemini_keys import resume_epoch
+    return hashlib.sha256(json.dumps([
+        RESUME_PROTOCOL, model, voice, api_key, resume_epoch()
+    ]).encode()).hexdigest()
 
 
 class ConversationStore:

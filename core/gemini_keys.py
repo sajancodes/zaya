@@ -5,6 +5,37 @@ import time
 from email.utils import parsedate_to_datetime
 
 
+# Live resumption handles are provider-owned checkpoints.  A 1008 saying that a
+# BidiGenerateContent session is gone means the *checkpoint* is stale, not that
+# the model or API key is unavailable.  main.py already rebuilds a session when
+# its resume scope changes, so keep a tiny in-process generation counter here.
+# error_text() bumps it only for that exact provider failure; conversation_store
+# includes the generation in its scope and the next reconnect therefore drops
+# the dead handle while keeping the locally archived conversation intact.
+_resume_epoch = 0
+_resume_epoch_lock = threading.Lock()
+
+
+def resume_epoch() -> int:
+    with _resume_epoch_lock:
+        return _resume_epoch
+
+
+def _invalidate_resume_checkpoint() -> None:
+    global _resume_epoch
+    with _resume_epoch_lock:
+        _resume_epoch += 1
+
+
+def _expired_live_session(error) -> bool:
+    low = str(error).lower()
+    return (
+        "bidigeneratecontent session not found or expired" in low
+        or ("session not found" in low and "expired" in low)
+        or ("session expired" in low and "bidigeneratecontent" in low)
+    )
+
+
 def parse_keys(value):
     values = value if isinstance(value, (tuple, list)) else [value]
     return list(dict.fromkeys(part.strip() for item in values if isinstance(item, str)
@@ -45,7 +76,15 @@ def quota_failure(error):
 
 def error_text(error):
     children = getattr(error, 'exceptions', ())
-    return '\n'.join(error_text(child) for child in children) if children else f'{type(error).__name__}: {error}'
+    if children:
+        return '\n'.join(error_text(child) for child in children)
+    if _expired_live_session(error):
+        # Do not return "not found": core.gemini deliberately interprets that
+        # phrase as "this model does not exist for this key" and would cool the
+        # model for hours.  Here only the resumable checkpoint has expired.
+        _invalidate_resume_checkpoint()
+        return 'LiveSessionExpired: provider checkpoint expired; reconnect fresh'
+    return f'{type(error).__name__}: {error}'
 
 
 class KeysCooling(RuntimeError):
