@@ -176,7 +176,7 @@ class WhatsAppStore:
 
     def conversation(self, chat_id: str, limit: int = 20) -> list[dict]:
         chat_id = self.canonical_chat(chat_id)
-        return self.rows('SELECT * FROM wa_messages WHERE chat_id=? ORDER BY timestamp DESC LIMIT ?', (chat_id, max(1, min(limit, 100))))
+        return self.rows('SELECT * FROM wa_messages WHERE chat_id=? ORDER BY timestamp DESC, rowid DESC LIMIT ?', (chat_id, max(1, min(limit, 100))))
 
     def mark_read(self, chat_id: str) -> None:
         chat_id = self.canonical_chat(chat_id)
