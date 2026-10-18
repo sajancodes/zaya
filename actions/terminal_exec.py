@@ -21,6 +21,10 @@ def terminal_exec(parameters: dict, **_kwargs) -> ToolResult:
                           'running': session_id in sessions.processes}, [{'cwd': str(directory)}])
     if operation != 'run':
         return ToolResult('failed', f'Unknown terminal operation: {operation}')
+    from core.opencode_cli import launches_cli
+    if launches_cli(str(parameters.get('command') or '')):
+        return ToolResult('failed', 'Use coding_job for OpenCode work so Zaya can prepare the prompt, monitor it and send follow-ups in a hidden session. Do not open an interactive console.',
+                          {'use_tool': 'coding_job'})
     directory = sessions.cwd(session_id, parameters.get('cwd'))
     command = parameters.get('command', '')
     decision = classify(command, str(directory))

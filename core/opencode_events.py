@@ -24,12 +24,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator
 
-MAX_TEXT = 1500
+MAX_TEXT = 6000
 MAX_COMMAND = 800
 MAX_PATH = 512
 
 FILE_TOOLS = {"read", "edit", "write", "patch"}
-CHANGE_TOOLS = {"edit", "write", "patch"}
+CHANGE_TOOLS = {"edit", "write", "patch", "apply_patch"}
 
 
 @dataclass(frozen=True)

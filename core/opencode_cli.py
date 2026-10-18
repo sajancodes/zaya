@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import threading
 from pathlib import Path
@@ -33,6 +34,26 @@ _cache_lock = threading.Lock()
 
 class CliMissing(RuntimeError):
     """Raised when no usable OpenCode CLI can be found."""
+
+
+def launches_cli(command: str) -> bool:
+    """Routing guard for direct OpenCode workers, not a shell security sandbox."""
+    if not re.search(r'(?i)\bopencode(?:-cli)?(?:\.exe|\.cmd|\.ps1)?\b', command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return True
+    names = [Path(token.strip('"\'')).name.lower() for token in tokens]
+    cli = {'opencode', 'opencode.exe', 'opencode-cli.exe', 'opencode.cmd', 'opencode.ps1'}
+    if names and names[0] in cli and names[1:] in [['--version'], ['--help']]:
+        return False
+    if any(name in cli for name in names):
+        return (names[0] in cli or any(name in {'start-process', 'start', 'wt', 'wt.exe',
+                                               'cmd', 'cmd.exe', 'powershell', 'powershell.exe',
+                                               'pwsh', 'pwsh.exe', '&'} for name in names))
+    # Catch a worker command wrapped inside a quoted shell argument.
+    return bool(re.search(r'(?i)\b(start-process|wt|powershell|pwsh|cmd)\b', command))
 
 
 def version_key(text: str) -> tuple[int, int, int]:

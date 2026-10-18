@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from core.coding_jobs import CodingJob, CodingJobs
+from core.coding_supervisor import Brief
 from core.execution_policy import TRUST_EXTERNAL_MESSAGE, TRUST_LOCAL_OWNER, with_trust
 from core.opencode_cli import CliInfo
 from core.opencode_events import Event, Tally, parse_line
@@ -35,6 +36,14 @@ class Process:
         return self.returncode
 
 
+class CompleteSupervisor:
+    def prepare(self, goal, project):
+        return Brief(['Complete the authorized request.'], [])
+
+    def review(self, goal, brief, response, observations):
+        return {'decision': 'complete'}
+
+
 def wait_for(jobs):
     jobs._thread.join(timeout=5)
     if jobs._thread.is_alive():
@@ -51,7 +60,7 @@ class CodingJobsTests(unittest.TestCase):
         (self.project / 'app.py').write_text('x = 1\n')
         self.runtime = TaskRuntime()
         self.addCleanup(self.runtime.db.close)
-        self.jobs = CodingJobs(self.root / 'jobs.json', runtime=self.runtime)
+        self.jobs = CodingJobs(self.root / 'jobs.json', runtime=self.runtime, supervisor=CompleteSupervisor())
         roots = patch('core.coding_projects.APPROVED_ROOTS', (self.root,))
         roots.start()
         self.addCleanup(roots.stop)
@@ -69,7 +78,9 @@ class CodingJobsTests(unittest.TestCase):
                 job = self.jobs.start(self.project, 'Fix app.py; do not touch other projects')
             wait_for(self.jobs)
         argv = spawn.call_args.args[0]
-        self.assertEqual(argv[-2:], ['--', 'Fix app.py; do not touch other projects'])
+        self.assertEqual(argv[-2], '--')
+        self.assertEqual(argv[-1].count('Fix app.py; do not touch other projects'), 1)
+        self.assertIn('DELIVERY REQUIREMENTS', argv[-1])
         self.assertEqual(spawn.call_args.kwargs['cwd'], str(self.project))
         self.assertEqual(spawn.call_args.kwargs['stdin'], subprocess.DEVNULL)
         self.assertNotIn('env', spawn.call_args.kwargs)
@@ -101,7 +112,8 @@ class CodingJobsTests(unittest.TestCase):
             wait_for(self.jobs)
         argv = spawn.call_args.args[0]
         self.assertEqual(argv[argv.index('--session') + 1], 'ses_fixture')
-        self.assertEqual(argv[-1], 'Now fix the identified issue')
+        self.assertIn('Now fix the identified issue', argv[-1])
+        self.assertIn('Inspect the project', argv[-1])
         self.assertEqual(job.response, 'Followup answer')
 
     def test_external_sources_cannot_start_resume_stop_or_read_through_action(self):
@@ -149,7 +161,7 @@ class CodingJobsTests(unittest.TestCase):
         spawn_real = subprocess.Popen
         code = "import time; print(" + repr(record('step_start')) + ", flush=True); time.sleep(60)"
         for closing in (False, True):
-            jobs = CodingJobs(self.root / ('close.json' if closing else 'stop.json'), runtime=self.runtime)
+            jobs = CodingJobs(self.root / ('close.json' if closing else 'stop.json'), runtime=self.runtime, supervisor=CompleteSupervisor())
             processes = []
 
             def spawn(argv, **kwargs):

@@ -1,41 +1,60 @@
-# Hidden coding sessions
+# Supervised coding sessions
 
-Zaya sends owner coding requests to the locally installed OpenCode CLI through a
-hidden process. There is no console window to focus or type into. OpenCode uses
-its existing provider, model, agent and permission settings; Zaya does not change
-them. Install and sign in to OpenCode normally before using this feature.
+Zaya handles coding requests as a coordinator. A short request such as "make a
+simple calculator" becomes a concrete brief with basic behavior, error cases,
+relevant checks and run instructions. Existing project conventions and explicit
+owner constraints take precedence over defaults. The original owner request is
+kept separately from the compiled prompt and is included once, not pasted twice.
 
-Say which project to work in and what to change. Names are resolved under the
-Desktop, Desktop/ZayaProjects, Documents and dev folders; an absolute path must
-also be inside one of those roots. The directory must already contain project
-files. If several projects share a name, give the absolute path.
+Use `coding_job start` with the existing project directory and task. For a new
+project, choose a folder name and set `create_project=true`; the directory is
+created under Desktop/ZayaProjects without replacing existing files. Explicit
+paths must be inside the configured project roots. Ambiguous existing names
+require an exact path. A missing directory never requires an interactive terminal.
 
-Zaya reports reading, finding an issue, editing and checking from actual JSON
-events in first-person speech. She remains available for other conversation.
-"How is the coding going?" reads the stored state and response. "Continue" with
-a follow-up sends another prompt to that exact session. "Stop coding" terminates
-the process tree; closing Zaya also stops it and leaves a resumable local record.
-No coding work resumes automatically on app startup.
+The owner talks to Zaya. She prompts the installed OpenCode CLI through a hidden
+process, reads its JSON events, and narrates meaningful progress. OpenCode retains
+its existing provider, model, agent and permission settings; Zaya does not add
+`--auto`, inject permission configuration or operate its interactive interface.
+Direct OpenCode worker launches through `terminal_exec` are routed back to
+`coding_job`; simple CLI help/version inspection is still available.
 
-OpenCode permission refusals or requests for more information are returned for
-Zaya to explain. Zaya never silently adds `--auto`. A response arriving is not
-independent proof that a fix works; the response and recorded checks must support
-any stronger claim. Raw terminal output and model prose are not read aloud as
-instructions, and external contacts cannot start, resume, stop or inspect jobs.
+After every completed pass, Zaya's tool-free reviewer checks the response and
+observed steps against the brief. Missing requirements or checks cause a focused
+follow-up in the same saved OpenCode session. Follow-ups are constructed from
+selected items in the original brief; the reviewer cannot turn quoted output
+into an arbitrary new prompt. There are at most three OpenCode passes per owner
+request. Permission/input blockers, unavailable review, or exhausted passes leave
+the job waiting for the owner instead of silently retrying or claiming completion.
 
-Local state is saved in ignored `memory/coding_jobs.json`; it includes bounded
-responses and session identifiers. The runtime task store records the active
-child task separately from the tool call that started it.
+`status` reports planning, work, review, pass count, brief, responses and recorded
+checks. `continue` can supply a new owner follow-up and retains the original
+request. `stop` terminates the current process tree and prevents another pass.
+Closing Zaya also stops work and leaves the session resumable. Nothing resumes
+automatically on startup. A review is not an independent guarantee of correctness;
+reported checks and available evidence determine what Zaya can claim.
 
-Offline verification:
+Bounded job state is private in ignored `memory/coding_jobs.json`. The runtime
+store tracks the coding task through execution and review. Speech uses local
+first-person progress templates through the isolated voice channel. OpenCode
+output is untrusted evidence and cannot authorize unrelated tools or actions.
 
-    .venv\Scripts\python.exe -m unittest tests.test_coding_jobs tests.test_coding_voice tests.test_opencode_events
+Offline checks:
 
-A real CLI smoke check is opt-in and uses temporary project files. It sends two
-small prompts through the configured OpenCode provider:
+    .venv\Scripts\python.exe -m unittest tests.test_coding_jobs tests.test_coding_supervisor tests.test_coding_voice tests.test_opencode_events
+
+Real CLI prompt/follow-up checks are opt-in:
 
     $env:ZAYA_OPENCODE_SMOKE = '1'
     .venv\Scripts\python.exe -m unittest tests.test_coding_jobs.RealOpenCodeSmoke
 
-This does not verify a physical microphone or speakers. Live narration uses the
-same existing voice provider and owner interruption gates as other notices.
+The real supervised calculator check invokes the brief planner, OpenCode and
+reviewer using their existing configured providers, then runs independent
+arithmetic and division-by-zero checks on the generated program:
+
+    $env:ZAYA_OPENCODE_SUPERVISOR_SMOKE = '1'
+    .venv\Scripts\python.exe -m unittest tests.test_coding_supervisor.RealSupervisedCodingTests
+
+These tests use temporary projects and do not edit the owner's projects or
+verify physical microphone/speaker behavior. Restart Zaya after updating the
+application code so new requests use the supervised route.

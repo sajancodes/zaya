@@ -1399,16 +1399,24 @@ class JarvisLive:
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
 
-            elif name in {'dev_agent', 'code_helper'}:
+            elif name in {'coding_job', 'dev_agent', 'code_helper'}:
                 # All live coding requests use the same hidden OpenCode path.
                 # Keep legacy implementations callable for existing integrations.
                 from actions.coding_job import coding_job
-                project = args.get('project') or args.get('project_name') or ''
-                file_path = args.get('file_path') or args.get('output_path')
-                if not project and file_path and Path(file_path).is_absolute():
-                    project = str(Path(file_path).parent)
-                task = owner_goal or args.get('description') or args.get('instruction') or ''
-                result = await asyncio.to_thread(coding_job, {'action': 'start', 'project': project, 'task': task})
+                request = owner_goal if owner_goal is not None else getattr(self, '_operator_goal', '')
+                if name == 'coding_job':
+                    coding_args = args
+                    request = request if args.get('action') == 'start' or args.get('task') else None
+                else:
+                    project = args.get('project') or args.get('project_name') or ''
+                    file_path = args.get('file_path') or args.get('output_path')
+                    if not project and file_path and Path(file_path).is_absolute():
+                        project = str(Path(file_path).parent)
+                    coding_args = {'action': 'start', 'project': project,
+                                   'task': args.get('description') or args.get('instruction') or ''}
+                    if name == 'dev_agent' and args.get('project_name'):
+                        coding_args['create_project'] = True
+                result = await asyncio.to_thread(coding_job, coding_args, owner_request=request or None)
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given

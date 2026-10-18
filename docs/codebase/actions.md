@@ -508,14 +508,18 @@ under `~/.jarvis_profiles` (`browser_control.py:114, 658`), and
 
 ## Coding requests through OpenCode
 
-`coding_job` is Zaya's owner-only entry point for new coding requests. It sends
-one prompt with `opencode run --format json` in a hidden process, reads the
-response stream, and stores bounded local job state. `status` reads the actual
+`coding_job` is Zaya's owner-only entry point for new coding requests. Zaya
+expands the owner's request into a concrete brief, sends it with
+`opencode run --format json` in a hidden process, reads the response stream,
+and reviews the result. Missing original requirements trigger focused follow-up
+prompts in the same session, with at most three passes per owner request.
+It stores bounded local job state. `status` reads the actual
 response; `continue` sends a new owner prompt to the saved session; `stop` pauses
 work and keeps the files. A fresh app startup never replays a saved coding task.
 The live dispatcher redirects legacy `dev_agent` / `code_helper` calls through
 this entry point; their existing implementations remain available to direct
-integrations. Project requests need an explicit existing project directory.
+integrations. Existing projects need an explicit directory; new projects use
+`create_project=true` to prepare their folder without placeholder files.
 
 Progress notices use short first-person templates and the existing isolated
 voice channel. OpenCode's responses never enter the voice session as commands.

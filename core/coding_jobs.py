@@ -1,7 +1,8 @@
 """Owner-started OpenCode sessions, with durable state and local voice notices.
 
-OpenCode runs with its installed settings. Zaya owns the prompt and reads the
-JSON response stream; this module does not inject permissions or auto-approve.
+OpenCode runs with its installed settings. Zaya prepares the prompt, reads the
+JSON stream, reviews results and sends bounded follow-ups in the same session.
+This module does not inject permissions or auto-approve.
 """
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ import time
 import uuid
 
 from core import audit, opencode_cli
-from core.coding_projects import resolve_project
+from core.coding_projects import resolve_project, prepare_project
+from core.coding_supervisor import Supervisor, MAX_PASSES, initial_prompt, followup_prompt
 from core.execution_policy import get_trust, require_owner
 from core.opencode_events import Tally, parse_line
 from core.opencode_narrator import Narrator
@@ -25,7 +27,7 @@ from core.shell_session import terminate_tree
 from core.task_runtime import get_runtime
 
 STORE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json'
-ACTIVE = {'starting', 'working'}
+ACTIVE = {'starting', 'planning', 'working', 'reviewing'}
 _HIDDEN = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
            if os.name == 'nt' else {'start_new_session': True})
 
@@ -47,15 +49,23 @@ class CodingJob:
     exit_code: int | None = None
     agent: str = ''
     model: str = ''
+    requirements: list[str] = field(default_factory=list)
+    checks: list[str] = field(default_factory=list)
+    prompt: str = ''
+    pass_number: int = 0
+    passes: list[dict] = field(default_factory=list)
+    observations: list[dict] = field(default_factory=list)
+    review: str = ''
 
     def public(self):
         return audit.redact(asdict(self))
 
 
 class CodingJobs:
-    def __init__(self, store_path=None, *, runtime=None):
+    def __init__(self, store_path=None, *, runtime=None, supervisor=None):
         self._path = Path(store_path) if store_path else STORE_PATH
         self._runtime = runtime
+        self._supervisor = supervisor or Supervisor()
         self._lock = threading.RLock()
         self._jobs = {}
         self._process = None
@@ -133,13 +143,13 @@ class CodingJobs:
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError('I am already working on a coding request. Ask me to stop it first.')
 
-    def start(self, project, goal, *, agent='', model=''):
+    def start(self, project, goal, *, agent='', model='', create_project=False):
         require_owner()
-        project = resolve_project(str(project))
         if not goal.strip():
             raise ValueError('Tell me what you want done in the project.')
         with self._lock:
             self._available()
+            project = prepare_project(str(project), create=create_project)
             job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model)
             self._jobs[job.id] = job
             self._begin(job)
@@ -152,20 +162,20 @@ class CodingJobs:
             job = self.latest()
             if job is None or not job.session_id:
                 raise ValueError('There is no saved coding session to continue.')
-            resolve_project(job.project)
+            resolve_project(job.project, allow_empty=True)
             if task.strip():
-                job.goal = task.strip()
+                job.goal += '\nOwner follow-up: ' + task.strip()
             elif job.phase == 'completed':
                 raise ValueError('That request finished. Tell me what to do next in this session.')
-            else:
-                job.goal = 'Continue the unfinished request. Inspect current files and previous results before repeating any action.'
             self._begin(job)
         return job
 
     def _begin(self, job):
         self._stop.clear()
         self._notices.clear()
-        job.phase, job.response, job.error, job.exit_code = 'starting', '', '', None
+        job.phase, job.response, job.error, job.exit_code = 'planning', '', '', None
+        job.pass_number, job.passes, job.observations = 0, [], []
+        job.requirements, job.checks, job.review, job.prompt = [], [], '', ''
         job.updated_at = time.time()
         task = self.runtime.create(job.goal, source='coding_job', trust_level=get_trust())
         job.runtime_id = task.id
@@ -185,30 +195,95 @@ class CodingJobs:
 
     def _run(self, job):
         narrator, tally = Narrator(Path(job.project).name), Tally()
+        try:
+            self._notice("I'm turning your request into a clear coding brief, sir.")
+            brief = self._supervisor.prepare(job.goal, job.project)
+            if self._stop.is_set():
+                return
+            job.requirements, job.checks = brief.requirements, brief.checks
+            job.prompt = initial_prompt(job.goal, job.project, brief)
+            info = opencode_cli.resolve()
+            for number in range(1, MAX_PASSES + 1):
+                if self._stop.is_set():
+                    break
+                job.pass_number = number
+                job.response, job.error = '', ''
+                job.phase, job.progress = 'working', f'working on pass {number}'
+                self.runtime.transition(job.runtime_id, 'executing', active_step=f'opencode pass {number}')
+                self._save()
+                self._run_pass(job, info, narrator, tally)
+                if self._stop.is_set():
+                    break
+                job.passes.append({'pass': number, 'prompt': audit.redact(job.prompt),
+                                   'response': job.response, 'exit_code': job.exit_code})
+                if job.exit_code != 0 or job.error or not job.response:
+                    job.phase = 'failed'
+                    job.error = job.error or 'OpenCode ended without a usable response.'
+                    self._notice("I couldn't finish this coding pass. I've kept the response so I can check it.")
+                    break
+                job.phase, job.progress = 'reviewing', 'checking the result against your request'
+                self.runtime.transition(job.runtime_id, 'verifying', active_step=f'review pass {number}')
+                self._save()
+                self._notice("I'm reviewing the result against your request now.")
+                review = self._supervisor.review(job.goal, brief, job.response, job.observations)
+                if self._stop.is_set():
+                    break
+                job.review = review.get('decision', 'blocked')
+                job.passes[-1]['review'] = review
+                if job.review == 'complete':
+                    job.phase, job.progress = 'completed', 'reviewed against the coding brief'
+                    self._notice("I've reviewed the result against your request, sir. I have the changes and check results ready.")
+                    break
+                if job.review != 'continue' or number == MAX_PASSES:
+                    job.phase = 'waiting_owner'
+                    job.progress = 'needs owner input or further review'
+                    job.error = ('The automatic review limit was reached; I have kept the remaining work.'
+                                 if job.review == 'continue' else
+                                 'The review needs owner input or could not be completed reliably.')
+                    self._notice("I've kept the result, sir. I need your input before taking this further.")
+                    break
+                if not job.session_id:
+                    raise RuntimeError('OpenCode returned no session ID for a safe follow-up.')
+                job.prompt = followup_prompt(brief, review)
+                self._notice("I found work still missing. I'm sending a focused follow-up in the same session.")
+        except Exception as error:
+            job.phase, job.error = 'failed', audit.redact(str(error))[:2000]
+            job.progress = 'could not finish'
+            self._notice("I couldn't finish the coding request. I've kept the session details so I can check it.")
+        finally:
+            with self._lock:
+                if self._stop.is_set():
+                    job.phase, job.progress = 'paused', 'stopped; ask me to continue'
+                job.updated_at = time.time()
+                self._save()
+            self.runtime.transition(job.runtime_id,
+                                    'waiting_external' if job.phase == 'waiting_owner' else job.phase,
+                                    error=job.error or None,
+                                    evidence=[{'session_id': job.session_id, 'exit_code': job.exit_code,
+                                               'changed_files': job.changed_files, 'passes': job.pass_number,
+                                               'review': job.review}])
+
+    def _run_pass(self, job, info, narrator, tally):
+        argv = [str(info.path), 'run', '--format', 'json']
+        if opencode_cli.version_key(info.version)[0] >= 2:
+            argv.append('--standalone')
+        if job.session_id:
+            argv += ['--session', job.session_id]
+        if job.agent:
+            argv += ['--agent', job.agent]
+        if job.model:
+            argv += ['--model', job.model]
+        argv += ['--', job.prompt]
         process = None
         diagnostics = ''
         try:
-            info = opencode_cli.resolve()
             if self._stop.is_set():
                 return
-            argv = [str(info.path), 'run', '--format', 'json']
-            if opencode_cli.version_key(info.version)[0] >= 2:
-                argv.append('--standalone')
-            if job.session_id:
-                argv += ['--session', job.session_id]
-            if job.agent:
-                argv += ['--agent', job.agent]
-            if job.model:
-                argv += ['--model', job.model]
-            # The only prompt is Zaya's owner-authorized request, passed as data.
-            argv += ['--', job.goal]
             process = subprocess.Popen(argv, cwd=job.project, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                        encoding='utf-8', errors='replace', bufsize=1, **_HIDDEN)
             with self._lock:
                 self._process = process
-                job.phase = 'working'
-                job.progress = 'reading the project'
             messages = queue.Queue()
             readers = [threading.Thread(target=self._pump, args=(stream, kind, messages), daemon=True)
                        for stream, kind in ((process.stdout, 'out'), (process.stderr, 'err'))]
@@ -241,6 +316,11 @@ class CodingJobs:
                     job.response = audit.redact((job.response + '\n' + event.text)[-6000:]).strip()
                 if event.kind == 'error':
                     job.error = audit.redact(event.error)
+                if event.kind == 'tool' and event.status in {'completed', 'error'}:
+                    job.observations = (job.observations + [audit.redact({
+                        'tool': event.tool, 'status': event.status, 'path': event.path,
+                        'command': event.command, 'exit_code': event.exit_code,
+                        'error': event.error[:500]})])[-40:]
                 job.changed_files = list(tally.changed)
                 for beat in narrator.feed(event):
                     job.progress = narrator.progress
@@ -253,31 +333,14 @@ class CodingJobs:
                 reader.join(timeout=1)
             process.wait(timeout=10)
             job.exit_code = process.returncode
-            if not self._stop.is_set():
-                job.phase = 'completed' if process.returncode == 0 and job.response and not job.error else 'failed'
-                if job.phase == 'failed' and not job.error:
-                    job.error = diagnostics or ('OpenCode ended without a response.' if process.returncode == 0 else 'OpenCode exited with an error.')
-                job.progress = 'response received' if job.phase == 'completed' else 'could not finish'
-                self._notice(narrator.finish_sentence(tally, exit_code=0 if job.phase == 'completed' else 1, stopped=False))
-        except Exception as error:
-            job.phase, job.error = 'failed', audit.redact(str(error))[:2000]
-            job.progress = 'could not finish'
-            self._notice("I couldn't finish the coding request. I've kept the session details so I can check it.")
+            if process.returncode != 0 and not job.error:
+                job.error = diagnostics or 'OpenCode exited with an error.'
         finally:
             if process is not None:
                 terminate_tree(process)
                 process.wait(timeout=10)
             with self._lock:
                 self._process = None
-                if self._stop.is_set():
-                    job.phase, job.progress = 'paused', 'stopped; ask me to continue'
-                job.updated_at = time.time()
-                self._save()
-            state = 'paused' if job.phase == 'paused' else job.phase
-            self.runtime.transition(job.runtime_id, state,
-                                    error=job.error or None,
-                                    evidence=[{'session_id': job.session_id, 'exit_code': job.exit_code,
-                                               'changed_files': job.changed_files}])
 
     def stop(self):
         require_owner()

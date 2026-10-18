@@ -99,7 +99,7 @@ def find_named_project(name: str) -> list[Path]:
     return matches
 
 
-def resolve_project(requested: str) -> Path:
+def resolve_project(requested: str, *, allow_empty: bool = False) -> Path:
     """Return the validated project directory for ``requested``.
 
     ``requested`` may be an absolute path the owner supplied, or a folder name
@@ -130,12 +130,29 @@ def resolve_project(requested: str) -> Path:
             f"Give me an absolute path if it lives somewhere else."
         )
 
+    if len(candidates) > 1:
+        raise ProjectError('More than one project has that name. Give me the exact directory.')
     project = candidates[0].resolve()
     if not any(is_within(project, root) for root in approved_roots()):
         raise ProjectError(f"{project} is outside the folders I am allowed to code in.")
-    if not looks_like_project(project):
+    if not allow_empty and not looks_like_project(project):
         raise ProjectError(f"{project} does not look like a project or repository.")
     return project
+
+
+def prepare_project(requested: str, *, create: bool = False) -> Path:
+    """Create a specifically requested new project, without overwriting files."""
+    if not create:
+        return resolve_project(requested)
+    text = (requested or '').strip().strip('"').strip("'")
+    path = Path(os.path.expandvars(os.path.expanduser(text)))
+    if not text or (not path.is_absolute() and (path.name != text or text in {'.', '..'})):
+        raise ProjectError('Give me a project folder name or an absolute directory.')
+    target = (path if path.is_absolute() else approved_roots()[0] / path).resolve()
+    if not any(is_within(target, root) and target != root for root in approved_roots()):
+        raise ProjectError('The new project must be a folder inside an approved project root.')
+    target.mkdir(parents=True, exist_ok=True)
+    return resolve_project(str(target), allow_empty=True)
 
 
 def contains(project: Path, other: str | Path) -> bool:
