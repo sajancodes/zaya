@@ -1480,15 +1480,15 @@ class JarvisLive:
             else:
                 self.interrupt()
 
-    def _notifications_busy(self):
+    def _notifications_busy(self, *, allow_sleep=False):
         return (getattr(self, '_owner_request_pending', False) or self._is_speaking
                 or getattr(self, '_tools_active', 0) or getattr(self, '_input_turn_active', False)
                 or time.monotonic() - self._last_user_speech < 10
                 or not self.audio_in_queue.empty()
-                or (self._wake_enabled and not self._awake))
+                or (self._wake_enabled and not self._awake and not allow_sleep))
 
-    def _can_announce(self, epoch):
-        return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy()
+    def _can_announce(self, epoch, *, allow_sleep=False):
+        return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy(allow_sleep=allow_sleep)
 
     def _voice_reply_stalled(self, now):
         if (not getattr(self, '_owner_request_pending', False) or self._is_speaking
@@ -1519,6 +1519,7 @@ class JarvisLive:
         from services.whatsapp.service import get_service
         from core.proactive_manager import ProactiveManager
         from core.coding_jobs import get_jobs
+        from core.reminders import get_reminders
         service = get_service()
         try:
             service.start()
@@ -1532,17 +1533,27 @@ class JarvisLive:
                 if not self.session or self.ui.muted:
                     continue
                 busy = self._notifications_busy()
-                item = manager.next(busy=busy)
+                reminders = get_reminders()
+                item = reminders.next_due() if not self._notifications_busy(allow_sleep=True) else None
+                reminder_notice = item is not None
+                if not item:
+                    item = manager.next(busy=busy)
                 coding = False
                 if not item and not busy:
                     item = get_jobs().next_notice()
                     coding = item is not None
                 if item:
                     try:
-                        if not await self._deliver_owner_notice(item, coding=coding):
+                        if not await self._deliver_owner_notice(item, coding=coding,
+                                                               mode='reminder' if reminder_notice else ''):
                             continue
-                        (get_jobs() if coding else manager).delivered(item)
+                        if reminder_notice:
+                            reminders.voice_queued(item)
+                        else:
+                            (get_jobs() if coding else manager).delivered(item)
                     except Exception as error:
+                        if reminder_notice:
+                            reminders.voice_failed(item, error)
                         if time.monotonic() - last_voice_error > 30:
                             self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); notification retained for retry.")
                             last_voice_error = time.monotonic()
@@ -1551,15 +1562,21 @@ class JarvisLive:
             manager.close()
             service.close()
 
-    async def _deliver_owner_notice(self, item, *, coding=False):
+    async def _deliver_owner_notice(self, item, *, coding=False, mode=''):
         from core.notification_voice import synthesize_notice
         epoch = getattr(self, '_owner_epoch', 0)
         text = item.get('announcement', item['summary'])
-        audio, transcript = await synthesize_notice(text, coding=True) if coding else await synthesize_notice(text)
+        kwargs = {'mode': mode} if mode else {'coding': True} if coding else {}
+        audio, transcript = await synthesize_notice(text, **kwargs)
         # Owner speech wins if it arrived while synthesis ran. The notice is
         # acknowledged by its queue only after it actually reaches playback.
-        if not self._can_announce(epoch):
+        if not self._can_announce(epoch, allow_sleep=mode == 'reminder'):
             return False
+        if mode == 'reminder':
+            from core.reminders import get_reminders
+            current = get_reminders().get(item['id'])
+            if current['cancelled_at'] is not None or current['voice_queued_at'] is not None:
+                return False
         self.ui.write_log('Zaya: ' + (transcript or item['summary']))
         self._visemes.feed_text(transcript or item['summary'])
         self._turn_done_event.clear()
@@ -1567,6 +1584,7 @@ class JarvisLive:
         for offset in range(0, len(audio), 2400):
             self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
         self._turn_done_event.set()
+        await self._conversation_write('append', 'assistant', transcript or item['summary'])
         return True
 
     def _voice_mark(self, stage, **fields):

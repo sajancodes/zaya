@@ -130,11 +130,15 @@ class OwnerPriorityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_pause_sends_one_end_marker_and_audio_can_resume(self):
         live = self.live()
-        live.session = SimpleNamespace(send_realtime_input=AsyncMock())
+        ended = asyncio.Event()
+        async def observe(**kwargs):
+            if kwargs.get('audio_stream_end'):
+                ended.set()
+        live.session = SimpleNamespace(send_realtime_input=AsyncMock(side_effect=observe))
         live.out_queue.put_nowait({'data': bytes(2048), 'mime_type': 'audio/pcm'})
         task = asyncio.create_task(live._send_realtime())
         try:
-            await asyncio.sleep(1.3)
+            await asyncio.wait_for(ended.wait(), timeout=5)
             calls = live.session.send_realtime_input.call_args_list
             self.assertEqual(len(calls), 12)
             self.assertEqual(calls[0].kwargs['audio'].mime_type, 'audio/pcm;rate=16000')
