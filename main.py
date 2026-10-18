@@ -920,6 +920,9 @@ class JarvisLive:
 
     async def _send_owner_text(self, text):
         await self._conversation_write('append', 'user', text)
+        log = getattr(self, '_session_log', None)
+        if log is not None:
+            log.append(f'User: {text}')
         await self.session.send_client_content(
             turns={'role': 'user', 'parts': [{'text': text}]}, turn_complete=True)
 
@@ -1077,7 +1080,7 @@ class JarvisLive:
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
         # already knows the respectful register of whatever language it is in.
-        _addr = (f"ADDRESS: Always call the user '{_user_name}'."
+        _addr = (f"ADDRESS: The owner's name is '{_user_name}'. Use sir naturally in English and the ordinary respectful equivalent in his current language."
                  if _user_name
                  else 'ADDRESS: Address the user with the ordinary respectful form '
                       'for a superior in the language you are currently speaking — '
@@ -2407,43 +2410,34 @@ class JarvisLive:
     # ── Proactive mode ──────────────────────────────────────────────────────────
 
     async def _run_proactive_mode(self) -> None:
-        """
-        Background task: periodically checks if the user has been silent long enough,
-        then hands time + memory context to Gemini so it can decide what (if anything)
-        to say proactively. No hardcoded rules — Gemini makes the call.
-        """
+        """Occasional contextual speech through an isolated, tool-free voice."""
         while True:
-            await asyncio.sleep(60)   # evaluate once per minute
-
-            if not self.session or not self._awake:
-                continue
-
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if speaking or getattr(self, '_owner_turn_pending', False):
-                continue
-
-            if not self._proactive.should_trigger(self._last_user_speech):
-                continue
-
-            self._proactive.mark_triggered()
-
+            await asyncio.sleep(20)
             try:
-                memory       = await asyncio.to_thread(load_memory)
-                monitors     = await asyncio.to_thread(list_monitors)
-                recent_turns = self._session_log[-8:] if self._session_log else []
-                prompt = self._proactive.build_prompt(
-                    memory       = memory,
-                    monitors     = monitors or None,
-                    recent_turns = recent_turns or None,
-                )
-                await self.session.send_client_content(
-                    turns={"role": "user", "parts": [{"text": prompt}]},
-                    turn_complete=True,
-                )
-                print("[Zaya] Proactive check-in.")
-            except Exception as e:
-                print(f"[Proactive] ⚠️ {e}")
+                await self._proactive_checkin()
+            except Exception as error:
+                # Optional chatter never blocks a real owner request or reminder.
+                print(f"[Proactive] Check-in unavailable ({type(error).__name__}).")
+
+    async def _proactive_checkin(self):
+        if not self.session or self.ui.muted or self._notifications_busy():
+            return False
+        if not self._proactive.should_trigger(self._last_user_speech):
+            return False
+        from core.reminders import get_reminders
+        if get_reminders().next_due():
+            return False  # Explicit reminders have priority over optional chat.
+        from core.session_activity import activity
+        prompt = self._proactive.build_prompt(
+            monitors=await asyncio.to_thread(list_monitors),
+            recent_turns=self._session_log[-5:] if self._session_log else [],
+            current_activity=activity.snapshot(),
+        )
+        if not prompt:
+            return False
+        self._proactive.mark_triggered()
+        return await self._deliver_owner_notice(
+            {'summary': 'A contextual check-in.', 'announcement': prompt}, mode='checkin')
 
     # ── Phone audio relay ────────────────────────────────────────────────────────
 

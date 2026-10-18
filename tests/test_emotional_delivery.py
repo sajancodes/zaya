@@ -30,7 +30,7 @@ class EmotionalDeliveryTests(unittest.TestCase):
 
     def test_personality_is_expressive_and_keeps_truth_and_trust(self):
         prompt = (Path(__file__).resolve().parents[1] / 'core' / 'prompt.txt').read_text(encoding='utf-8')
-        self.assertIn('warm, lively anime companion', prompt)
+        self.assertIn('Jarvis-like manner', prompt)
         self.assertIn('face and delivery consistent', prompt)
         self.assertIn('answer honestly', prompt)
         self.assertIn('Tool evidence and runtime state', prompt)
