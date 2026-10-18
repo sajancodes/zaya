@@ -1,0 +1,145 @@
+"""Resolve the project a coding job must run in, and prove it stays there.
+
+Owner-approved roots are searched; an explicit absolute path is accepted but
+still validated. The whole home directory is never scanned. A job is only
+started against something that actually looks like a project or repository.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+APPROVED_ROOTS = (
+    Path.home() / "Desktop" / "ZayaProjects",
+    Path.home() / "Desktop",
+    Path.home() / "Documents",
+    Path.home() / "dev",
+)
+
+# Markers that make a directory a believable project. One is enough.
+PROJECT_MARKERS = (
+    ".git", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "tox.ini",
+    "package.json", "tsconfig.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
+    "Gemfile", "composer.json", "CMakeLists.txt", "Makefile", "*.sln", "*.csproj",
+    ".opencode", "opencode.json", "opencode.jsonc", "AGENTS.md", "readme.md",
+)
+
+SOURCE_SUFFIXES = {
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".cs", ".c", ".cpp", ".h", ".hpp",
+    ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".sh", ".ps1", ".sql", ".html",
+}
+
+
+class ProjectError(ValueError):
+    """The requested project could not be resolved to a safe directory."""
+
+
+def approved_roots() -> list[Path]:
+    seen: list[Path] = []
+    for root in APPROVED_ROOTS:
+        try:
+            resolved = root.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved not in seen:
+            seen.append(resolved)
+    return seen
+
+
+def is_within(path: Path, root: Path) -> bool:
+    """True when ``path`` equals ``root`` or sits inside it."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def looks_like_project(directory: Path) -> bool:
+    """A directory that plausibly holds code: a marker file, or source files."""
+    if not directory.is_dir():
+        return False
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return False
+    names = {entry.name.lower() for entry in entries}
+    for marker in PROJECT_MARKERS:
+        if marker.startswith("*"):
+            if any(n.endswith(marker[1:].lower()) for n in names):
+                return True
+        elif marker.lower() in names:
+            return True
+    for entry in entries:
+        if entry.is_file() and entry.suffix.lower() in SOURCE_SUFFIXES:
+            return True
+    return False
+
+
+def find_named_project(name: str) -> list[Path]:
+    """Directories under an approved root whose name matches ``name``.
+
+    Only direct children are considered, so nothing under the home directory is
+    walked. ``name`` is compared case-insensitively, ignoring surrounding space.
+    """
+    wanted = name.strip().strip('"').strip("'").lower().replace("\\", "/").rstrip("/").split("/")[-1]
+    if not wanted:
+        return []
+    matches: list[Path] = []
+    for root in approved_roots():
+        if not root.is_dir():
+            continue
+        try:
+            children = sorted(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.is_dir() and child.name.lower() == wanted and child not in matches:
+                matches.append(child)
+    return matches
+
+
+def resolve_project(requested: str) -> Path:
+    """Return the validated project directory for ``requested``.
+
+    ``requested`` may be an absolute path the owner supplied, or a folder name
+    found under an approved root. Raises ``ProjectError`` with a sentence Zaya
+    can say when it cannot be resolved safely.
+    """
+    text = (requested or "").strip().strip('"').strip("'")
+    if not text:
+        raise ProjectError("I need to know which project directory to work in.")
+
+    expanded = Path(os.path.expandvars(os.path.expanduser(text)))
+    candidates: list[Path] = []
+
+    if expanded.is_absolute():
+        explicit = expanded
+        if not explicit.exists():
+            raise ProjectError(f"There is no directory at {explicit}.")
+        if not is_within(explicit, explicit) or not explicit.is_dir():
+            raise ProjectError(f"{explicit} is not a directory.")
+        candidates.append(explicit)
+    else:
+        candidates.extend(find_named_project(text))
+
+    if not candidates:
+        roots = ", ".join(str(root) for root in approved_roots() if root.is_dir())
+        raise ProjectError(
+            f"I could not find a project called '{text}'. I look in: {roots}. "
+            f"Give me an absolute path if it lives somewhere else."
+        )
+
+    project = candidates[0].resolve()
+    if not any(is_within(project, root) for root in approved_roots()):
+        raise ProjectError(f"{project} is outside the folders I am allowed to code in.")
+    if not looks_like_project(project):
+        raise ProjectError(f"{project} does not look like a project or repository.")
+    return project
+
+
+def contains(project: Path, other: str | Path) -> bool:
+    """True when ``other`` (absolute or relative) stays inside ``project``."""
+    raw = Path(str(other)).expanduser()
+    candidate = raw if raw.is_absolute() else project / raw
+    return is_within(candidate, project)

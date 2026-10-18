@@ -1,0 +1,8 @@
+{"type":"text","timestamp":1,"sessionID":"ses_x","part":{"type":"text","text":"hello"}}
+not json at all
+
+{"type":"tool_use","timestamp":2,"sessionID":"ses_x"}
+{"type":"tool_use","timestamp":3,"sessionID":"ses_x","part":{"type":"tool","tool":"shell","state":{"status":"completed","input":{"command":"pytest -q"},"metadata":{"metadata":{"exit":0}}}}}
+{"type":"text","timestamp":4,"part":null}
+{"no_type":true}
+[

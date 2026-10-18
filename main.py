@@ -931,6 +931,8 @@ class JarvisLive:
         if getattr(self, '_shutdown_requested', False):
             return
         self._shutdown_requested = True
+        from core.coding_jobs import close_jobs
+        close_jobs()
         self._audio_ducker.close()
         task = getattr(self, '_run_task', None)
         if task and self._loop and not self._loop.is_closed():
@@ -1263,7 +1265,7 @@ class JarvisLive:
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
-        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
+        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper', 'coding_job'}
                 or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
                     {'stage', 'commit', 'push', 'pull', 'checkout', 'create_branch'})):
             from core.session_activity import activity
@@ -1388,9 +1390,22 @@ class JarvisLive:
                         except Exception:
                             pass
                     await asyncio.sleep(1.5)
+                    from core.coding_jobs import close_jobs
+                    await asyncio.to_thread(close_jobs)
                     import os as _os
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
+
+            elif name in {'dev_agent', 'code_helper'}:
+                # All live coding requests use the same hidden OpenCode path.
+                # Keep legacy implementations callable for existing integrations.
+                from actions.coding_job import coding_job
+                project = args.get('project') or args.get('project_name') or ''
+                file_path = args.get('file_path') or args.get('output_path')
+                if not project and file_path and Path(file_path).is_absolute():
+                    project = str(Path(file_path).parent)
+                task = owner_goal or args.get('description') or args.get('instruction') or ''
+                result = await asyncio.to_thread(coding_job, {'action': 'start', 'project': project, 'task': task})
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -1503,6 +1518,7 @@ class JarvisLive:
     async def _operator_notifications(self):
         from services.whatsapp.service import get_service
         from core.proactive_manager import ProactiveManager
+        from core.coding_jobs import get_jobs
         service = get_service()
         try:
             service.start()
@@ -1517,22 +1533,15 @@ class JarvisLive:
                     continue
                 busy = self._notifications_busy()
                 item = manager.next(busy=busy)
+                coding = False
+                if not item and not busy:
+                    item = get_jobs().next_notice()
+                    coding = item is not None
                 if item:
                     try:
-                        from core.notification_voice import synthesize_notice
-                        epoch = getattr(self, '_owner_epoch', 0)
-                        audio, transcript = await synthesize_notice(item.get('announcement', item['summary']))
-                        # Owner speech wins if it arrived while synthesis ran.
-                        if not self._can_announce(epoch):
+                        if not await self._deliver_owner_notice(item, coding=coding):
                             continue
-                        self.ui.write_log('Zaya: ' + (transcript or item['summary']))
-                        self._visemes.feed_text(transcript or item['summary'])
-                        self._turn_done_event.clear()
-                        self._notification_active = True
-                        for offset in range(0, len(audio), 2400):
-                            self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
-                        self._turn_done_event.set()
-                        manager.delivered(item)
+                        (get_jobs() if coding else manager).delivered(item)
                     except Exception as error:
                         if time.monotonic() - last_voice_error > 30:
                             self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); notification retained for retry.")
@@ -1541,6 +1550,24 @@ class JarvisLive:
         finally:
             manager.close()
             service.close()
+
+    async def _deliver_owner_notice(self, item, *, coding=False):
+        from core.notification_voice import synthesize_notice
+        epoch = getattr(self, '_owner_epoch', 0)
+        text = item.get('announcement', item['summary'])
+        audio, transcript = await synthesize_notice(text, coding=True) if coding else await synthesize_notice(text)
+        # Owner speech wins if it arrived while synthesis ran. The notice is
+        # acknowledged by its queue only after it actually reaches playback.
+        if not self._can_announce(epoch):
+            return False
+        self.ui.write_log('Zaya: ' + (transcript or item['summary']))
+        self._visemes.feed_text(transcript or item['summary'])
+        self._turn_done_event.clear()
+        self._notification_active = True
+        for offset in range(0, len(audio), 2400):
+            self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
+        self._turn_done_event.set()
+        return True
 
     def _voice_mark(self, stage, **fields):
         health = getattr(self, '_voice_health', None)
@@ -2779,6 +2806,8 @@ def _run_desktop_agent(ui, stopping):
             pass
     finally:
         if agent is not None:
+            from core.coding_jobs import close_jobs
+            close_jobs()
             agent._audio_ducker.close()
 
 

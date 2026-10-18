@@ -51,6 +51,7 @@ class Event:
     reason: str = ""
     exit_code: int | None = None
     timestamp: float = 0.0
+    id: str = ""
 
     @property
     def is_tool(self) -> bool:
@@ -97,7 +98,7 @@ def _exit_code(metadata: dict) -> int | None:
     """A shell tool writes its exit status under ``metadata.metadata.exit``."""
     inner = metadata.get("metadata") if isinstance(metadata, dict) else None
     if not isinstance(inner, dict):
-        return None
+        inner = metadata
     try:
         return int(inner.get("exit"))
     except (TypeError, ValueError):
@@ -123,6 +124,13 @@ def parse_event(payload: object) -> Event | None:
         return Event(kind="text", session_id=session_id, text=_text(part.get("text"), MAX_TEXT),
                      timestamp=timestamp)
 
+    if raw_type == "error":
+        error = payload.get("error")
+        if isinstance(error, dict):
+            data = error.get("data")
+            error = data.get("message") if isinstance(data, dict) else error.get("message") or error.get("name")
+        return Event(kind="error", session_id=session_id, error=_text(error, MAX_TEXT))
+
     if raw_type == "tool_use":
         state = part.get("state") if isinstance(part.get("state"), dict) else {}
         tool = _text(part.get("tool"), 64)
@@ -131,7 +139,7 @@ def parse_event(payload: object) -> Event | None:
         metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
         names, additions, deletions = _files(metadata)
         output = _text(state.get("output"), MAX_TEXT)
-        error = output if status == "error" else ""
+        error = _text(state.get("error") or output, MAX_TEXT) if status == "error" else ""
         exit_code = _exit_code(metadata)
         return Event(
             kind="tool", session_id=session_id, tool=tool, status=status,
@@ -140,6 +148,7 @@ def parse_event(payload: object) -> Event | None:
             title=_text(state.get("title") or metadata.get("title"), 200),
             files=names, additions=additions, deletions=deletions,
             error=error, exit_code=exit_code, timestamp=timestamp,
+            id=_text(part.get("callID") or part.get("id") or part.get("partID"), 128),
         )
 
     if raw_type in ("step_start", "step_finish"):
@@ -187,6 +196,7 @@ class Tally:
     last_text: str = ""
     last_tool: str = ""
     last_error: str = ""
+    _seen: set[str] = field(default_factory=set, repr=False)
 
     def add(self, event: Event) -> None:
         if event.session_id and not self.session_id:
@@ -195,15 +205,21 @@ class Tally:
             self.last_text = event.text
         if not event.is_tool:
             return
+        if event.status not in {"completed", "error"}:
+            return
+        if event.id:
+            if event.id in self._seen:
+                return
+            self._seen.add(event.id)
         self.last_tool = event.tool or self.last_tool
         if event.tool in FILE_TOOLS:
             self.reads += 1
         if event.tool in {"grep", "glob"}:
             self.searches += 1
-        if event.tool in CHANGE_TOOLS:
+        if event.tool in CHANGE_TOOLS and not event.failed:
             self.edits += 1
             for name in event.files or ((event.path,) if event.path else ()):
-                short = name.replace("\\", "/").split("/")[-1]
+                short = name.replace("\\", "/")
                 if short and short not in self.changed:
                     self.changed.append(short)
             self.additions += event.additions

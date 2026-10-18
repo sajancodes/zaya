@@ -27,7 +27,7 @@ class OpenCodeEventTests(unittest.TestCase):
                 'status': 'error', 'input': {'command': 'pytest'}, 'output': 'failed'}},
         })))
         self.assertEqual(tally.session_id, 'ses_example')
-        self.assertEqual((tally.changed, tally.additions, tally.deletions), (['app.py'], 2, 1))
+        self.assertEqual((tally.changed, tally.additions, tally.deletions), (['src/app.py'], 2, 1))
         self.assertEqual((tally.failures, tally.last_error), (1, 'failed'))
 
     def test_noise_and_malformed_lines_are_ignored(self):
