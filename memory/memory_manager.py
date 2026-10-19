@@ -127,9 +127,20 @@ def save_memory(memory: dict) -> None:
         )
 
 
-def _truncate_value(val: str) -> str:
-    if isinstance(val, str) and len(val) > MAX_VALUE_LENGTH:
-        return val[:MAX_VALUE_LENGTH].rstrip() + "…"
+CATEGORY_VALUE_LENGTHS: dict[str, int] = {
+    "identity": 380,
+    "preferences": 380,
+    "relationships": 380,
+    "wishes": 500,
+    "projects": 1200,
+    "notes": 1200,
+}
+
+
+def _truncate_value(val: str, category: str = "") -> str:
+    limit = CATEGORY_VALUE_LENGTHS.get(category.lower(), MAX_VALUE_LENGTH)
+    if isinstance(val, str) and len(val) > limit:
+        return val[:limit].rstrip() + "…"
     return val
 
 
@@ -141,13 +152,15 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
         if isinstance(value, str) and not value.strip():
             continue
         if isinstance(value, dict) and "value" not in value:
+            cat_name = category or key
             if key not in target or not isinstance(target[key], dict):
                 target[key] = {}
                 changed = True
-            if _recursive_update(target[key], value, category or key):
+            if _recursive_update(target[key], value, cat_name):
                 changed = True
         else:
-            new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value))
+            cat_name = category or str(value.get("category", "") if isinstance(value, dict) else "")
+            new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value), cat_name)
             existing = target.get(key, {})
             previous = existing if isinstance(existing, dict) else {}
             metadata = value if isinstance(value, dict) else {}
@@ -155,7 +168,7 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
             if confidence < 0.7:
                 continue
             now = datetime.now(timezone.utc).isoformat()
-            entry = {"value": new_val, "updated": now[:10], "category": category,
+            entry = {"value": new_val, "updated": now[:10], "category": cat_name,
                      "source": metadata.get("source", "user"), "confidence": min(1.0, confidence),
                      "created_at": previous.get("created_at", now), "updated_at": now,
                      "last_used_at": previous.get("last_used_at"), "expires_at": metadata.get("expires_at")}

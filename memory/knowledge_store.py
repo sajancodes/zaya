@@ -1,7 +1,7 @@
 """High-performance hybrid local knowledge store backed by SQLite (WAL mode, FTS5).
 
 Provides full-text lexical search with BM25 ranking, structured category-aware limits,
-entity relationships, transactional consistency, and JSON store synchronization.
+entity relationships, transactional consistency, corruption recovery, and JSON store synchronization.
 """
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ import re
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).resolve().parent / "knowledge.db"
+_DEFAULT_DB_PATH = Path(__file__).resolve().parent / "knowledge.db"
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -34,6 +35,14 @@ CREATE TABLE IF NOT EXISTS facts (
     source TEXT DEFAULT 'user',
     metadata_json TEXT,
     PRIMARY KEY (category, key)
+);
+
+CREATE TABLE IF NOT EXISTS aliases (
+    alias TEXT NOT NULL,
+    canonical_key TEXT NOT NULL,
+    category TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (alias, category)
 );
 
 CREATE TABLE IF NOT EXISTS entity_relations (
@@ -68,18 +77,34 @@ END;
 """
 
 
+def _derive_default_db_path() -> Path:
+    """Derive SQLite DB path from memory_manager.MEMORY_PATH so tests monkeypatching MEMORY_PATH isolate DB."""
+    try:
+        from memory import memory_manager
+        return memory_manager.MEMORY_PATH.parent / "knowledge.db"
+    except Exception:
+        return _DEFAULT_DB_PATH
+
+
 class KnowledgeStore:
     """Thread-safe SQLite + FTS5 knowledge store."""
 
     def __init__(self, db_path: Path | str | None = None, clock: Callable[[], float] = time.time):
-        self._path = Path(db_path) if db_path else DB_PATH
+        self._custom_path = Path(db_path) if db_path else None
         self._clock = clock
         self._lock = threading.RLock()
         self._init_db()
 
+    @property
+    def path(self) -> Path:
+        if self._custom_path:
+            return self._custom_path
+        return _derive_default_db_path()
+
     def _connect(self) -> sqlite3.Connection:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(str(self._path), timeout=10.0)
+        p = self.path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(str(p), timeout=10.0)
         con.row_factory = sqlite3.Row
         return con
 
@@ -93,7 +118,28 @@ class KnowledgeStore:
                 finally:
                     con.close()
             except Exception as e:
-                logger.error("Failed to initialize KnowledgeStore database at %s: %s", self._path, e)
+                logger.error("Failed to initialize KnowledgeStore database at %s: %s", self.path, e)
+                self._handle_corruption(e)
+
+    def _handle_corruption(self, err: Exception) -> None:
+        """Recover from SQLite database corruption by backing up corrupt file, recreating schema, and resyncing from JSON."""
+        logger.warning("Attempting SQLite corruption recovery for %s due to: %s", self.path, err)
+        with self._lock:
+            try:
+                corrupt_backup = self.path.with_suffix(".corrupt")
+                if self.path.exists():
+                    self.path.replace(corrupt_backup)
+                con = self._connect()
+                con.executescript(_SCHEMA)
+                con.commit()
+                con.close()
+                # Rebuild from memory_manager JSON
+                from memory.memory_manager import load_memory
+                data = load_memory()
+                self.sync_from_json(data)
+                logger.info("Corruption recovery successful: rebuilt %s from JSON store", self.path)
+            except Exception as rec_err:
+                logger.error("Corruption recovery failed: %s", rec_err)
 
     def put_fact(
         self,
@@ -116,26 +162,29 @@ class KnowledgeStore:
         meta_json = json.dumps(metadata or {}, ensure_ascii=False)
 
         with self._lock:
-            con = self._connect()
             try:
-                cur = con.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO facts (category, key, value, created_at, updated_at, expires_at, confidence, source, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(category, key) DO UPDATE SET
-                        value=excluded.value,
-                        updated_at=excluded.updated_at,
-                        expires_at=excluded.expires_at,
-                        confidence=excluded.confidence,
-                        source=excluded.source,
-                        metadata_json=excluded.metadata_json
-                    """,
-                    (cat, k, val, now, now, expires_at, float(confidence), str(source), meta_json),
-                )
-                con.commit()
-            finally:
-                con.close()
+                con = self._connect()
+                try:
+                    cur = con.cursor()
+                    cur.execute(
+                        """
+                        INSERT INTO facts (category, key, value, created_at, updated_at, expires_at, confidence, source, metadata_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(category, key) DO UPDATE SET
+                            value=excluded.value,
+                            updated_at=excluded.updated_at,
+                            expires_at=excluded.expires_at,
+                            confidence=excluded.confidence,
+                            source=excluded.source,
+                            metadata_json=excluded.metadata_json
+                        """,
+                        (cat, k, val, now, now, expires_at, float(confidence), str(source), meta_json),
+                    )
+                    con.commit()
+                finally:
+                    con.close()
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
 
     def get_fact(self, category: str, key: str) -> dict[str, Any] | None:
         with self._lock:
@@ -143,11 +192,14 @@ class KnowledgeStore:
             try:
                 cur = con.cursor()
                 row = cur.execute(
-                    "SELECT category, key, value, created_at, updated_at, confidence, source FROM facts WHERE category=? AND key=?",
+                    "SELECT category, key, value, created_at, updated_at, confidence, source, expires_at, last_used_at FROM facts WHERE category=? AND key=?",
                     (category.strip().lower(), key.strip().lower()),
                 ).fetchone()
                 if row:
                     return dict(row)
+                return None
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
                 return None
             finally:
                 con.close()
@@ -163,6 +215,61 @@ class KnowledgeStore:
                 )
                 con.commit()
                 return cur.rowcount > 0
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
+                return False
+            finally:
+                con.close()
+
+    def record_alias(self, alias: str, canonical_key: str, category: str) -> None:
+        """Map an alias/synonym to a canonical memory key."""
+        a = str(alias or "").strip().lower()
+        c = str(canonical_key or "").strip().lower()
+        cat = str(category or "").strip().lower()
+        if not a or not c or not cat:
+            return
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._clock()))
+
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO aliases (alias, canonical_key, category, created_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(alias, category) DO UPDATE SET
+                        canonical_key=excluded.canonical_key
+                    """,
+                    (a, c, cat, now),
+                )
+                con.commit()
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
+            finally:
+                con.close()
+
+    def resolve_alias(self, alias: str, category: str | None = None) -> str | None:
+        """Resolve an alias to its canonical key."""
+        a = str(alias or "").strip().lower()
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.cursor()
+                if category:
+                    row = cur.execute(
+                        "SELECT canonical_key FROM aliases WHERE alias=? AND category=?",
+                        (a, category.strip().lower()),
+                    ).fetchone()
+                else:
+                    row = cur.execute(
+                        "SELECT canonical_key FROM aliases WHERE alias=?",
+                        (a,),
+                    ).fetchone()
+                return str(row["canonical_key"]) if row else None
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
+                return None
             finally:
                 con.close()
 
@@ -190,6 +297,8 @@ class KnowledgeStore:
                     (src, rel, tgt, float(weight), now),
                 )
                 con.commit()
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
             finally:
                 con.close()
 
@@ -204,41 +313,65 @@ class KnowledgeStore:
                     (ent, ent),
                 ).fetchall()
                 return [dict(r) for r in rows]
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
+                return []
             finally:
                 con.close()
 
     def search_hybrid(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
-        """Hybrid search combining FTS5 BM25 ranking and lexical fallback."""
+        """Hybrid search combining FTS5 BM25 ranking, expiration filtering, alias resolution, 1-hop entity boosting, and last_used_at update."""
         clean_q = re.sub(r"[^\w\s]", " ", (query or "")).strip()
         tokens = [t for t in clean_q.split() if len(t) > 1]
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._clock()))
+
+        # Expand query tokens with aliases and 1-hop related entity targets
+        expanded_keys: set[str] = set()
+        for t in tokens:
+            canon = self.resolve_alias(t)
+            if canon:
+                expanded_keys.add(canon)
+            # 1-hop relation lookup
+            rels = self.get_relations(t)
+            for r in rels:
+                tgt = r.get("target_entity")
+                if tgt:
+                    expanded_keys.add(tgt)
+
         results: list[dict[str, Any]] = []
 
         with self._lock:
             con = self._connect()
             try:
                 cur = con.cursor()
-                # 1. Try FTS5 BM25 match if query tokens exist
-                if tokens:
-                    fts_query = " OR ".join(f'"{t}"*' for t in tokens)
+                # 1. Try FTS5 BM25 match excluding expired facts
+                search_terms = list(tokens) + list(expanded_keys)
+                if search_terms:
+                    fts_query = " OR ".join(f'"{t}"*' for t in search_terms)
                     try:
                         rows = cur.execute(
                             """
-                            SELECT f.category, f.key, f.value, f.updated_at, bm25(facts_fts) as score
+                            SELECT f.category, f.key, f.value, f.updated_at, f.expires_at, bm25(facts_fts) as score
                             FROM facts_fts
                             JOIN facts f ON f.rowid = facts_fts.rowid
                             WHERE facts_fts MATCH ?
+                              AND (f.expires_at IS NULL OR f.expires_at > ?)
                             ORDER BY score ASC
                             LIMIT ?
                             """,
-                            (fts_query, limit),
+                            (fts_query, now_iso, limit),
                         ).fetchall()
                         for r in rows:
+                            # Apply 1-hop entity relation boosting
+                            base_score = float(r["score"])
+                            if r["key"] in expanded_keys:
+                                base_score -= 1.5  # lower score is better in BM25 ASC
                             results.append({
                                 "category": r["category"],
                                 "key": r["key"],
                                 "value": r["value"],
                                 "updated_at": r["updated_at"],
-                                "score": float(r["score"]),
+                                "score": base_score,
                             })
                     except Exception as e:
                         logger.debug("FTS5 match failed, falling back to LIKE: %s", e)
@@ -247,19 +380,19 @@ class KnowledgeStore:
                 if len(results) < limit:
                     seen = {(r["category"], r["key"]) for r in results}
                     # If empty query, return most recently updated facts
-                    if not tokens:
+                    if not search_terms:
                         rows = cur.execute(
-                            "SELECT category, key, value, updated_at FROM facts ORDER BY updated_at DESC LIMIT ?",
-                            (limit,),
+                            "SELECT category, key, value, updated_at FROM facts WHERE (expires_at IS NULL OR expires_at > ?) ORDER BY updated_at DESC LIMIT ?",
+                            (now_iso, limit),
                         ).fetchall()
                     else:
-                        like_clause = " OR ".join("key LIKE ? OR value LIKE ?" for _ in tokens)
-                        params: list[str] = []
-                        for t in tokens:
+                        like_clause = " OR ".join("key LIKE ? OR value LIKE ?" for _ in search_terms)
+                        params: list[Any] = [now_iso]
+                        for t in search_terms:
                             params.extend([f"%{t}%", f"%{t}%"])
-                        params.append(str(limit - len(results)))
+                        params.append(limit - len(results))
                         rows = cur.execute(
-                            f"SELECT category, key, value, updated_at FROM facts WHERE {like_clause} ORDER BY updated_at DESC LIMIT ?",
+                            f"SELECT category, key, value, updated_at FROM facts WHERE (expires_at IS NULL OR expires_at > ?) AND ({like_clause}) ORDER BY updated_at DESC LIMIT ?",
                             params,
                         ).fetchall()
 
@@ -277,7 +410,23 @@ class KnowledgeStore:
                             if len(results) >= limit:
                                 break
 
-                return results
+                # Sort by score ascending
+                results.sort(key=lambda r: r["score"])
+                final_results = results[:limit]
+
+                # Update last_used_at ONLY on the returned facts
+                if final_results:
+                    for r in final_results:
+                        cur.execute(
+                            "UPDATE facts SET last_used_at=? WHERE category=? AND key=?",
+                            (now_iso, r["category"], r["key"]),
+                        )
+                    con.commit()
+
+                return final_results
+            except sqlite3.DatabaseError as e:
+                self._handle_corruption(e)
+                return []
             finally:
                 con.close()
 
