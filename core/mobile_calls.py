@@ -22,11 +22,13 @@ the phone, which is exactly the behaviour this feature cannot afford.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core import mobile_protocol as protocol
 
@@ -43,6 +45,90 @@ MIN_CALL_INTERVAL = 150.0
 MAX_CALLS_PER_HOUR = 6
 KEY_COOLDOWN = 600.0
 MAX_TRACKED = 40
+
+DEFAULT_AWAY_MINUTES = 10.0
+DEFAULT_QUIET_FROM, DEFAULT_QUIET_TO = 23, 7
+
+# Where the owner's tunable block lives; a module constant so tests can point it
+# at a fixture instead of the real config.
+CONFIG_PATH = Path(__file__).resolve().parents[1] / 'config' / 'api_keys.json'
+
+
+@dataclass(frozen=True)
+class PhoneCallSettings:
+    """The owner-tunable slice of the call policy.
+
+    Read from config/api_keys.json → `phone_calls`. Every field has a working
+    default, so a missing or hand-broken block means the shipped behaviour
+    rather than no behaviour.
+    """
+
+    call_when_task_finishes: bool = True
+    away_minutes: float = DEFAULT_AWAY_MINUTES
+    quiet_from: int | None = DEFAULT_QUIET_FROM
+    quiet_to: int | None = DEFAULT_QUIET_TO
+
+    @property
+    def away_seconds(self) -> float:
+        try:
+            minutes = float(self.away_minutes)
+        except (TypeError, ValueError):
+            minutes = DEFAULT_AWAY_MINUTES
+        return max(60.0, minutes * 60.0)
+
+
+def phone_call_settings() -> PhoneCallSettings:
+    """Load the settings block, falling back to defaults on anything odd."""
+    block: dict = {}
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+        candidate = data.get('phone_calls') or {}
+        if isinstance(candidate, dict):
+            block = candidate
+    except Exception:
+        block = {}
+
+    raw_enabled = block.get('call_when_task_finishes', True)
+    if isinstance(raw_enabled, bool):
+        enabled = raw_enabled
+    else:
+        enabled = str(raw_enabled).strip().lower() not in ('off', 'false', 'no', '0', '')
+
+    try:
+        minutes = float(block.get('away_minutes', DEFAULT_AWAY_MINUTES))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_AWAY_MINUTES
+
+    quiet = block.get('quiet_hours', [DEFAULT_QUIET_FROM, DEFAULT_QUIET_TO])
+    quiet_from: int | None
+    quiet_to: int | None
+    if isinstance(quiet, (list, tuple)) and len(quiet) == 2:
+        try:
+            quiet_from, quiet_to = int(quiet[0]) % 24, int(quiet[1]) % 24
+        except (TypeError, ValueError):
+            quiet_from, quiet_to = DEFAULT_QUIET_FROM, DEFAULT_QUIET_TO
+    else:
+        quiet_from = quiet_to = None       # explicitly disabled with null
+
+    return PhoneCallSettings(call_when_task_finishes=enabled, away_minutes=minutes,
+                             quiet_from=quiet_from, quiet_to=quiet_to)
+
+
+def _quiet_hours(settings: PhoneCallSettings, now: float | None = None) -> bool:
+    """True during the hours an informational ring would be rude.
+
+    Urgent things never consult this: a critical problem rings at any hour. It
+    only guards the "task finished while you were out" call, which can wait for
+    morning without anything being lost.
+    """
+    start, end = settings.quiet_from, settings.quiet_to
+    if start is None or end is None or start == end:
+        return False
+    hour = time.localtime(now if now is not None else time.time()).tm_hour
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
 @dataclass
@@ -96,6 +182,8 @@ class MobileCallManager:
         self._last_key: dict[str, float] = {}
         self._ring_timer: threading.Timer | None = None
         self._answer_hook = None
+        self._away_provider = None
+        self._reachable_provider = None
         self._unsubscribe = None
         self.suppressed = 0
 
@@ -111,6 +199,38 @@ class MobileCallManager:
         """Called with the ZayaCall when the owner answers. The hook is what makes
         Zaya aware of her own call, so it must run in the session's context."""
         self._answer_hook = fn
+
+    def set_away_provider(self, fn) -> None:
+        """Where the runtime reports whether the owner is somewhere else.
+
+        Absent or failing, the answer is "he is here": the quieter delivery is
+        always the safe one.
+        """
+        self._away_provider = fn
+
+    def set_reachable_provider(self, fn) -> None:
+        """Where the runtime reports whether a paired phone holds a live session."""
+        self._reachable_provider = fn
+
+    def owner_away(self) -> bool:
+        provider = self._away_provider
+        if provider is None:
+            return False
+        try:
+            return bool(provider())
+        except Exception:
+            log.debug('Away provider failed', exc_info=True)
+            return False
+
+    def phone_reachable(self) -> bool:
+        provider = self._reachable_provider
+        if provider is None:
+            return True
+        try:
+            return bool(provider())
+        except Exception:
+            log.debug('Reachable provider failed', exc_info=True)
+            return False
 
     def start(self) -> None:
         from core.event_bus import bus
@@ -212,9 +332,36 @@ class MobileCallManager:
                             priority=protocol.P2_IMPORTANT, source='task',
                             key=f'failed-notify:{task_id}')
         elif state == 'completed':
-            self.notify(title='Task completed', body=goal,
-                        priority=protocol.P3_NORMAL, source='task',
-                        quiet=True, key=f'done:{task_id}')
+            self._on_task_completed(task_id, goal)
+
+    def _on_task_completed(self, task_id: str, goal: str) -> None:
+        """Finished work is worth a ring only when the owner cannot see it.
+
+        He asked to be called when a task finishes while he is out; sitting in
+        front of the desktop is the one case where a ring adds nothing, and the
+        middle of the night is the one where it costs too much. Both fall back to
+        the quiet line that has always been there.
+        """
+        settings = phone_call_settings()
+        if (settings.call_when_task_finishes and not _quiet_hours(settings)
+                and self.owner_away() and self.phone_reachable()):
+            call = self.request_call(
+                title='Task finished',
+                detail=goal,
+                priority=protocol.P1_IMMEDIATE,
+                reason='You asked to be told when a task finishes while you are away.',
+                briefing=(f'Task "{goal}" finished successfully while the owner was away from '
+                          f'the machine. Tell him it is done and what came of it in one or two '
+                          f'sentences, then ask whether he wants anything else.'),
+                source='task', key=f'done-call:{task_id}')
+            if call is not None:
+                return
+            # The policy declined the ring (a call is already up, a cooldown, or
+            # the hourly cap) and has already delivered a notification instead.
+            return
+        self.notify(title='Task completed', body=goal,
+                    priority=protocol.P3_NORMAL, source='task',
+                    quiet=True, key=f'done:{task_id}')
 
     def _on_alert(self, event: dict) -> None:
         score = int(event.get('score') or 0)

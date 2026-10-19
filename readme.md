@@ -383,7 +383,7 @@ WhatsApp link answer the phone.
 | On the phone | Behavior |
 | --- | --- |
 | Home / Chat | Zaya's state and emotion exactly as the laptop reports them, never decided locally; text commands go through the same owner-scope approval path |
-| Voice and calls | Two-way PCM16 voice on its own sockets; Zaya can call the phone (P0/P1 ring full-screen, P2 notifies, P3 stays silent) and a missed call leaves one summary, never a repeat |
+| Voice and calls | Two-way PCM16 voice on its own sockets; Zaya can call the phone (P0/P1 ring the phone like a real call, P2 notifies, P3 stays silent), a task that finishes while the owner is away rings him, and a missed call leaves one summary, never a repeat |
 | Output | Desktop, phone or both; a call routes her voice to the phone automatically and restores the previous route afterwards |
 | Tasks | The laptop's task runtime, newest first, read-only |
 | WhatsApp | Read-only views plus owner mode switches; message text is never treated as a command |

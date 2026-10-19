@@ -26,9 +26,12 @@ import com.zaya.companion.ui.IncomingCallActivity
  */
 object Notifications {
     const val CHANNEL_CONNECTION = "zaya.connection"
-    const val CHANNEL_CALLS = "zaya.calls"
+    const val CHANNEL_CALLS = "zaya.calls.v2"
     const val CHANNEL_MESSAGES = "zaya.messages"
     const val CHANNEL_MISSED = "zaya.missed"
+
+    /** Superseded by [CHANNEL_CALLS]; kept only so it can be removed. */
+    private const val CHANNEL_CALLS_LEGACY = "zaya.calls"
 
     const val ID_CONNECTION = 1001
     const val ID_CALL = 1002
@@ -47,14 +50,17 @@ object Notifications {
                     enableVibration(false)
                     setSound(null, null)
                 },
+                // Silent on purpose: a ringing call is produced by [Ringer], which
+                // loops the phone's own ringtone for as long as the laptop says the
+                // call is ringing. A channel sound would only chime once on top of it.
                 NotificationChannel(
                     CHANNEL_CALLS,
                     context.getString(R.string.channel_calls),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
                     description = context.getString(R.string.channel_calls_desc)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 600, 600, 600)
+                    enableVibration(false)
+                    setSound(null, null)
                     setShowBadge(true)
                 },
                 NotificationChannel(
@@ -77,6 +83,9 @@ object Notifications {
                 },
             ),
         )
+        // Channel settings are frozen at creation, so the old sounding call channel
+        // cannot be repurposed — it is dropped so the settings list stays honest.
+        runCatching { manager.deleteNotificationChannel(CHANNEL_CALLS_LEGACY) }
     }
 
     fun connection(context: Context, status: ConnectionStatus, serverName: String): Notification {

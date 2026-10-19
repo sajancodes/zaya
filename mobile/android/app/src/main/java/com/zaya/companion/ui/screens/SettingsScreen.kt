@@ -1,6 +1,11 @@
 package com.zaya.companion.ui.screens
 
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +22,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zaya.companion.core.ZayaBuild
 import com.zaya.companion.net.AuthResult
@@ -190,6 +199,9 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
+        CallPermissionCard()
+
+        Spacer(Modifier.height(12.dp))
         SectionCard(title = "This phone") {
             KeyValue("Microphone", "only while you are in a call")
             KeyValue("Faces", "mobile/android/assets (see image.txt)")
@@ -219,4 +231,61 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         )
         Spacer(Modifier.height(32.dp))
     }
+}
+
+/**
+ * Android 14 and newer let the owner (or the system) revoke "take over the
+ * screen" — the switch that turns a ringing call into a full-screen window
+ * instead of a heads-up notification. It lives in system settings, so the app
+ * can only point at it, never grant it.
+ */
+@Composable
+private fun CallPermissionCard() {
+    val context = LocalContext.current
+    var allowed by remember { mutableStateOf(canTakeOverScreen(context)) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) allowed = canTakeOverScreen(context)
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    if (allowed) return
+    SectionCard(
+        title = "Let calls take over the screen",
+        subtitle = "Without this, a call arrives as a notification instead of a call screen",
+    ) {
+        Text(
+            text = "Zaya can still ring, but the call will not open full screen the way a " +
+                "real phone call does.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(10.dp))
+        Button(onClick = { openTakeOverSettings(context) }) { Text("Open settings") }
+        Spacer(Modifier.height(6.dp))
+        Note("Allow \"Full screen notifications\" for Zaya there.", ZayaAccent.amber)
+    }
+}
+
+private fun canTakeOverScreen(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+    val manager = context.getSystemService(NotificationManager::class.java) ?: return true
+    return runCatching { manager.canUseFullScreenIntent() }.getOrDefault(true)
+}
+
+private fun openTakeOverSettings(context: Context) {
+    val fallback = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+            .setData(Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    } else {
+        fallback
+    }
+    runCatching { context.startActivity(intent) }
+        .onFailure { runCatching { context.startActivity(fallback) } }
 }

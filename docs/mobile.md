@@ -108,10 +108,64 @@ Calls are started by the laptop, never by the phone:
 
 | Priority | Name | On the phone |
 | --- | --- | --- |
-| P0 | critical | Full-screen incoming call, ringtone, answer/decline |
-| P1 | immediate | Full-screen incoming call, ringtone, answer/decline |
+| P0 | critical | Full-screen incoming call, ringing, answer/decline |
+| P1 | immediate | Full-screen incoming call, ringing, answer/decline |
 | P2 | important | A notification only — never takes over the screen |
 | P3 | normal | A notification, silent (`quiet`) |
+
+A ring is a real ring: the phone loops its own ringtone and repeats a vibration
+for as long as the laptop says the call is ringing, the screen wakes over the
+lock screen, and Answer/Decline sit on both the call screen and the notification.
+The phone's ringer mode is respected — normal rings and shakes, vibrate-only
+shakes, silent stays silent. Ringing stops on answer, decline, a missed call, or
+a dropped connection (a 60-second cap so a lost link cannot ring forever).
+On Android 14+ the *Full screen notifications* switch can be revoked for the app;
+without it a call still rings but only as a heads-up notification, so Settings
+shows a card with a shortcut straight to that switch.
+
+### When Zaya rings
+
+| Trigger | Priority |
+| --- | --- |
+| A critical system or security problem | P0 |
+| A task is blocked waiting for your decision | P1 |
+| A task failed after its retry budget, or after changing the machine | P1 |
+| An urgent WhatsApp message (alert score ≥ 85) | P1 |
+| An action you requested from your phone is waiting on the desktop | P1 |
+| **A task finished while you are away** | P1 |
+| Zaya decides she needs you (`call_owner` tool) | her choice |
+| Completed work while you are at the machine, important messages | a notification |
+
+"While you are away" is decided on the laptop: this machine reports how long it has
+gone untouched (10 minutes by default), and the mobile API knows whether a paired
+phone actually holds a session. Sitting at the desktop therefore never rings the
+phone, and a phone that is offline is not rung at either — it gets the written
+line instead, the same way a suppressed call does.
+
+The policy keeps it sane regardless: one call at a time, a cooldown of 10 minutes
+per issue, a 150-second floor between calls, and at most 6 calls an hour. Anything
+suppressed is delivered as a notification, so the signal is never lost — only the
+ring is. A missed call is summarised once and never redialled.
+
+### Tuning it
+
+All optional, in `config/api_keys.json` (the same file as `dashboard_https`):
+
+```json
+"phone_calls": {
+  "call_when_task_finishes": true,
+  "away_minutes": 10,
+  "quiet_hours": [23, 7]
+}
+```
+
+- `call_when_task_finishes` — `false` keeps finished work as the silent line it
+  used to be.
+- `away_minutes` — how long the desktop must be untouched before you count as out.
+- `quiet_hours` — a finished task waits for morning rather than ringing (it stays
+  in the activity list). `null` disables the window entirely. Urgent calls — a
+  blocked task, a failure, an urgent message, anything critical — ignore this and
+  ring at any hour.
 
 A missed call produces **one** summary notification (channel: *Missed Zaya calls*)
 with what the call was about, and it never repeats itself. While a call is active,
@@ -216,6 +270,8 @@ checkable without a device or an emulator.
 | The address does not resolve on the phone | Tailscale must be installed, signed in to the same account and toggled on there; `*.ts.net` names resolve only inside the tailnet (MagicDNS). |
 | Connected but silent on a call | Check the phone's media volume and that the call is *answered* (the microphone only opens then). Output routing is on the Settings screen. |
 | Zaya's voice comes from the laptop, not the phone | Output route is `desktop`; switch to `Phone` or `Both`, or answer a call (a call routes to the phone automatically). |
+| A call only arrives as a notification | Android 14+: allow *Full screen notifications* for Zaya — Settings shows a card with the shortcut. |
+| A finished task did not ring | Working as designed if you were at the desktop, the phone was offline, or it fell inside `quiet_hours`. It is still in the phone's activity list; `away_minutes` and `call_when_task_finishes` in `config/api_keys.json` tune the behaviour. |
 | A command stays "submitted" | The laptop was asleep; the phone resends in-flight commands after a reconnect and the laptop dedupes by request id, so it will not run twice. |
 | "This phone was removed from Zaya" | It was revoked on the laptop; pair again with a fresh key. |
 | Build fails on `compileSdk 36` | Install Android SDK Platform 36 and set `sdk.dir` in `mobile/android/local.properties`. |

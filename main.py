@@ -2560,6 +2560,19 @@ class JarvisLive:
 
     # ── Zaya-initiated calls ───────────────────────────────────────────────
 
+    def _phone_reachable(self) -> bool:
+        """True while a paired phone actually holds a session with this runtime.
+
+        Ringing a phone that is not there helps nobody: the policy downgrades such
+        a call to a notification, which the phone picks up when it reconnects.
+        """
+        try:
+            dashboard = getattr(self, '_dashboard', None)
+            mobile = dashboard.mobile() if dashboard is not None else None
+            return bool(mobile is not None and mobile.sessions)
+        except Exception:
+            return False
+
     def _on_zaya_call_answered(self, call) -> None:
         """The owner picked up. Zaya already knows why she rang.
 
@@ -2708,6 +2721,14 @@ class JarvisLive:
         self._bridge.start()
         self._calls = get_call_manager()
         self._calls.set_answer_hook(self._on_zaya_call_answered)
+        # A finished task rings the phone only when the owner is somewhere else:
+        # this machine reports how long it has gone untouched, and the mobile API
+        # knows whether a paired phone holds a session right now.
+        from core.mobile_calls import phone_call_settings
+        from core.presence import owner_is_away
+        self._calls.set_away_provider(
+            lambda: owner_is_away(phone_call_settings().away_seconds))
+        self._calls.set_reachable_provider(self._phone_reachable)
 
         while True:
             _resumed_with = False

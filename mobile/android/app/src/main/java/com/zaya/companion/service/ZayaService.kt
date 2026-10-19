@@ -72,6 +72,7 @@ class ZayaService : Service() {
                     Notifications.cancel(this, Notifications.ID_CALL)
                     ringingCallId = ""
                 }
+                Ringer.stop()
             }
 
             ACTION_DECLINE -> {
@@ -79,6 +80,7 @@ class ZayaService : Service() {
                 if (callId.isNotEmpty()) current?.decline(callId)
                 Notifications.cancel(this, Notifications.ID_CALL)
                 ringingCallId = ""
+                Ringer.stop()
             }
         }
         return START_STICKY
@@ -87,6 +89,7 @@ class ZayaService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        Ringer.stop()
         Notifications.cancel(this, Notifications.ID_CALL)
         watchers?.cancel()
         runtime?.stop()
@@ -102,10 +105,12 @@ class ZayaService : Service() {
         when (effect) {
             is RuntimeEffect.Ring -> {
                 ringingCallId = effect.call.callId
+                Ringer.start(this)
                 Notifications.post(this, Notifications.ID_CALL, Notifications.incomingCall(this, effect.call))
             }
 
             RuntimeEffect.StopRinging -> {
+                Ringer.stop()
                 if (ringingCallId.isNotEmpty()) {
                     Notifications.cancel(this, Notifications.ID_CALL)
                     ringingCallId = ""
@@ -132,6 +137,7 @@ class ZayaService : Service() {
         if (status.isOnline) {
             val active = source.model.call.value
             if (active !is CallUiState.Ringing && ringingCallId.isNotEmpty()) {
+                Ringer.stop()
                 Notifications.cancel(this, Notifications.ID_CALL)
                 ringingCallId = ""
             }
