@@ -220,4 +220,19 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
     registry = ActionRegistry(valid, logger)
     registry._all_records = all_records
     logger(f"Action discovery complete: {len(valid)} active.")
+    global _global_registry
+    _global_registry = registry
     return registry
+
+
+_global_registry: ActionRegistry | None = None
+
+
+def get_action_registry(actions_dir: Path | None = None) -> ActionRegistry:
+    """Return the global ActionRegistry, discovering actions from actions_dir if not initialized."""
+    global _global_registry
+    if _global_registry is None:
+        if actions_dir is None:
+            actions_dir = Path(__file__).resolve().parent.parent / "actions"
+        _global_registry = discover_actions(actions_dir, logger=lambda _: None)
+    return _global_registry

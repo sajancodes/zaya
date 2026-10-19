@@ -68,8 +68,19 @@ def mission_control(parameters: dict, *, owner_request: str | None = None, **_kw
                 {"missions": missions},
             )
 
+        elif action == "continue":
+            if not mission_id:
+                m = supervisor.latest_mission()
+                mission_id = m.id if m else ""
+
+            if not mission_id:
+                return ToolResult("failed", "No mission specified or found to continue.")
+
+            approved = bool(parameters.get("approved", True))
+            return supervisor.continue_mission(mission_id, approved=approved)
+
         else:
-            return ToolResult("failed", f"Unknown mission action: '{action}'. Use start, status, cancel, or list.")
+            return ToolResult("failed", f"Unknown mission action: '{action}'. Use start, status, cancel, list, or continue.")
 
     except Exception as e:
         return ToolResult("failed", f"Mission control error: {e}")
@@ -77,13 +88,14 @@ def mission_control(parameters: dict, *, owner_request: str | None = None, **_kw
 
 TOOL = {
     "name": "mission_control",
-    "description": "Plan, supervise, inspect, and cancel bounded multi-step autonomous background missions with verification checks.",
+    "description": "Plan, supervise, inspect, continue, and cancel bounded multi-step autonomous background missions with verification checks.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "enum": ["start", "status", "cancel", "list"]},
+            "action": {"type": "STRING", "enum": ["start", "status", "cancel", "list", "continue"]},
             "goal": {"type": "STRING", "description": "The objective to plan and execute when action='start'."},
-            "mission_id": {"type": "STRING", "description": "Optional specific mission ID for status or cancellation."},
+            "mission_id": {"type": "STRING", "description": "Optional specific mission ID for status, cancellation, or continue."},
+            "approved": {"type": "BOOLEAN", "description": "Whether to approve pending confirmation when action='continue' (default True)."},
             "limit": {"type": "INTEGER", "description": "Maximum missions to return when action='list'."},
         },
         "required": ["action"],

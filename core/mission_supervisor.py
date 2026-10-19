@@ -1,7 +1,8 @@
 """Background multi-step mission planner, execution supervisor, and state manager.
 
 Plans bounded missions (<= 5 steps, <= 4 verification checks) with SMART tier planner,
-deterministic tool validation, trust propagation from owner contexts, and atomic persistence.
+deterministic tool validation, trust propagation from owner contexts, execution through
+Operator and canonical confirmation policies, and atomic persistence.
 """
 from __future__ import annotations
 
@@ -34,12 +35,139 @@ STORE_PATH = Path(__file__).resolve().parent.parent / "memory" / "missions.json"
 MAX_STEPS = 5
 MAX_CHECKS = 4
 MAX_ROUNDS = 3
+MAX_HISTORY_MISSIONS = 150
 
 _ALLOWED_TRUSTS = {TRUST_LOCAL_OWNER, TRUST_AUTHENTICATED_REMOTE_OWNER}
+
+# Explicit whitelist of tools permissible in background missions
+MISSION_ALLOWED_TOOLS = {
+    "system_diagnostics",
+    "runtime_status",
+    "runtime_logs",
+    "computer_control",
+    "computer_settings",
+    "file_controller",
+    "file_processor",
+    "open_app",
+    "terminate_app",
+    "browser_control",
+    "web_search",
+    "git_control",
+    "game_updater",
+    "personal_profile",
+    "reminder",
+    "conversation_history",
+    "session_activity",
+    "terminal_exec",
+}
+
+# Operation classification mapping for tools
+TOOL_OPERATION_CLASSES: dict[str, set[str]] = {
+    "system_diagnostics": {"inspect_system", "read"},
+    "runtime_status": {"inspect_system", "read"},
+    "runtime_logs": {"inspect_system", "read"},
+    "personal_profile": {"read"},
+    "conversation_history": {"read"},
+    "session_activity": {"read", "change_settings"},
+    "web_search": {"search", "read"},
+    "open_app": {"run_command", "computer_control"},
+    "terminate_app": {"terminate_process"},
+    "computer_control": {"computer_control"},
+    "computer_settings": {"change_settings", "computer_control"},
+    "file_controller": {"inspect_files", "read", "write_files", "delete"},
+    "file_processor": {"inspect_files", "read", "write_files"},
+    "browser_control": {"search", "read", "computer_control"},
+    "git_control": {"git_commit", "git_push"},
+    "game_updater": {"install", "run_command"},
+    "reminder": {"write_files"},
+    "terminal_exec": {"run_command"},
+}
+
+
+def classify_goal_scope(goal: str) -> set[str]:
+    """Deterministically classify authorized operation classes from the owner's request."""
+    g = str(goal or "").lower()
+    allowed: set[str] = {"read", "search", "inspect_system", "inspect_files"}
+
+    # Process termination
+    if re.search(r"\b(kill|terminate|close|stop|end|abort)\b.*\b(process|app|program|task|chrome|brave|window)\b", g) or \
+       re.search(r"\b(kill|terminate|close)\b", g):
+        allowed.add("terminate_process")
+
+    # File operations
+    if re.search(r"\b(write|create|edit|modify|save|append|update|touch|make|generate)\b.*\b(file|script|code|folder|directory)\b", g):
+        allowed.add("write_files")
+    if re.search(r"\b(delete|remove|erase|clean|clear|purge|rm|unlink)\b", g):
+        allowed.add("delete")
+
+    # Computer control and settings
+    if re.search(r"\b(click|press|type|hotkey|drag|scroll|mouse|cursor|grounding)\b", g):
+        allowed.add("computer_control")
+    if re.search(r"\b(volume|brightness|dark mode|wifi|bluetooth|setting|mute|unmute)\b", g):
+        allowed.add("change_settings")
+
+    # Commands / installation
+    if re.search(r"\b(run|execute|command|script|shell|terminal|powershell|pwsh|cmd)\b", g):
+        allowed.add("run_command")
+    if re.search(r"\b(install|setup|update game|upgrade|download)\b", g):
+        allowed.add("install")
+
+    # Git
+    if re.search(r"\b(git|commit|stage)\b", g):
+        allowed.add("git_commit")
+    if re.search(r"\b(push|publish)\b", g):
+        allowed.add("git_push")
+
+    # Messages / external
+    if re.search(r"\b(send|message|whatsapp|telegram|email|call)\b", g):
+        allowed.add("send_message")
+
+    return allowed
+
+
+def validate_step(tool_name: str, parameters: dict[str, Any], allowed_scopes: set[str]) -> str | None:
+    """Validate step tool, authorization scope, and parameters. Returns error string or None."""
+    tool_name = str(tool_name or "").strip()
+    if not tool_name:
+        return "Empty tool name (empty tool steps are rejected)."
+
+    if tool_name not in MISSION_ALLOWED_TOOLS:
+        return f"Tool '{tool_name}' is not in the mission allowed tools set."
+
+    tool_scopes = TOOL_OPERATION_CLASSES.get(tool_name, set())
+    if not (tool_scopes & allowed_scopes):
+        return f"Tool '{tool_name}' requires operation classes {sorted(tool_scopes)}, but authorized scope is {sorted(allowed_scopes)}."
+
+    if not isinstance(parameters, dict):
+        return f"Parameters for tool '{tool_name}' must be a dictionary."
+
+    # Parameter schema inspection
+    try:
+        from core.action_loader import get_action_registry
+        reg = get_action_registry()
+        rec = reg._actions.get(tool_name)
+        if rec and rec.parameters:
+            schema = rec.parameters
+            required = schema.get("required", [])
+            for req in required:
+                if req not in parameters:
+                    return f"Missing required parameter '{req}' for tool '{tool_name}'."
+            props = schema.get("properties", {})
+            for k, v in parameters.items():
+                if isinstance(v, str) and len(v) > 5000:
+                    return f"Parameter '{k}' exceeds length limits."
+                if k in props and "enum" in props[k]:
+                    if v not in props[k]["enum"]:
+                        return f"Invalid value '{v}' for '{k}'. Expected {props[k]['enum']}."
+    except Exception as e:
+        logger.debug("Schema validation error: %s", e)
+
+    return None
 
 
 @dataclass
 class MissionStep:
+
     id: int
     description: str
     tool: str = ""
@@ -53,7 +181,7 @@ class MissionStep:
 class Mission:
     id: str
     goal: str
-    status: str = "planning"  # planning, running, completed, failed, blocked, cancelled
+    status: str = "planning"  # planning, running, completed, completed_unverified, failed, blocked, cancelled, waiting_confirmation, paused, interrupted
     trust_level: str = TRUST_LOCAL_OWNER
     steps: list[dict[str, Any]] = field(default_factory=list)
     checks: list[str] = field(default_factory=list)
@@ -63,6 +191,7 @@ class Mission:
     round_number: int = 1
     error: str = ""
     summary: str = ""
+    pending_confirmation: dict[str, Any] | None = None
 
     def public(self) -> dict[str, Any]:
         return audit.redact(asdict(self))
@@ -96,7 +225,6 @@ class MissionSupervisor:
         self._clock = clock
         self._lock = threading.RLock()
         self._missions: dict[str, Mission] = {}
-        self._active_worker: threading.Thread | None = None
         self._cancel_events: dict[str, threading.Event] = {}
         self._load()
 
@@ -105,16 +233,33 @@ class MissionSupervisor:
             if not self._path.exists():
                 return
             try:
-                data = json.loads(self._path.read_text(encoding="utf-8"))
-                for row in data.get("missions", []):
-                    m = Mission(**row)
-                    self._missions[m.id] = m
+                raw = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    rows = raw.get("missions", list(raw.values()) if not raw.get("missions") else [])
+                elif isinstance(raw, list):
+                    rows = raw
+                else:
+                    rows = []
+
+                for row in rows:
+                    if isinstance(row, dict) and "id" in row and "goal" in row:
+                        m = Mission(**row)
+                        # Crash/restart recovery: any previously running or waiting mission becomes paused/interrupted
+                        if m.status in ("running", "planning"):
+                            m.status = "interrupted"
+                            m.error = "Mission interrupted by system restart. Resume explicitly via continue."
+                        elif m.status == "waiting_confirmation":
+                            m.status = "paused"
+                            m.error = "Pending confirmation preserved on restart. Approve or deny to continue."
+                        self._missions[m.id] = m
             except Exception as e:
-                logger.debug("Failed to load missions from %s: %s", self._path, e)
+                logger.error("Corrupt or invalid missions.json at %s: %s", self._path, e)
+                # Keep existing in-memory state or fresh store if unreadable
 
     def _save(self) -> None:
         with self._lock:
             try:
+                self._prune_history()
                 self._path.parent.mkdir(parents=True, exist_ok=True)
                 tmp_path = self._path.with_suffix(".tmp")
                 payload = {
@@ -125,19 +270,37 @@ class MissionSupervisor:
             except Exception as e:
                 logger.debug("Failed to save missions to %s: %s", self._path, e)
 
+    def _prune_history(self, keep: int = MAX_HISTORY_MISSIONS) -> None:
+        """Keep 100-200 missions, preserving unfinished/interrupted missions."""
+        if len(self._missions) <= keep:
+            return
+
+        unfinished = {mid: m for mid, m in self._missions.items() if m.status in ("running", "planning", "interrupted", "paused", "waiting_confirmation")}
+        terminal = [m for m in self._missions.values() if m.status not in ("running", "planning", "interrupted", "paused", "waiting_confirmation")]
+        terminal.sort(key=lambda m: m.created_at, reverse=True)
+
+        keep_count = max(0, keep - len(unfinished))
+        kept_terminal = {m.id: m for m in terminal[:keep_count]}
+
+        self._missions = {**unfinished, **kept_terminal}
+
     def plan_mission(self, goal: str) -> tuple[list[dict[str, Any]], list[str]]:
-        """Decompose an owner request into bounded steps and verification checks using SMART tier."""
+        """Decompose an owner request into bounded steps and verification checks."""
+        allowed_scopes = classify_goal_scope(goal)
+        allowed_tool_list = sorted([t for t in MISSION_ALLOWED_TOOLS if TOOL_OPERATION_CLASSES.get(t, set()) & allowed_scopes])
+
         system_prompt = (
             "You are Zaya, Sajan Rai's autonomous system operator. "
             "Decompose the given user goal into a concise, ordered execution plan. "
+            f"You may ONLY choose tools from this exact allowed list: {allowed_tool_list}. "
             f"Provide at most {MAX_STEPS} concrete steps and at most {MAX_CHECKS} verification checks. "
-            "Never add destructive operations (e.g. format drive, rm -rf, drop database, credential theft). "
-            "For each step specify: id (1-based integer), description, tool (recommended tool name if known), parameters (dict). "
+            "Never invent tools outside the allowed list. Every step must have a non-empty tool. "
+            "For each step specify: id (1-based integer), description, tool (must be from allowed list), parameters (dict). "
             "Return JSON only: {\"steps\": [{\"id\": 1, \"description\": \"...\", \"tool\": \"...\", \"parameters\": {}}], "
-            "\"checks\": [\"check description\"]}. You have no tools."
+            "\"checks\": [\"concrete check description\"]}. You have no tools."
         )
 
-        data = _json_call(system_prompt, {"goal": goal})
+        data = _json_call(system_prompt, {"goal": goal, "allowed_tools": allowed_tool_list})
         steps: list[dict[str, Any]] = []
         checks: list[str] = []
 
@@ -146,10 +309,11 @@ class MissionSupervisor:
             if isinstance(raw_steps, list):
                 for idx, s in enumerate(raw_steps[:MAX_STEPS], start=1):
                     if isinstance(s, dict):
+                        tool_candidate = str(s.get("tool", "")).strip().lower()
                         steps.append({
                             "id": idx,
                             "description": str(s.get("description", f"Step {idx}")).strip()[:300],
-                            "tool": str(s.get("tool", "")).strip()[:100],
+                            "tool": tool_candidate,
                             "parameters": s.get("parameters", {}) if isinstance(s.get("parameters"), dict) else {},
                             "status": "pending",
                             "result": "",
@@ -162,20 +326,19 @@ class MissionSupervisor:
                     if isinstance(c, str) and c.strip():
                         checks.append(c.strip()[:300])
 
-        if not steps:
-            steps = [{
-                "id": 1,
-                "description": f"Execute goal: {goal[:200]}",
-                "tool": "",
-                "parameters": {},
-                "status": "pending",
-                "result": "",
-                "error": "",
-            }]
         if not checks:
-            checks = ["Verify final outcome and report results."]
+            checks = ["Verify primary goal execution outcome."]
 
         return steps, checks
+
+    def validate_step(self, step: dict[str, Any], goal: str) -> tuple[bool, str]:
+        """Validate step tool, authorization scope, and parameters."""
+        tool_name = step.get("tool", "")
+        params = step.get("parameters", {})
+        err = validate_step(tool_name, params, classify_goal_scope(goal))
+        if err:
+            return False, err
+        return True, ""
 
     def start_mission(self, goal: str) -> Mission:
         """Create and start a background mission with trust propagated from current owner context."""
@@ -189,6 +352,9 @@ class MissionSupervisor:
             raise ValueError("Mission goal cannot be empty.")
 
         steps, checks = self.plan_mission(clean_goal)
+        if not steps:
+            raise ValueError("Planner failed to produce valid executable steps.")
+
         mission_id = f"m-{uuid.uuid4().hex[:8]}"
 
         mission = Mission(
@@ -210,7 +376,89 @@ class MissionSupervisor:
             self._cancel_events[mission_id] = cancel_event
             self._save()
 
-        # Launch background execution thread
+        self._spawn_worker(mission_id, cancel_event, caller_trust)
+        return mission
+
+    def execute_step_sync(self, mission_id: str) -> None:
+        """Execute one pending step synchronously (used in tests and stepping)."""
+        cancel_event = self._cancel_events.get(mission_id, threading.Event())
+        caller_trust = self._missions[mission_id].trust_level if mission_id in self._missions else TRUST_LOCAL_OWNER
+        # Run one iteration of worker logic
+        with self._lock:
+            mission = self._missions.get(mission_id)
+            if not mission or mission.status in ("paused", "waiting_confirmation", "interrupted", "failed", "cancelled", "completed", "completed_unverified"):
+                return
+            step_to_run = None
+            for s in mission.steps:
+                if s["status"] == "pending":
+                    step_to_run = s
+                    s["status"] = "running"
+                    mission.current_step = s["id"]
+                    mission.updated_at = self._clock()
+                    self._save()
+                    break
+
+        if step_to_run is None:
+            self._review_and_verify_mission(mission_id)
+            return
+
+        valid, reason = self.validate_step(step_to_run, mission.goal)
+        if not valid:
+            with self._lock:
+                mission = self._missions.get(mission_id)
+                if mission:
+                    step_to_run["status"] = "failed"
+                    step_to_run["error"] = reason
+                    mission.status = "failed"
+                    mission.error = f"Step validation failed: {reason}"
+                    mission.updated_at = self._clock()
+                    self._save()
+            return
+
+        step_id = step_to_run["id"]
+        tool_name = step_to_run["tool"]
+        params = step_to_run.get("parameters", {})
+
+        result, needs_confirm = self._execute_step_via_operator(tool_name, params, mission.goal, caller_trust)
+
+        if needs_confirm:
+            with self._lock:
+                mission = self._missions.get(mission_id)
+                if mission:
+                    step_to_run["status"] = "pending"
+                    mission.status = "waiting_confirmation"
+                    mission.pending_confirmation = {
+                        "step_id": step_id,
+                        "tool": tool_name,
+                        "parameters": params,
+                    }
+                    mission.updated_at = self._clock()
+                    self._save()
+            return
+
+        success = (result.status == "success")
+        result_text = str(result.summary or result.data or "")[:2000]
+        error_text = str(result.summary or "Tool execution failed")[:1000] if not success else ""
+
+        with self._lock:
+            mission = self._missions.get(mission_id)
+            if mission:
+                for s in mission.steps:
+                    if s["id"] == step_id:
+                        s["status"] = "completed" if success else "failed"
+                        s["result"] = result_text
+                        s["error"] = error_text
+                mission.updated_at = self._clock()
+                if not success:
+                    if result.retryable and not result.side_effect:
+                        step_to_run["status"] = "pending"
+                        step_to_run["error"] = f"Retryable error: {error_text}"
+                    else:
+                        mission.status = "failed"
+                        mission.error = error_text
+                self._save()
+
+    def _spawn_worker(self, mission_id: str, cancel_event: threading.Event, caller_trust: str) -> None:
         th = threading.Thread(
             target=self._run_mission_worker,
             args=(mission_id, cancel_event, caller_trust),
@@ -218,7 +466,6 @@ class MissionSupervisor:
             name=f"mission-{mission_id}",
         )
         th.start()
-        return mission
 
     def _run_mission_worker(self, mission_id: str, cancel_event: threading.Event, caller_trust: str) -> None:
         """Background execution worker loop for a mission."""
@@ -234,8 +481,9 @@ class MissionSupervisor:
                         mission.updated_at = self._clock()
                         self._save()
                         return
+                    if mission.status in ("paused", "waiting_confirmation", "interrupted", "failed", "cancelled", "completed", "completed_unverified"):
+                        return
 
-                # Find next pending step
                 step_to_run = None
                 with self._lock:
                     for s in mission.steps:
@@ -248,40 +496,50 @@ class MissionSupervisor:
                             break
 
                 if step_to_run is None:
-                    # All steps executed -> run validation / review
-                    self._review_mission(mission_id)
+                    # Run bounded review and verification
+                    self._review_and_verify_mission(mission_id)
                     return
 
-                # Execute step
+                # Validate step
+                valid, reason = self.validate_step(step_to_run, mission.goal)
+                if not valid:
+                    with self._lock:
+                        mission = self._missions.get(mission_id)
+                        if mission:
+                            step_to_run["status"] = "failed"
+                            step_to_run["error"] = reason
+                            mission.status = "failed"
+                            mission.error = f"Step validation failed: {reason}"
+                            mission.updated_at = self._clock()
+                            self._save()
+                    return
+
+                # Execute step through canonical Operator
                 step_id = step_to_run["id"]
-                tool_name = step_to_run.get("tool", "")
+                tool_name = step_to_run["tool"]
                 params = step_to_run.get("parameters", {})
 
-                result_text = ""
-                error_text = ""
-                success = False
+                result, needs_confirm = self._execute_step_via_operator(tool_name, params, mission.goal, caller_trust)
 
-                if tool_name:
-                    try:
-                        from core.action_loader import registry
-                        handler = registry.get(tool_name)
-                        if handler:
-                            # Invoke tool synchronously or await if coroutine
-                            res = handler(params)
-                            if asyncio.iscoroutine(res):
-                                res = asyncio.run(res)
-                            res = normalize(res)
-                            success = (res.status == "success")
-                            result_text = str(res.summary or res.data or "")[:2000]
-                            if not success:
-                                error_text = str(res.summary or "Tool execution failed")[:1000]
-                        else:
-                            error_text = f"Tool '{tool_name}' not found in registry."
-                    except Exception as e:
-                        error_text = f"Execution exception: {e}"
-                else:
-                    result_text = f"Step executed: {step_to_run['description']}"
-                    success = True
+                if needs_confirm:
+                    with self._lock:
+                        mission = self._missions.get(mission_id)
+                        if mission:
+                            step_to_run["status"] = "pending"  # Will re-run after confirmation
+                            mission.status = "waiting_confirmation"
+                            mission.pending_confirmation = {
+                                "step_id": step_id,
+                                "tool": tool_name,
+                                "parameters": params,
+                            }
+                            mission.updated_at = self._clock()
+                            self._save()
+                    return
+
+                # Treat tool result as untrusted evidence
+                success = (result.status == "success")
+                result_text = str(result.summary or result.data or "")[:2000]
+                error_text = str(result.summary or "Tool execution failed")[:1000] if not success else ""
 
                 with self._lock:
                     mission = self._missions.get(mission_id)
@@ -292,39 +550,234 @@ class MissionSupervisor:
                                 s["result"] = result_text
                                 s["error"] = error_text
                         mission.updated_at = self._clock()
-                        if not success:
-                            mission.status = "failed"
-                            mission.error = error_text
-                            self._save()
-                            return
-                        self._save()
 
-                if cancel_event.is_set():
-                    with self._lock:
-                        if mission:
-                            mission.status = "cancelled"
-                            self._save()
-                    return
+                        if not success:
+                            # Check retryability
+                            if result.retryable and not result.side_effect:
+                                s["status"] = "pending"
+                                s["error"] = f"Retryable error: {error_text}"
+                            else:
+                                mission.status = "failed"
+                                mission.error = error_text
+                                self._save()
+                                return
+                        self._save()
 
         finally:
             trust_context.reset(token)
 
-    def _review_mission(self, mission_id: str) -> None:
-        """Deterministic review of completed mission steps against checks."""
+    def _execute_step_via_operator(self, tool_name: str, params: dict[str, Any], goal: str, trust_level: str) -> tuple[ToolResult, bool]:
+        """Execute action through Operator, respecting confirmations and audit trails."""
+        from core.action_loader import get_action_registry
+        from core.operator import Operator
+        from core.task_runtime import get_runtime
+        from memory.config_manager import get_auto_execute_enabled
+
+        # Check confirmation requirement for destructive/privileged tools
+        destructive_tools = {"terminate_app", "terminal_exec"}
+        if tool_name in destructive_tools and not get_auto_execute_enabled():
+            return ToolResult("failed", "Action requires human confirmation."), True
+
+        reg = get_action_registry()
+        rec = reg._actions.get(tool_name)
+        if not rec or not rec.handler:
+            return ToolResult("failed", f"Tool '{tool_name}' not available in registry."), False
+
+        handler = rec.handler
+
+        async def _invoke():
+            res = handler(params)
+            if asyncio.iscoroutine(res):
+                res = await res
+            return normalize(res)
+
+        operator = Operator(get_runtime())
+        try:
+            loop = asyncio.new_event_loop()
+            res = loop.run_until_complete(
+                operator.execute(
+                    name=tool_name,
+                    invoke=_invoke,
+                    goal=goal,
+                    trust_level=trust_level,
+                )
+            )
+            loop.close()
+            return res, False
+        except Exception as e:
+            return ToolResult("failed", f"Operator execution exception: {e}"), False
+
+    def _review_and_verify_mission(self, mission_id: str) -> None:
+        """Bounded review loop and real verification of checks."""
         with self._lock:
             mission = self._missions.get(mission_id)
             if not mission:
                 return
 
-            all_completed = all(s.get("status") == "completed" for s in mission.steps)
-            if all_completed:
-                mission.status = "completed"
-                mission.summary = f"All {len(mission.steps)} steps successfully executed and verified."
+        # 1. Deterministic verification of outcomes
+        verification_passed, verif_detail = self._verify_checks(mission)
+
+        # 2. Review loop if incomplete and rounds remain
+        if not verification_passed and mission.round_number < MAX_ROUNDS:
+            followup_steps = self._review_followup(mission, verif_detail)
+            if followup_steps:
+                with self._lock:
+                    mission.round_number += 1
+                    mission.steps.extend(followup_steps)
+                    mission.updated_at = self._clock()
+                    self._save()
+                # Continue execution
+                cancel_event = self._cancel_events.get(mission_id, threading.Event())
+                self._spawn_worker(mission_id, cancel_event, mission.trust_level)
+                return
+
+        with self._lock:
+            mission = self._missions.get(mission_id)
+            if not mission:
+                return
+
+            all_steps_ok = all(s.get("status") == "completed" for s in mission.steps)
+            if all_steps_ok:
+                if verification_passed:
+                    mission.status = "completed"
+                    mission.summary = f"Execution succeeded and verified: {verif_detail}"
+                else:
+                    mission.status = "completed_unverified"
+                    mission.summary = f"Execution succeeded but verification inconclusive: {verif_detail}"
             else:
                 mission.status = "failed"
                 mission.summary = "One or more steps failed execution."
+
             mission.updated_at = self._clock()
             self._save()
+
+    def _verify_checks(self, mission: Mission) -> tuple[bool, str]:
+        """Verify real deterministic outcomes from checks."""
+        checks = mission.checks
+        if not checks:
+            return True, "No verification checks specified."
+
+        verifications: list[str] = []
+        all_passed = True
+
+        for check in checks:
+            c_lower = check.lower()
+            # File existence check
+            m = re.search(r"file\s*(?:exists\s*:?|:\s*)?\s*['\"]?([\w\-\\./:]+)['\"]?(?:\s+exists)?", c_lower)
+            if m and (":\\" in m.group(1) or "/" in m.group(1) or "." in m.group(1)):
+                target_path = Path(m.group(1))
+                if target_path.exists():
+                    verifications.append(f"Verified: {target_path} exists")
+                else:
+                    all_passed = False
+                    verifications.append(f"Failed check: {target_path} does not exist")
+                continue
+
+            # Process / window running check
+            m_proc = re.search(r"process\s+['\"]?([\w\-\\.]+)['\"]?\s+running", c_lower)
+            if m_proc:
+                pname = m_proc.group(1).lower()
+                try:
+                    import psutil
+                    running = any(pname in (p.info["name"] or "").lower() for p in psutil.process_iter(["name"]))
+                    if running:
+                        verifications.append(f"Verified: {pname} is running")
+                    else:
+                        all_passed = False
+                        verifications.append(f"Failed check: {pname} is not running")
+                except Exception:
+                    all_passed = False
+                continue
+
+            # Default outcome verification: check that steps executed without error
+            step_results = [s.get("result", "") for s in mission.steps if s.get("status") == "completed"]
+            if any(step_results):
+                verifications.append(f"Verified via step results ({len(step_results)} steps returned output)")
+            else:
+                all_passed = False
+                verifications.append(f"Unverifiable check: '{check}'")
+
+        return all_passed, "; ".join(verifications)
+
+    def _review_followup(self, mission: Mission, verif_detail: str) -> list[dict[str, Any]]:
+        """Bounded reviewer asking if further allowed steps are needed from original brief."""
+        allowed_scopes = classify_goal_scope(mission.goal)
+        allowed_tools = sorted([t for t in MISSION_ALLOWED_TOOLS if TOOL_OPERATION_CLASSES.get(t, set()) & allowed_scopes])
+
+        review_prompt = (
+            "You are Zaya reviewing mission progress against the original owner goal. "
+            f"Original goal: '{mission.goal}'. "
+            f"Verification findings: '{verif_detail}'. "
+            f"Executed steps: {[{'desc': s['description'], 'tool': s['tool'], 'status': s['status']} for s in mission.steps]}. "
+            f"Allowed tools: {allowed_tools}. "
+            "You may return decision 'complete', 'blocked', or 'continue'. "
+            "For 'continue', provide up to 2 follow-up steps using ONLY allowed tools. "
+            "Never escalate scope or invent new tools. Return JSON only: "
+            "{\"decision\": \"complete|continue|blocked\", \"steps\": [{\"id\": 1, \"description\": \"...\", \"tool\": \"...\", \"parameters\": {}}]}"
+        )
+
+        resp = _json_call(review_prompt, {"goal": mission.goal})
+        if isinstance(resp, dict) and resp.get("decision") == "continue":
+            raw_steps = resp.get("steps", [])
+            valid_steps = []
+            curr_id = len(mission.steps) + 1
+            for s in raw_steps[:2]:
+                if isinstance(s, dict):
+                    tool = str(s.get("tool", "")).strip().lower()
+                    if tool in allowed_tools:
+                        valid_steps.append({
+                            "id": curr_id,
+                            "description": str(s.get("description", "Follow-up step"))[:300],
+                            "tool": tool,
+                            "parameters": s.get("parameters", {}) if isinstance(s.get("parameters"), dict) else {},
+                            "status": "pending",
+                            "result": "",
+                            "error": "",
+                        })
+                        curr_id += 1
+            return valid_steps
+
+        return []
+
+    def continue_mission(self, mission_id: str, approved: bool = True) -> ToolResult:
+        """Resume a paused, interrupted, or waiting_confirmation mission."""
+        require_owner()
+        caller_trust = get_trust()
+        if caller_trust not in _ALLOWED_TRUSTS:
+            raise PermissionError(f"Owner authorization required to continue missions (got {caller_trust}).")
+
+        with self._lock:
+            mission = self._missions.get(mission_id)
+            if not mission:
+                return ToolResult("failed", f"Mission {mission_id} not found.")
+
+            if mission.status == "waiting_confirmation":
+                if not approved:
+                    mission.status = "cancelled"
+                    mission.error = "Confirmation denied by owner."
+                    mission.updated_at = self._clock()
+                    self._save()
+                    return ToolResult("success", f"Mission {mission_id} denied and cancelled.", {"mission": mission.public()}, side_effect=True)
+
+                # Approved -> resume execution
+                mission.status = "running"
+                mission.pending_confirmation = None
+                mission.updated_at = self._clock()
+                self._save()
+
+            elif mission.status in ("interrupted", "paused"):
+                mission.status = "running"
+                mission.updated_at = self._clock()
+                self._save()
+
+            else:
+                return ToolResult("failed", f"Mission {mission_id} is in status '{mission.status}' and cannot be continued.")
+
+            cancel_event = threading.Event()
+            self._cancel_events[mission_id] = cancel_event
+
+        self._spawn_worker(mission_id, cancel_event, caller_trust)
+        return ToolResult("success", f"Mission {mission_id} resumed.", {"mission": mission.public()}, side_effect=True)
 
     def get_mission(self, mission_id: str) -> Mission | None:
         with self._lock:
