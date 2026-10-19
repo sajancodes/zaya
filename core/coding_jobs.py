@@ -18,7 +18,7 @@ import time
 import uuid
 
 from core import audit, opencode_cli
-from core.coding_projects import resolve_project, prepare_project
+from core.coding_projects import prepare_workspace, resolve_project
 from core.coding_supervisor import Supervisor, MAX_PASSES, initial_prompt, followup_prompt
 from core.execution_policy import get_trust, require_owner
 from core.opencode_events import Tally, parse_line
@@ -56,6 +56,7 @@ class CodingJob:
     passes: list[dict] = field(default_factory=list)
     observations: list[dict] = field(default_factory=list)
     review: str = ''
+    purpose: str = 'coding'
 
     def public(self):
         return audit.redact(asdict(self))
@@ -143,14 +144,14 @@ class CodingJobs:
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError('I am already working on a coding request. Ask me to stop it first.')
 
-    def start(self, project, goal, *, agent='', model='', create_project=False):
+    def start(self, project, goal, *, agent='', model='', create_project=False, purpose='coding'):
         require_owner()
         if not goal.strip():
             raise ValueError('Tell me what you want done in the project.')
         with self._lock:
             self._available()
-            project = prepare_project(str(project), create=create_project)
-            job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model)
+            project = prepare_workspace(str(project), purpose=purpose, create=create_project)
+            job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model, purpose=purpose)
             self._jobs[job.id] = job
             self._begin(job)
         return job
@@ -162,7 +163,10 @@ class CodingJobs:
             job = self.latest()
             if job is None or not job.session_id:
                 raise ValueError('There is no saved coding session to continue.')
-            resolve_project(job.project, allow_empty=True)
+            if job.purpose == 'coding':
+                resolve_project(job.project, allow_empty=True)
+            else:
+                prepare_workspace(job.project, purpose=job.purpose)
             if task.strip():
                 job.goal += '\nOwner follow-up: ' + task.strip()
             elif job.phase == 'completed':
@@ -196,7 +200,8 @@ class CodingJobs:
     def _run(self, job):
         narrator, tally = Narrator(Path(job.project).name), Tally()
         try:
-            self._notice("I'm turning your request into a clear coding brief, sir.")
+            self._notice("I'm preparing your software setup request for OpenCode, sir." if job.purpose == 'setup'
+                         else "I'm turning your request into a clear coding brief, sir.")
             brief = self._supervisor.prepare(job.goal, job.project)
             if self._stop.is_set():
                 return
@@ -231,7 +236,7 @@ class CodingJobs:
                 job.review = review.get('decision', 'blocked')
                 job.passes[-1]['review'] = review
                 if job.review == 'complete':
-                    job.phase, job.progress = 'completed', 'reviewed against the coding brief'
+                    job.phase, job.progress = 'completed', 'reviewed against the request brief'
                     self._notice("I've reviewed the result against your request, sir. I have the changes and check results ready.")
                     break
                 if job.review != 'continue' or number == MAX_PASSES:

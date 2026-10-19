@@ -1,8 +1,10 @@
-"""Resolve the project a coding job must run in, and prove it stays there.
+"""Resolve working directories for coding and software setup jobs.
 
 Owner-approved roots are searched; an explicit absolute path is accepted but
 still validated. The whole home directory is never scanned. A job is only
-started against something that actually looks like a project or repository.
+started against something that actually looks like a project or repository,
+unless a new project was requested. Software setup can instead use home or an
+existing approved directory without adding home to the coding roots.
 """
 from __future__ import annotations
 
@@ -160,3 +162,23 @@ def contains(project: Path, other: str | Path) -> bool:
     raw = Path(str(other)).expanduser()
     candidate = raw if raw.is_absolute() else project / raw
     return is_within(candidate, project)
+
+
+def prepare_workspace(requested: str, *, purpose: str = 'coding', create: bool = False) -> Path:
+    """Setup may use home as cwd without making home a general coding root.
+
+    This is working-directory selection, not a sandbox for the child process.
+    Installer destinations are governed by the owner request and CLI permissions.
+    """
+    if purpose not in {'coding', 'setup'}:
+        raise ProjectError('Use coding or setup as the task purpose.')
+    if purpose == 'coding':
+        return prepare_project(requested, create=create)
+    if create:
+        raise ProjectError('Software setup uses an existing directory; do not create a project.')
+    text = (requested or '').strip().strip('"').strip("'")
+    home = Path.home().resolve()
+    candidate = home if text.lower() in {'', '~', 'home'} else Path(os.path.expandvars(os.path.expanduser(text)))
+    if candidate.is_absolute() and candidate.resolve() == home and home.is_dir():
+        return home
+    return resolve_project(text, allow_empty=True)

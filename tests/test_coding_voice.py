@@ -68,6 +68,19 @@ class CodingVoiceTests(unittest.IsolatedAsyncioTestCase):
             await live._execute_tool_impl(fc, owner_goal='Make a simple calculator.')
         self.assertEqual(coding.call_args.kwargs['owner_request'], 'Make a simple calculator.')
 
+    async def test_live_installation_request_keeps_setup_mode_and_home_directory(self):
+        live = self.live()
+        live._action_registry = Mock()
+        live._action_registry.scheduling.return_value = None
+        live._plugin_registry = Mock()
+        live._plugin_registry.scheduling.return_value = None
+        goal = 'Use OpenCode to install Android Studio and essential development components.'
+        args = {'action': 'start', 'purpose': 'setup', 'project': '~', 'task': goal}
+        fc = SimpleNamespace(name='coding_job', id='setup-fixture', args=args)
+        with patch('actions.coding_job.coding_job', return_value=ToolResult('success', 'started')) as coding:
+            await live._execute_tool_impl(fc, owner_goal=goal)
+        coding.assert_called_once_with(args, owner_request=goal)
+
 
 if __name__ == '__main__':
     unittest.main()
