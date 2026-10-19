@@ -440,8 +440,10 @@ skipped), 34 of them driving the mobile routes, pairing, revocation and both
 WebSockets through the real FastAPI app; a separate 48-test JVM suite covers the
 phone-side logic (envelope parsing, request dedupe, backoff bounds, the audio byte
 budget and every laptop event → screen transition) with no device or emulator;
-`:app:assembleDebug` builds the APK with the committed Gradle wrapper. Those two
-temporary suites were removed after their final run, per owner preference.
+`:app:assembleDebug` builds the APK with the committed Gradle wrapper. The
+temporary phone-companion Python tests were removed after their final
+verification run, per owner preference; the JVM suite stays in the app module,
+where it needs no device.
 
 The JVM suite found one real bug: `CommandTracker.prune` compared an absolute
 cutoff against an entry's age, so with a real clock no entry ever expired and with
