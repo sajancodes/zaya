@@ -217,11 +217,18 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
             # Only log a rejection if the file actually tried to be an action.
             logger(f"Action rejected: {path.name} — {rec.error}")
 
+    canonical_actions = Path(__file__).resolve().parent.parent / "actions"
+    try:
+        is_canonical = actions_dir.resolve() == canonical_actions.resolve()
+    except Exception:
+        is_canonical = False
+
     registry = ActionRegistry(valid, logger)
     registry._all_records = all_records
     logger(f"Action discovery complete: {len(valid)} active.")
-    global _global_registry
-    _global_registry = registry
+    if is_canonical:
+        global _global_registry
+        _global_registry = registry
     return registry
 
 
