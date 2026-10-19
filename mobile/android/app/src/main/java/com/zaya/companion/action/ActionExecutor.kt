@@ -14,7 +14,9 @@ import com.zaya.companion.service.ContactLookupResult
 import com.zaya.companion.service.ContactManager
 import com.zaya.companion.service.HardwareController
 import com.zaya.companion.service.MediaPlaybackController
+import com.zaya.companion.service.NotificationItem
 import com.zaya.companion.service.OutgoingCallOutcome
+import com.zaya.companion.service.ReplyOutcome
 import com.zaya.companion.service.ZayaNotificationListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -60,7 +62,10 @@ class ActionExecutor(
             is AndroidAction.ComposeSms -> executeComposeSms(action)
             is AndroidAction.AnswerCall -> executeAnswerCall()
             is AndroidAction.RejectCall -> executeRejectCall()
-            is AndroidAction.ReadNotifications -> executeReadNotifications(action.packageFilter)
+            is AndroidAction.ReadNotifications -> executeReadNotifications(action.packageFilter, action.limit)
+            is AndroidAction.ReadLatestNotification -> executeReadLatestNotification(action.packageFilter)
+            is AndroidAction.SummarizeNotifications -> executeSummarizeNotifications(action.packageFilter)
+            is AndroidAction.DraftNotificationReply -> executeDraftNotificationReply(action)
             is AndroidAction.ReplyToNotification -> executeReplyNotification(action)
             is AndroidAction.CaptureScreen -> {
                 ActionResult.unsupported("Screen capture requires explicit system dialog authorization via MediaProjection.")
@@ -523,27 +528,253 @@ class ActionExecutor(
         }
     }
 
-    private fun executeReadNotifications(packageFilter: String?): ActionResult {
-        // Read recent notification summaries
+    // ── Notifications & Smart Replies ──────────────────────────────────────
+
+    private fun checkNotificationAccess(): Boolean {
+        val flat = android.provider.Settings.Secure.getString(
+            context.contentResolver,
+            "enabled_notification_listeners"
+        ) ?: return false
+        return flat.contains(context.packageName)
+    }
+
+    private fun executeReadNotifications(packageFilter: String?, limit: Int): ActionResult {
+        if (!checkNotificationAccess()) {
+            return ActionResult.failure(
+                spoken = "Notification access is not enabled. Would you like me to open settings so you can grant it?",
+                error = "notification_access_disabled",
+                data = mapOf("needs_settings" to "notification_listener")
+            )
+        }
+
+        val items = ZayaNotificationListener.getActiveNotifications(
+            context = context,
+            packageFilter = packageFilter,
+            limit = limit
+        )
+
+        if (items.isEmpty()) {
+            val spoken = if (!packageFilter.isNullOrBlank()) {
+                "You have no new ${packageFilter.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }} notifications."
+            } else {
+                "You have no new notifications right now."
+            }
+            return ActionResult.success(spoken, mapOf("count" to 0, "notifications" to emptyList<Any>()))
+        }
+
+        val spokenParts = items.take(4).map { item ->
+            val sender = item.title.ifBlank { "Someone" }
+            val text = item.text.ifBlank { item.lines.firstOrNull() ?: "sent a message" }
+            "$sender on ${item.appName}: \"$text\""
+        }
+
+        val spoken = if (items.size == 1) {
+            "You have 1 notification: ${spokenParts.first()}."
+        } else {
+            "You have ${items.size} notifications. ${spokenParts.joinToString(". ")}."
+        }
+
         return ActionResult.success(
-            "Checked latest notifications.",
-            mapOf("filter" to (packageFilter ?: "all"))
+            spoken = spoken,
+            data = mapOf(
+                "count" to items.size,
+                "notifications" to items.map {
+                    mapOf(
+                        "key" to it.key,
+                        "app" to it.appName,
+                        "package" to it.packageName,
+                        "sender" to it.title,
+                        "text" to it.text,
+                        "can_reply" to it.canReply,
+                        "timestamp" to it.timestamp
+                    )
+                }
+            )
+        )
+    }
+
+    private fun executeReadLatestNotification(packageFilter: String?): ActionResult {
+        if (!checkNotificationAccess()) {
+            return ActionResult.failure(
+                spoken = "Notification access is required to read incoming messages.",
+                error = "notification_access_disabled",
+                data = mapOf("needs_settings" to "notification_listener")
+            )
+        }
+
+        val items = ZayaNotificationListener.getActiveNotifications(
+            context = context,
+            packageFilter = packageFilter,
+            limit = 1
+        )
+
+        if (items.isEmpty()) {
+            val spoken = if (!packageFilter.isNullOrBlank()) {
+                "You have no new $packageFilter notifications."
+            } else {
+                "You have no new notifications right now."
+            }
+            return ActionResult.success(spoken, mapOf("count" to 0))
+        }
+
+        val item = items.first()
+        val sender = item.title.ifBlank { "Someone" }
+        val body = item.text.ifBlank { item.lines.firstOrNull() ?: "sent a message" }
+        val spoken = "Latest notification from $sender on ${item.appName}: \"$body\"."
+
+        return ActionResult.success(
+            spoken = spoken,
+            data = mapOf(
+                "key" to item.key,
+                "app" to item.appName,
+                "sender" to sender,
+                "text" to body,
+                "can_reply" to item.canReply,
+                "timestamp" to item.timestamp
+            )
+        )
+    }
+
+    private fun executeSummarizeNotifications(packageFilter: String?): ActionResult {
+        if (!checkNotificationAccess()) {
+            return ActionResult.failure(
+                spoken = "Notification access is not enabled.",
+                error = "notification_access_disabled",
+                data = mapOf("needs_settings" to "notification_listener")
+            )
+        }
+
+        val items = ZayaNotificationListener.getActiveNotifications(
+            context = context,
+            packageFilter = packageFilter,
+            limit = 25
+        )
+
+        if (items.isEmpty()) {
+            return ActionResult.success("You have no active notifications to summarize.", mapOf("count" to 0))
+        }
+
+        val grouped = items.groupBy { it.appName }
+        val summaryPhrases = grouped.map { (app, list) ->
+            val senders = list.map { it.title.ifBlank { "Unknown" } }.distinct().take(3).joinToString(", ")
+            "${list.size} from $app ($senders)"
+        }
+
+        val spoken = "You have ${items.size} notifications: ${summaryPhrases.joinToString("; ")}."
+        return ActionResult.success(
+            spoken = spoken,
+            data = mapOf(
+                "total_count" to items.size,
+                "apps" to grouped.mapValues { (_, list) -> list.size }
+            )
+        )
+    }
+
+    private fun executeDraftNotificationReply(action: AndroidAction.DraftNotificationReply): ActionResult {
+        if (!checkNotificationAccess()) {
+            return ActionResult.failure(
+                spoken = "Notification access is required to draft replies.",
+                error = "notification_access_disabled"
+            )
+        }
+
+        val item = ZayaNotificationListener.findNotificationForReply(
+            context = context,
+            targetKey = action.targetKey,
+            targetSender = action.targetSender,
+            targetPackage = action.targetPackage
+        ) ?: return ActionResult.failure(
+            spoken = "No active notification found to draft a reply for.",
+            error = "notification_not_found"
+        )
+
+        // Generate contextual response
+        val draft = when {
+            !action.contextInstruction.isNullOrBlank() -> action.contextInstruction
+            item.text.endsWith("?") -> "I'll check and let you know soon."
+            item.text.contains("when", true) || item.text.contains("time", true) -> "Sounds good, I'll see you then."
+            item.text.contains("thanks", true) || item.text.contains("thank you", true) -> "You're welcome!"
+            else -> "Sounds good!"
+        }
+
+        val recipient = item.title.ifBlank { "the sender" }
+        return ActionResult.success(
+            spoken = "Drafted reply for $recipient on ${item.appName}: \"$draft\". Would you like me to send it?",
+            data = mapOf(
+                "notification_key" to item.key,
+                "app" to item.appName,
+                "sender" to recipient,
+                "draft" to draft,
+                "can_reply" to item.canReply
+            )
         )
     }
 
     private fun executeReplyNotification(action: AndroidAction.ReplyToNotification): ActionResult {
-        if (!action.confirmed) {
-            return ActionResult.needsConfirmation(
-                spoken = "Confirm reply to notification?",
-                actionId = "reply_notification",
-                payload = mapOf("notification_key" to action.notificationKey, "text" to action.text)
+        if (!checkNotificationAccess()) {
+            return ActionResult.failure(
+                spoken = "Notification access is required to send notification replies.",
+                error = "notification_access_disabled"
             )
         }
-        val ok = ZayaNotificationListener.sendAutoReply(action.notificationKey, action.text)
-        return if (ok) {
-            ActionResult.success("Reply sent.")
-        } else {
-            ActionResult.failure("Could not dispatch reply. Notification may have been dismissed.", error = "reply_failed")
+
+        val targetItem = ZayaNotificationListener.findNotificationForReply(
+            context = context,
+            targetKey = action.notificationKey,
+            targetSender = action.targetSender,
+            targetPackage = action.targetPackage
+        )
+
+        if (targetItem == null) {
+            val targetDesc = action.targetSender ?: action.targetPackage ?: "that app"
+            return ActionResult.failure(
+                spoken = "I couldn't find an active notification from $targetDesc to reply to.",
+                error = "notification_not_found"
+            )
+        }
+
+        if (!action.confirmed) {
+            val recipient = targetItem.title.ifBlank { "the sender" }
+            return ActionResult.needsConfirmation(
+                spoken = "Do you want me to reply to $recipient on ${targetItem.appName}: \"${action.text}\"?",
+                actionId = "reply_notification",
+                payload = mapOf(
+                    "notification_key" to targetItem.key,
+                    "sender" to recipient,
+                    "app" to targetItem.appName,
+                    "text" to action.text
+                )
+            )
+        }
+
+        return when (val outcome = ZayaNotificationListener.sendReply(targetItem.key, action.text)) {
+            is ReplyOutcome.Success -> {
+                ActionResult.success(
+                    spoken = "Reply dispatched to ${targetItem.appName} for ${targetItem.title.ifBlank { "recipient" }}.",
+                    data = mapOf("app" to targetItem.appName, "recipient" to targetItem.title)
+                )
+            }
+            is ReplyOutcome.NoRemoteInput -> {
+                if (outcome.contentIntent != null) {
+                    try {
+                        outcome.contentIntent.send()
+                        ActionResult.success(
+                            spoken = "${targetItem.appName} doesn't support direct voice replies. I've opened the app for you.",
+                            data = mapOf("app" to targetItem.appName, "opened_app" to true)
+                        )
+                    } catch (e: Exception) {
+                        ActionResult.failure("Could not open ${targetItem.appName}: ${e.message}", error = "intent_failed")
+                    }
+                } else {
+                    ActionResult.failure("${targetItem.appName} notification does not support inline replies.", error = "no_remote_input")
+                }
+            }
+            is ReplyOutcome.NotificationNotFound -> {
+                ActionResult.failure("Notification was dismissed or is no longer active.", error = "stale_notification")
+            }
+            is ReplyOutcome.Failed -> {
+                ActionResult.failure("Could not dispatch reply: ${outcome.reason}", error = "reply_failed")
+            }
         }
     }
 }

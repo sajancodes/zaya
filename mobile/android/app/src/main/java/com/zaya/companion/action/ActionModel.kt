@@ -108,11 +108,30 @@ sealed class AndroidAction(
 
     data object RejectCall : AndroidAction("reject_call", ActionRisk.HIGH)
 
-    data class ReadNotifications(val packageFilter: String? = null) :
-        AndroidAction("read_notifications", ActionRisk.MEDIUM)
+    data class ReadNotifications(
+        val packageFilter: String? = null,
+        val limit: Int = 5,
+    ) : AndroidAction("read_notifications", ActionRisk.LOW)
+
+    data class ReadLatestNotification(
+        val packageFilter: String? = null,
+    ) : AndroidAction("read_latest_notification", ActionRisk.LOW)
+
+    data class SummarizeNotifications(
+        val packageFilter: String? = null,
+    ) : AndroidAction("summarize_notifications", ActionRisk.LOW)
+
+    data class DraftNotificationReply(
+        val targetKey: String? = null,
+        val targetSender: String? = null,
+        val targetPackage: String? = null,
+        val contextInstruction: String? = null,
+    ) : AndroidAction("draft_notification_reply", ActionRisk.LOW)
 
     data class ReplyToNotification(
-        val notificationKey: String,
+        val notificationKey: String? = null,
+        val targetSender: String? = null,
+        val targetPackage: String? = null,
         val text: String,
         val confirmed: Boolean = false,
     ) : AndroidAction("reply_notification", ActionRisk.HIGH, requiresConfirmation = true)

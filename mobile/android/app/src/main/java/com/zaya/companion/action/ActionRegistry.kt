@@ -224,9 +224,51 @@ class ActionRegistry(private val context: Context) {
         list.add(
             ActionCapability(
                 actionId = "read_notifications",
-                purpose = "Read and summarize recent messaging notifications",
+                purpose = "Read recent messaging notifications with optional app or sender filter",
                 requiredArguments = emptyList(),
-                risk = ActionRisk.MEDIUM,
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = notifAccess,
+                isAvailable = notifAccess,
+            )
+        )
+
+        // 9b. Read Latest Notification
+        list.add(
+            ActionCapability(
+                actionId = "read_latest_notification",
+                purpose = "Read the most recent incoming notification aloud",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = notifAccess,
+                isAvailable = notifAccess,
+            )
+        )
+
+        // 9c. Summarize Notifications
+        list.add(
+            ActionCapability(
+                actionId = "summarize_notifications",
+                purpose = "Summarize active notifications grouped by application",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = notifAccess,
+                isAvailable = notifAccess,
+            )
+        )
+
+        // 9d. Draft Notification Reply
+        list.add(
+            ActionCapability(
+                actionId = "draft_notification_reply",
+                purpose = "Generate or draft an inline reply for an incoming message",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
                 requiresConfirmation = false,
                 isSupportedOnOs = true,
                 isPermissionGranted = notifAccess,
@@ -239,7 +281,7 @@ class ActionRegistry(private val context: Context) {
             ActionCapability(
                 actionId = "reply_notification",
                 purpose = "Send autonomous RemoteInput inline reply to a notification",
-                requiredArguments = listOf("notification_key", "text"),
+                requiredArguments = listOf("text"),
                 risk = ActionRisk.HIGH,
                 requiresConfirmation = true,
                 isSupportedOnOs = true,

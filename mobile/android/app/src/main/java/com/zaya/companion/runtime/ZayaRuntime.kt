@@ -1083,10 +1083,25 @@ class ZayaRuntime(
             "answer_call" -> com.zaya.companion.action.AndroidAction.AnswerCall
             "reject_call" -> com.zaya.companion.action.AndroidAction.RejectCall
             "read_notifications" -> com.zaya.companion.action.AndroidAction.ReadNotifications(
+                packageFilter = args.optString("package_filter", "").ifBlank { null },
+                limit = args.optInt("limit", 5)
+            )
+            "read_latest_notification" -> com.zaya.companion.action.AndroidAction.ReadLatestNotification(
                 packageFilter = args.optString("package_filter", "").ifBlank { null }
             )
+            "summarize_notifications" -> com.zaya.companion.action.AndroidAction.SummarizeNotifications(
+                packageFilter = args.optString("package_filter", "").ifBlank { null }
+            )
+            "draft_notification_reply" -> com.zaya.companion.action.AndroidAction.DraftNotificationReply(
+                targetKey = args.optString("notification_key", "").ifBlank { null },
+                targetSender = args.optString("sender", "").ifBlank { null },
+                targetPackage = args.optString("package", "").ifBlank { null },
+                contextInstruction = args.optString("instruction", "").ifBlank { null }
+            )
             "reply_notification" -> com.zaya.companion.action.AndroidAction.ReplyToNotification(
-                notificationKey = args.optString("notification_key", ""),
+                notificationKey = args.optString("notification_key", "").ifBlank { null },
+                targetSender = args.optString("sender", "").ifBlank { null },
+                targetPackage = args.optString("package", "").ifBlank { null },
                 text = args.optString("text", ""),
                 confirmed = args.optBoolean("confirmed", false)
             )
