@@ -55,7 +55,8 @@ def _get_os() -> str:
 
 
 def _get_api_key() -> str:
-    return _load_config().get("gemini_api_key", "")
+    from core import gemini
+    return gemini.api_key()
 
 _SAFE_SCREENSHOT_ROOTS = (
     Path.home(),
@@ -260,7 +261,8 @@ def _focus_window(title: str) -> str:
 
     if os_name == "windows":
         try:
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
+            literal = "'" + title.replace("'", "''") + "'"
+            script = f'(New-Object -ComObject WScript.Shell).AppActivate({literal})'
             subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                 capture_output=True, timeout=5, **_WIN_HIDE,
@@ -271,13 +273,13 @@ def _focus_window(title: str) -> str:
             return f"focus_window (Windows) failed: {e}"
 
     if os_name == "mac":
-        script = (
-            f'tell application "System Events" to '
-            f'set frontmost of (first process whose name contains "{title}") to true'
-        )
+        script = ('on run argv\n'
+                  'tell application "System Events" to set frontmost of '
+                  '(first process whose name contains (item 1 of argv)) to true\n'
+                  'end run')
         try:
             subprocess.run(
-                ["osascript", "-e", script],
+                ["osascript", "-e", script, title],
                 capture_output=True, timeout=5,
             )
             time.sleep(0.3)

@@ -2,6 +2,8 @@ import time
 import subprocess
 import platform
 import shutil
+import os
+import re
 
 try:
     import psutil
@@ -79,11 +81,12 @@ def _normalize(raw: str) -> str:
 
 def _launch_windows(app_name: str) -> bool:
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
+    binary = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if binary:
         try:
             subprocess.Popen(
-                app_name,
-                shell=True,
+                [binary],
+                shell=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -92,9 +95,9 @@ def _launch_windows(app_name: str) -> bool:
         except Exception as e:
             print(f"[open_app] subprocess failed: {e}")
 
-    if ":" in app_name:
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", app_name):
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
+            os.startfile(app_name)
             time.sleep(1.0)
             return True
         except Exception:
