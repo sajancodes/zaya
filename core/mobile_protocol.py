@@ -233,10 +233,37 @@ def normalize_event(event) -> list[dict]:
             'text': clip(event.get('text'), LIMITS['detail']),
         }, timestamp=stamp)]
 
-    if name == 'audio.duck.changed':
-        return [envelope('system.audio', {
-            'ducked': bool(event.get('active', False)),
-            'voice': bool(event.get('voice', False)),
+    if name in {'call.incoming', 'call.answered', 'call.ended', 'call.dialing', 'call.missed'}:
+        return [envelope(name, {
+            'caller_name': clip(event.get('caller_name'), LIMITS['title']),
+            'caller_number': clip(event.get('caller_number'), 40),
+            'call_id': clip(event.get('call_id'), LIMITS['reference']),
+            'priority': int(event.get('priority', P1_IMMEDIATE)),
+        }, timestamp=stamp)]
+
+    if name == 'notification.received':
+        return [envelope('notification.received', {
+            'app': clip(event.get('app') or 'unknown', 40),
+            'sender': clip(event.get('sender'), LIMITS['title']),
+            'text': clip(event.get('text'), LIMITS['detail']),
+            'package': clip(event.get('package'), 100),
+        }, timestamp=stamp)]
+
+    if name in {'hardware.control', 'hardware.status'}:
+        return [envelope('hardware.status', {
+            'target': clip(event.get('target'), 40),
+            'state': clip(event.get('state'), 40),
+            'battery': int(event.get('battery', 100)),
         }, timestamp=stamp)]
 
     return []
+
+
+def to_wire_events(event_name_or_dict, payload: dict | None = None) -> list[dict]:
+    """Convenience helper to convert event name and payload into wire envelopes."""
+    if isinstance(event_name_or_dict, str):
+        evt = {'event': event_name_or_dict}
+        if isinstance(payload, dict):
+            evt.update(payload)
+        return normalize_event(evt)
+    return normalize_event(event_name_or_dict)
