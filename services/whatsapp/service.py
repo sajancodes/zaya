@@ -61,7 +61,7 @@ class WhatsAppService:
             from services.whatsapp.native_bridge import NativeBridge
             connection = load_connection()
             if connection:
-                bridge = NativeBridge(self.ingest, connection)
+                bridge = NativeBridge(self.ingest, connection, read_state_callback=self.store.sync_read_state)
                 bridge.start()
                 self.native_bridge = bridge
                 self.adapter.transport = bridge
@@ -121,6 +121,7 @@ class WhatsAppService:
                     'feed': 'Owned Hermes live bridge' if native_ready else 'Hermes agent hooks (partial context)',
                     'connection_saved': __import__('services.whatsapp.connection', fromlist=['CONNECTION_PATH']).CONNECTION_PATH.exists(),
                     'bridge_connected': native_ready, 'bridge_error': self.bridge_error or (self.native_bridge.error if self.native_bridge else None),
+                    'phone_read_state_available': bool(native_ready and getattr(self.native_bridge, 'read_state_available', False)),
                     'full_inbox_available': False, 'manual_outgoing_events_available': native_ready,
                     'manual_outgoing_scope': 'direct chats only',
                     'complete_live_events_available': native_ready,
@@ -135,7 +136,7 @@ class WhatsAppService:
         elif action == 'recent':
             data = self.store.rows('SELECT c.*, (SELECT text FROM wa_messages m WHERE m.chat_id=c.chat_id ORDER BY timestamp DESC LIMIT 1) AS latest_text FROM wa_chats c ORDER BY last_message_at DESC LIMIT ?', (limit,))
         elif action == 'unread':
-            data = self.store.rows('SELECT * FROM wa_chats WHERE unread_count>0 ORDER BY last_message_at DESC LIMIT ?', (limit,))
+            data = self.store.rows("SELECT c.*, (SELECT text FROM wa_messages m WHERE m.chat_id=c.chat_id AND m.direction='incoming' AND m.timestamp>c.read_through ORDER BY timestamp DESC,rowid DESC LIMIT 1) AS latest_unread_text FROM wa_chats c WHERE unread_count>0 ORDER BY last_message_at DESC LIMIT ?", (limit,))
         elif action == 'important':
             data = self.store.rows('SELECT * FROM wa_alerts WHERE acknowledged_at IS NULL ORDER BY score DESC,created_at DESC LIMIT ?', (limit,))
         elif action == 'search':
@@ -160,7 +161,13 @@ class WhatsAppService:
         # is suppressed unless the owner explicitly supplies a new request ID.
         from core.operator import current_request
         request_id = request_id or current_request.get() or hashlib.sha256(f'{chat_id}|{time.strftime("%Y-%m-%d")}|{message}'.encode()).hexdigest()
-        return self.adapter.send(chat_id, message, request_id)
+        through = time.time()
+        result = self.adapter.send(chat_id, message, request_id)
+        if result.status == 'success':
+            # Explicit owner replies settle messages observed at send time.
+            # An incoming message arriving during delivery stays unread.
+            self.store.mark_read(chat_id, through=through)
+        return result
 
 
 _service: WhatsAppService | None = None

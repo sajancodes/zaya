@@ -65,9 +65,13 @@ class HookReceiver:
         self.thread.start()
 
     def close(self) -> None:
-        self.server.shutdown()
+        # shutdown() waits forever when serve_forever() was never started.
+        thread = getattr(self, 'thread', None)
+        if thread and thread.is_alive():
+            self.server.shutdown()
         self.server.server_close()
-        self.thread.join(timeout=3)
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=3)
         if self.descriptor.exists():
             try:
                 if json.loads(self.descriptor.read_text())['token'] == self.secret:

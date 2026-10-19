@@ -43,11 +43,16 @@ class WhatsAppStore:
         CREATE TABLE IF NOT EXISTS wa_chat_aliases (alias TEXT PRIMARY KEY, chat_id TEXT NOT NULL);
         ''')
         for table, column, declaration in [('wa_contacts', 'name_verified', 'INTEGER DEFAULT 0'),
+                                            ('wa_chats', 'read_through', 'REAL DEFAULT 0'),
                                             ('wa_messages', 'notified_at', 'REAL'),
                                             ('wa_alerts', 'notify_owner', 'INTEGER DEFAULT 0')]:
             if column not in {row[1] for row in self.db.execute(f'PRAGMA table_info({table})')}:
                 self.db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {declaration}')
         self.db.commit()
+        # Repair old counters using owner replies already recorded locally.
+        with self.lock, self.db:
+            for row in self.db.execute('SELECT chat_id,last_manual_owner_message_at,read_through FROM wa_chats WHERE last_manual_owner_message_at>read_through').fetchall():
+                self._mark_read_through(row['chat_id'], row['last_manual_owner_message_at'])
 
     def canonical_chat(self, chat_id: str) -> str:
         validate_chat_id(chat_id)
@@ -77,6 +82,9 @@ class WhatsAppStore:
                 self.db.execute(f'UPDATE {table} SET chat_id=? WHERE chat_id=?', (chat_id, alias))
             self.db.execute('UPDATE wa_chat_aliases SET chat_id=? WHERE chat_id=?', (chat_id, alias))
             self.db.execute('INSERT OR REPLACE INTO wa_chat_aliases VALUES(?,?)', (alias, chat_id))
+            if old:
+                current = self.db.execute('SELECT read_through FROM wa_chats WHERE chat_id=?', (chat_id,)).fetchone()
+                self._mark_read_through(chat_id, max(old['read_through'], current['read_through']))
 
     def identify_contact(self, chat_id: str, name: str) -> dict:
         chat_id = self.canonical_chat(chat_id)
@@ -125,16 +133,19 @@ class WhatsAppStore:
             fields = ['message_id', 'chat_id', 'sender_id', 'direction', 'source', 'text', 'timestamp', 'reply_to_id', 'ai_generated', 'transport_status', 'complete']
             self.db.execute(f'INSERT INTO wa_messages ({",".join(fields)},received_at) VALUES ({",".join("?" for _ in fields)},?)',
                             (*[m[k] for k in fields], time.time()))
-            self.db.execute('UPDATE wa_chats SET last_message_at=MAX(COALESCE(last_message_at,0),?), unread_count=unread_count+? WHERE chat_id=?',
-                            (message.timestamp, int(message.direction == 'incoming'), message.chat_id))
+            self.db.execute("UPDATE wa_chats SET last_message_at=MAX(COALESCE(last_message_at,0),?), unread_count=unread_count+CASE WHEN ?='incoming' AND ?>read_through THEN 1 ELSE 0 END WHERE chat_id=?",
+                            (message.timestamp, message.direction, message.timestamp, message.chat_id))
             if message.direction == 'incoming':
                 self.db.execute("UPDATE wa_messages SET notified_at=? WHERE message_id=? AND EXISTS(SELECT 1 FROM wa_chats WHERE chat_id=? AND mode='auto')",
+                                (time.time(), message.message_id, message.chat_id))
+                self.db.execute('UPDATE wa_messages SET notified_at=? WHERE message_id=? AND timestamp<=(SELECT read_through FROM wa_chats WHERE chat_id=?)',
                                 (time.time(), message.message_id, message.chat_id))
             if message.direction == 'outgoing':
                 if message.ai_generated:
                     self.db.execute('UPDATE wa_chats SET last_ai_message_at=? WHERE chat_id=?', (message.timestamp, message.chat_id))
                 else:
-                    self.db.execute("UPDATE wa_chats SET mode='manual',ai_active=0,last_manual_owner_message_at=? WHERE chat_id=?", (message.timestamp, message.chat_id))
+                    self.db.execute("UPDATE wa_chats SET mode='manual',ai_active=0,last_manual_owner_message_at=MAX(COALESCE(last_manual_owner_message_at,0),?) WHERE chat_id=?", (message.timestamp, message.chat_id))
+                    self._mark_read_through(message.chat_id, message.timestamp)
             return True
 
     def set_mode(self, chat_id: str, mode: str) -> dict:
@@ -178,11 +189,34 @@ class WhatsAppStore:
         chat_id = self.canonical_chat(chat_id)
         return self.rows('SELECT * FROM wa_messages WHERE chat_id=? ORDER BY timestamp DESC, rowid DESC LIMIT ?', (chat_id, max(1, min(limit, 100))))
 
-    def mark_read(self, chat_id: str) -> None:
+    def _mark_read_through(self, chat_id: str, timestamp: float) -> None:
+        self.db.execute('UPDATE wa_chats SET read_through=MAX(read_through,?) WHERE chat_id=?', (timestamp, chat_id))
+        self.db.execute("UPDATE wa_chats SET unread_count=(SELECT COUNT(*) FROM wa_messages m WHERE m.chat_id=wa_chats.chat_id AND direction='incoming' AND timestamp>read_through) WHERE chat_id=?", (chat_id,))
+        self.db.execute("UPDATE wa_messages SET notified_at=COALESCE(notified_at,?) WHERE chat_id=? AND direction='incoming' AND timestamp<=(SELECT read_through FROM wa_chats WHERE chat_id=?)", (time.time(), chat_id, chat_id))
+        self.db.execute('UPDATE wa_alerts SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE chat_id=? AND message_id IN (SELECT message_id FROM wa_messages WHERE chat_id=? AND timestamp<=?)', (time.time(), chat_id, chat_id, timestamp))
+
+    def mark_read(self, chat_id: str, through: float | None = None) -> None:
         chat_id = self.canonical_chat(chat_id)
         self.chat(chat_id)
         with self.lock, self.db:
-            self.db.execute('UPDATE wa_chats SET unread_count=0 WHERE chat_id=?', (chat_id,))
+            if through is None:
+                through = max(time.time(), self.chat(chat_id)['last_message_at'] or 0)
+            self._mark_read_through(chat_id, through)
+
+    def sync_read_state(self, event: dict) -> None:
+        """Read state from our owned bridge; never sends WhatsApp read receipts."""
+        import math
+        chat_id = self.canonical_chat(validate_chat_id(event['chatId']))
+        timestamp = float(event['timestamp'])
+        count = event['unreadCount']
+        if not math.isfinite(timestamp) or timestamp <= 0 or type(count) is not int or count < 0:
+            raise ValueError('Invalid read state')
+        # A nonzero count alone cannot identify which messages were read.
+        # Only a reliable zero or a manual owner reply advances the watermark.
+        if count == 0:
+            with self.lock, self.db:
+                self.db.execute('INSERT OR IGNORE INTO wa_chats(chat_id,title) VALUES(?,?)', (chat_id, chat_id))
+                self._mark_read_through(chat_id, min(timestamp, time.time()))
 
     def claim_message(self, message_id: str) -> bool:
         with self.lock, self.db:
@@ -194,6 +228,9 @@ class WhatsAppStore:
 
     def alert(self, message: Message, score: int, category: str, reason: str, notify_owner: bool = False) -> bool:
         with self.lock, self.db:
+            state = self.db.execute('SELECT read_through FROM wa_chats WHERE chat_id=?', (self.canonical_chat(message.chat_id),)).fetchone()
+            if state and message.timestamp <= state['read_through']:
+                return False  # The owner read/replied while classification ran.
             cursor = self.db.execute('INSERT OR IGNORE INTO wa_alerts(alert_id,chat_id,message_id,score,category,reason,created_at,notify_owner) VALUES(?,?,?,?,?,?,?,?)',
                                      ('alert-' + message.message_id, message.chat_id, message.message_id, score, category, reason, time.time(), int(notify_owner)))
             return cursor.rowcount == 1

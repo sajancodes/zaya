@@ -62,7 +62,10 @@ def normalize_event(event: dict, owner_id: str = '') -> Message:
     timestamp = event.get('timestamp', time.time())
     if isinstance(timestamp, dict):
         timestamp = timestamp.get('low', time.time())
-    owner = bool(event.get('fromOwner') or event.get('readReceiptKey', {}).get('fromMe'))
+    receipt = event.get('readReceiptKey') or {}
+    if not isinstance(receipt, dict):
+        raise ValueError('Invalid receipt key')
+    owner = bool(event.get('fromOwner') or receipt.get('fromMe'))
     peer = str(event.get('senderId', chat))
     aliases = ()
     if chat.endswith('@lid') and peer.endswith('@s.whatsapp.net') and peer != owner_id:
@@ -77,8 +80,10 @@ def normalize_event(event: dict, owner_id: str = '') -> Message:
 
 
 class NativeBridge:
-    def __init__(self, callback, connection: dict | None = None, port: int = 8768) -> None:
+    def __init__(self, callback, connection: dict | None = None, port: int = 8768, read_state_callback=None) -> None:
         self.callback = callback
+        self.read_state_callback = read_state_callback
+        self.read_state_available = False
         self.connection = connection or load_connection()
         self.port = port
         self.url = f'http://127.0.0.1:{port}'
@@ -131,6 +136,15 @@ class NativeBridge:
         node = shutil.which('node')
         if not node or not bridge.is_file() or not (bridge.parent / 'node_modules').is_dir():
             raise RuntimeError('Hermes WhatsApp bridge or its Node dependencies are unavailable.')
+        if self.read_state_callback:
+            from services.whatsapp.bridge_read_state import prepare_bridge
+            try:
+                bridge = prepare_bridge(bridge)
+                self.read_state_available = True
+            except (ValueError, OSError):
+                # An upstream update must not disable working messages/replies.
+                # Status exposes this verification gap; manual replies still sync.
+                self.read_state_available = False
         self._claim()
         try:
             self.http.get(self.url + '/health', timeout=.5)
@@ -177,7 +191,10 @@ class NativeBridge:
             try:
                 response = self.http.get(self.url + '/health', timeout=3)
                 response.raise_for_status()
-                self.ready = response.json().get('status') == 'connected'
+                health = response.json()
+                if not isinstance(health, dict):
+                    raise ValueError('Bridge returned invalid health data.')
+                self.ready = health.get('status') == 'connected'
                 if not self.ready:
                     continue
                 response = self.http.get(self.url + '/messages', timeout=3)
@@ -187,7 +204,17 @@ class NativeBridge:
                     raise ValueError('Bridge returned an invalid message batch.')
                 for event in events:
                     try:
-                        message = normalize_event(event, self.connection.get('account_id', '').split(':')[0].split('@')[0] + '@s.whatsapp.net')
+                        if not isinstance(event, dict):
+                            raise ValueError('Invalid bridge event')
+                        if event.get('event') == 'chat.read_state':
+                            if self.read_state_callback:
+                                self.read_state_callback(event)
+                            self.last_event_at = time.time()
+                            continue
+                        account = self.connection.get('account_id') or ''
+                        owner_id = account.split('@')[0].split(':')[0]
+                        owner_id = owner_id + '@s.whatsapp.net' if owner_id else ''
+                        message = normalize_event(event, owner_id)
                         self.callback(message)
                         self.last_event_at = time.time()
                     except (ValueError, KeyError, TypeError):
@@ -205,7 +232,12 @@ class NativeBridge:
         if reply_to_id:
             payload['replyTo'] = reply_to_id
         response = self.http.post(self.url + '/send', json=payload, timeout=50)
-        result = response.json()
+        try:
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError('Invalid send result')
+        except ValueError:
+            return subprocess.CompletedProcess([], 1, json.dumps({'error': 'Bridge returned an unreadable delivery result; delivery is unverified. Do not automatically resend.'}), '')
         if result.get('messageId'):
             result['message_id'] = result['messageId']
         return subprocess.CompletedProcess([], 0 if response.ok else 1, json.dumps(result), '')

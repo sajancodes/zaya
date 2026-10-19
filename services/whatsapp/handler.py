@@ -97,7 +97,7 @@ class ReplyWorker:
 
     def _process(self, messages) -> bool:
         messages = [m for m in messages if m.direction == 'incoming' and self.store.rows(
-            'SELECT message_id FROM wa_messages WHERE message_id=? AND handled=0', (m.message_id,))]
+            'SELECT m.message_id FROM wa_messages m JOIN wa_chats c ON c.chat_id=m.chat_id WHERE m.message_id=? AND m.handled=0 AND m.timestamp>c.read_through', (m.message_id,))]
         if self.closed or not messages:
             return True
         message = messages[-1]
