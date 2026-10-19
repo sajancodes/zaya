@@ -129,6 +129,8 @@ class ZayaRuntime(
     val updates = com.zaya.companion.updates.AppUpdates(context)
     private var updateChecks: Job? = null
     private val callAudio = CallAudioRoute(context)
+    val hardwareController by lazy { com.zaya.companion.service.HardwareController(context) }
+    val cellularCallManager by lazy { com.zaya.companion.service.CellularCallManager(context) }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -438,6 +440,25 @@ class ZayaRuntime(
                     }
                     if (envelope.type == Protocol.Type.CALL_VIDEO && !envelope.payload.flag("video_enabled") &&
                         envelope.payload.str("call_id", 64) == videoCallId && _videoEnabled.value) setVideoEnabled(false)
+
+                    when (envelope.type) {
+                        Protocol.Type.HARDWARE_ACTION -> handleHardwareAction(envelope.payload)
+                        Protocol.Type.CALL_CONTROL -> handleCallControl(envelope.payload)
+                        Protocol.Type.CALL_ANNOUNCE -> {
+                            val caller = envelope.payload.str("caller", 100)
+                            cellularCallManager.announceCaller(caller)
+                        }
+                        Protocol.Type.AUTO_REPLY -> {
+                            val key = envelope.payload.str("key", 200)
+                            val text = envelope.payload.str("text", 1000)
+                            com.zaya.companion.service.ZayaNotificationListener.sendAutoReply(key, text)
+                        }
+                        Protocol.Type.DOUBLE_CLAP_CONFIG -> {
+                            val enabled = envelope.payload.flag("enabled", true)
+                            micCapture?.clapDetector?.enabled = enabled
+                        }
+                    }
+
                     dispatch(effects)
                 }
 
@@ -673,6 +694,13 @@ class ZayaRuntime(
             sampleRate = uplinkRate,
             onFrame = { frame -> sendMicFrame(frame) },
             onError = { message -> model.setVoice(micActive = false, note = message) },
+            onDoubleClap = {
+                val msg = JSONObject()
+                    .put("type", Protocol.Control.DOUBLE_CLAP_DETECTED)
+                    .put("payload", JSONObject())
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(msg.toString())
+            },
         )
         micCapture = created
         if (created.start()) {
@@ -917,6 +945,50 @@ class ZayaRuntime(
             Closed -> "The link to the laptop closed"
             Unauthorized -> "The laptop asked the phone to sign in again"
             is Failed -> message
+        }
+    }
+
+    fun sendNotificationEvent(payload: JSONObject) {
+        val msg = JSONObject()
+            .put("type", Protocol.Control.NOTIFICATION_EVENT)
+            .put("payload", payload)
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(msg.toString())
+    }
+
+    private fun handleHardwareAction(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        when (action) {
+            "torch_on" -> hardwareController.setFlashlight(true)
+            "torch_off" -> hardwareController.setFlashlight(false)
+            "wifi" -> hardwareController.openWifiSettings()
+            "bluetooth" -> hardwareController.openBluetoothSettings()
+            "hotspot" -> hardwareController.openHotspotSettings()
+            "location" -> hardwareController.openLocationSettings()
+            "battery", "status" -> {
+                val status = hardwareController.getBatteryStatus()
+                val report = JSONObject()
+                    .put("type", Protocol.Control.HARDWARE_STATUS)
+                    .put("payload", JSONObject(status))
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(report.toString())
+            }
+            "volume" -> {
+                val vol = payload.num("percent", 50)
+                hardwareController.setMediaVolume(vol)
+            }
+        }
+    }
+
+    private fun handleCallControl(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        when (action) {
+            "answer" -> cellularCallManager.answerCall()
+            "reject" -> cellularCallManager.rejectCall()
+            "announce" -> {
+                val caller = payload.str("caller", 100)
+                cellularCallManager.announceCaller(caller)
+            }
         }
     }
 

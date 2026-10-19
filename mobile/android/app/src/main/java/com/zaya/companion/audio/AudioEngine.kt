@@ -23,7 +23,10 @@ class MicCapture(
     private val sampleRate: Int = Protocol.UPLINK_RATE,
     private val onFrame: (ByteArray) -> Unit,
     private val onError: (String) -> Unit = {},
+    val onDoubleClap: (() -> Unit)? = null,
 ) {
+    val clapDetector: DoubleClapDetector = DoubleClapDetector(onDoubleClap = { onDoubleClap?.invoke() })
+
     @Volatile
     private var running = false
 
@@ -101,6 +104,7 @@ class MicCapture(
                 break
             }
             if (read > 0) {
+                clapDetector.processFrame(frame, read)
                 onFrame(if (read == frame.size) frame.copyOf() else frame.copyOf(read))
             } else if (read < 0) {
                 onError("Microphone error $read")
