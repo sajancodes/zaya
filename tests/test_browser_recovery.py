@@ -30,12 +30,20 @@ class BrowserRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.pw = await async_playwright().start()
 
+        from pathlib import Path
+        chrome_exe = self.pw.chromium.executable_path
+        if not Path(chrome_exe).exists():
+            from actions.browser_control import _find_exe_windows
+            found = _find_exe_windows("chrome")
+            if found and Path(found).exists():
+                chrome_exe = found
+
         async def launch(profile, **kwargs):
-            return await self.pw.chromium.launch_persistent_context(profile, **{**kwargs, 'headless': True})
+            return await self.pw.chromium.launch_persistent_context(profile, **{**kwargs, 'headless': True, 'executable_path': chrome_exe})
 
         self.launcher = AsyncMock(side_effect=launch)
         self.session = _BrowserSession('chrome')
-        self.session._spec = {'engine': 'chromium', 'exe': self.pw.chromium.executable_path, 'channel': None}
+        self.session._spec = {'engine': 'chromium', 'exe': chrome_exe, 'channel': None}
         self.session._pw = SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=self.launcher), stop=AsyncMock())
         self.profile = patch('actions.browser_control._real_profile_dir', return_value=self.folder.name)
         self.profile.start()

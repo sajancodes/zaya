@@ -306,7 +306,7 @@ def _resolve_browser(name: str) -> dict | None:
                     exe = str(found_bins[0])
                     break
 
-    if not exe and _OS == "Windows" and not channel:
+    if not exe and _OS == "Windows":
         exe = _find_exe_windows(name)
 
     return {"engine": engine, "exe": exe, "channel": channel}
@@ -646,10 +646,10 @@ class _BrowserSession:
         try:
             self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
             self._page = await self._adopt_page()
-            print(f"[Browser] ✅ Launched [{label}] profile={profile}")
+            print(f"[Browser] [OK] Launched [{label}] profile={profile}")
             return
         except Exception as e:
-            print(f"[Browser] ⚠️  Real profile failed for {label}: {e}")
+            print(f"[Browser] [!] Real profile failed for {label}: {e}")
 
         # The real profile could not be opened (browser already open / locked
         # profile / newer Chrome versions block the real profile under
@@ -662,7 +662,7 @@ class _BrowserSession:
         try:
             self._context = await engine_obj.launch_persistent_context(jarvis_profile, **kwargs)
             self._page = await self._adopt_page()
-            print(f"[Browser] ✅ Launched [{label}] with Zaya profile "
+            print(f"[Browser] [OK] Launched [{label}] with Zaya profile "
                   f"(sign-ins persist across sessions)")
         except Exception as e2:
             raise RuntimeError(f"Could not launch {self.browser_name}: {e2}") from e2
