@@ -42,8 +42,10 @@ class ActionExecutor(
 
         return@withContext when (action) {
             is AndroidAction.SetFlashlight -> executeFlashlight(action.enabled)
-            is AndroidAction.OpenSystemSettings -> executeOpenSettings(action.setting)
+            is AndroidAction.GetFlashlightState -> executeGetFlashlightState()
+            is AndroidAction.OpenSystemSettings -> executeOpenSettings(action.setting, action.packageName)
             is AndroidAction.ControlMedia -> executeControlMedia(action.action)
+            is AndroidAction.GetMediaStatus -> executeGetMediaStatus()
             is AndroidAction.LaunchApp -> executeLaunchApp(action.name)
             is AndroidAction.LookUpContact -> executeContactLookup(action.query)
             is AndroidAction.ComposeSms -> executeComposeSms(action)
@@ -70,21 +72,45 @@ class ActionExecutor(
     }
 
     private fun executeFlashlight(enabled: Boolean): ActionResult {
-        val ok = hardwareController.setFlashlight(enabled)
+        val result = hardwareController.setFlashlight(enabled)
         val stateStr = if (enabled) "on" else "off"
-        return if (ok) {
-            ActionResult.success("Flashlight turned $stateStr.", mapOf("flashlight" to enabled))
-        } else {
-            ActionResult.failure("Unable to control flashlight. Camera flash may be unavailable.", error = "hardware_unavailable")
-        }
+        return result.fold(
+            onSuccess = {
+                ActionResult.success("Flashlight turned $stateStr.", mapOf("flashlight" to enabled))
+            },
+            onFailure = { error ->
+                ActionResult.failure(
+                    spoken = "Unable to turn $stateStr the flashlight: ${error.message}",
+                    error = error.javaClass.simpleName
+                )
+            }
+        )
     }
 
-    private fun executeOpenSettings(setting: String): ActionResult {
-        val ok = when (setting.lowercase().trim()) {
-            "wifi", "wi-fi" -> hardwareController.openWifiSettings()
+    private fun executeGetFlashlightState(): ActionResult {
+        val state = hardwareController.getFlashlightState()
+        if (!state.hasFlash) {
+            return ActionResult.failure("This device does not have a camera flash.", error = "no_flash_hardware")
+        }
+        val statusText = if (state.isOn) "The flashlight is currently on." else "The flashlight is currently off."
+        return ActionResult.success(
+            spoken = statusText,
+            data = mapOf("is_on" to state.isOn, "is_available" to state.isAvailable)
+        )
+    }
+
+    private fun executeOpenSettings(setting: String, packageName: String? = null): ActionResult {
+        val key = setting.lowercase().trim()
+        val ok = when (key) {
+            "wifi", "wi-fi", "internet" -> hardwareController.openWifiSettings()
             "bluetooth" -> hardwareController.openBluetoothSettings()
             "hotspot", "tethering" -> hardwareController.openHotspotSettings()
             "location", "gps" -> hardwareController.openLocationSettings()
+            "display", "brightness" -> hardwareController.openDisplaySettings()
+            "sound", "volume" -> hardwareController.openSoundSettings()
+            "notification_access", "notification_listeners" -> hardwareController.openNotificationListenerSettings()
+            "app_notifications", "notifications" -> hardwareController.openAppNotificationSettings(packageName)
+            "app_details", "app_info" -> hardwareController.openAppDetailsSettings(packageName)
             else -> appLauncher.launchAppByName("settings")
         }
         return if (ok) {
@@ -103,15 +129,61 @@ class ActionExecutor(
         }
     }
 
+    private fun executeGetMediaStatus(): ActionResult {
+        val status = mediaController.getActiveMediaStatus()
+        if (status.requiresNotificationAccess) {
+            return ActionResult.failure(
+                spoken = "Notification access is required to view active media playback. Would you like me to open settings?",
+                error = "notification_access_required",
+                data = mapOf("needs_settings" to "notification_access")
+            )
+        }
+        if (!status.hasActiveSession) {
+            return ActionResult.success("No active media is currently playing.", mapOf("is_playing" to false))
+        }
+
+        val stateDesc = if (status.isPlaying) "Playing" else "Paused"
+        val trackDesc = listOfNotNull(status.title, status.artist).joinToString(" by ")
+        val spoken = if (trackDesc.isNotEmpty()) "$stateDesc $trackDesc." else "$stateDesc."
+
+        return ActionResult.success(
+            spoken = spoken,
+            data = mapOf(
+                "is_playing" to status.isPlaying,
+                "title" to status.title,
+                "artist" to status.artist,
+                "album" to status.album,
+                "package" to status.packageName,
+            )
+        )
+    }
+
     private fun executeLaunchApp(name: String): ActionResult {
         if (name.isBlank()) {
             return ActionResult.failure("App name cannot be empty.", error = "invalid_argument")
         }
-        val ok = appLauncher.launchAppByName(name)
-        return if (ok) {
-            ActionResult.success("Opened $name.", mapOf("app_name" to name))
-        } else {
-            ActionResult.failure("Could not find or open application '$name'.", error = "app_not_found")
+
+        return when (val outcome = appLauncher.resolveAndLaunch(name)) {
+            is com.zaya.companion.service.AppLaunchOutcome.Success -> {
+                ActionResult.success("Opened ${outcome.appName}.", mapOf("app_name" to outcome.appName, "package" to outcome.packageName))
+            }
+            is com.zaya.companion.service.AppLaunchOutcome.Ambiguous -> {
+                val listStr = outcome.candidates.joinToString(" or ")
+                ActionResult.failure(
+                    spoken = "Found multiple matching apps. Did you mean $listStr?",
+                    error = "ambiguous_app",
+                    data = mapOf("candidates" to outcome.candidates)
+                )
+            }
+            is com.zaya.companion.service.AppLaunchOutcome.Disabled -> {
+                ActionResult.failure("${outcome.appName} is disabled in Android settings.", error = "app_disabled")
+            }
+            is com.zaya.companion.service.AppLaunchOutcome.NotFound -> {
+                ActionResult.failure("I couldn't find '${outcome.query}' on your phone.", error = "app_not_found")
+            }
+            is com.zaya.companion.service.AppLaunchOutcome.Failed -> {
+                ActionResult.failure("Could not open ${outcome.appName}: ${outcome.reason}", error = "launch_failed")
+            }
         }
     }
 

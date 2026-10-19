@@ -73,9 +73,16 @@ sealed class AndroidAction(
 
     data class SetFlashlight(val enabled: Boolean) : AndroidAction("set_flashlight", ActionRisk.LOW)
 
-    data class OpenSystemSettings(val setting: String) : AndroidAction("open_settings", ActionRisk.LOW)
+    data object GetFlashlightState : AndroidAction("get_flashlight_state", ActionRisk.LOW)
+
+    data class OpenSystemSettings(
+        val setting: String,
+        val packageName: String? = null,
+    ) : AndroidAction("open_settings", ActionRisk.LOW)
 
     data class ControlMedia(val action: String) : AndroidAction("control_media", ActionRisk.MEDIUM)
+
+    data object GetMediaStatus : AndroidAction("get_media_status", ActionRisk.LOW)
 
     data class LookUpContact(val query: String) : AndroidAction("lookup_contact", ActionRisk.LOW)
 

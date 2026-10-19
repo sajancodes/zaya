@@ -3,11 +3,22 @@ package com.zaya.companion.service
 import android.content.ComponentName
 import android.content.Context
 import android.media.AudioManager
+import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.util.Log
 import android.view.KeyEvent
+
+data class ActiveMediaStatus(
+    val hasActiveSession: Boolean,
+    val packageName: String? = null,
+    val isPlaying: Boolean = false,
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val requiresNotificationAccess: Boolean = false,
+)
 
 /**
  * System-wide media playback controller for Spotify, YouTube, Apple Music, and podcast players.
@@ -25,6 +36,14 @@ class MediaPlaybackController(private val context: Context) {
         context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
     }
 
+    fun hasNotificationAccess(): Boolean {
+        val flat = android.provider.Settings.Secure.getString(
+            context.contentResolver,
+            "enabled_notification_listeners"
+        ) ?: return false
+        return flat.contains(context.packageName)
+    }
+
     private fun getActiveControllers(): List<MediaController> {
         val manager = mediaSessionManager ?: return emptyList()
         return try {
@@ -37,6 +56,31 @@ class MediaPlaybackController(private val context: Context) {
             Log.e("MediaPlaybackController", "Failed to retrieve active media sessions: ${e.message}")
             emptyList()
         }
+    }
+
+    fun getActiveMediaStatus(): ActiveMediaStatus {
+        if (!hasNotificationAccess()) {
+            return ActiveMediaStatus(hasActiveSession = false, requiresNotificationAccess = true)
+        }
+        val controllers = getActiveControllers()
+        val active = controllers.firstOrNull() ?: return ActiveMediaStatus(hasActiveSession = false)
+
+        val pbState = active.playbackState?.state
+        val isPlaying = pbState == PlaybackState.STATE_PLAYING || pbState == PlaybackState.STATE_BUFFERING
+        val metadata = active.metadata
+
+        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+        val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)
+
+        return ActiveMediaStatus(
+            hasActiveSession = true,
+            packageName = active.packageName,
+            isPlaying = isPlaying,
+            title = title,
+            artist = artist,
+            album = album,
+        )
     }
 
     fun play(): Boolean {
@@ -55,6 +99,15 @@ class MediaPlaybackController(private val context: Context) {
             return true
         }
         return dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
+    }
+
+    fun stop(): Boolean {
+        val controllers = getActiveControllers()
+        if (controllers.isNotEmpty()) {
+            controllers.first().transportControls.stop()
+            return true
+        }
+        return dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_STOP)
     }
 
     fun toggle(): Boolean {
@@ -94,6 +147,7 @@ class MediaPlaybackController(private val context: Context) {
         return when (action.lowercase().trim()) {
             "play" -> play()
             "pause" -> pause()
+            "stop" -> stop()
             "toggle" -> toggle()
             "next", "skip" -> next()
             "previous", "prev" -> previous()
