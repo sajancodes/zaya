@@ -263,7 +263,13 @@ TOOL = {
             },
             "slides": {
                 "type": "ARRAY",
-                "items": {"type": "OBJECT"},
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "title": {"type": "STRING", "description": "Slide title"},
+                        "content": {"type": "STRING", "description": "Slide content"}
+                    }
+                },
                 "description": "List of slide objects with 'title' and 'content' (for presentations)."
             },
             "headers": {
@@ -273,12 +279,21 @@ TOOL = {
             },
             "rows": {
                 "type": "ARRAY",
-                "items": {"type": "ARRAY"},
+                "items": {
+                    "type": "ARRAY",
+                    "items": {"type": "STRING"}
+                },
                 "description": "List of row arrays (for spreadsheets)."
             },
             "sections": {
                 "type": "ARRAY",
-                "items": {"type": "OBJECT"},
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "title": {"type": "STRING", "description": "Section title"},
+                        "content": {"type": "STRING", "description": "Section text"}
+                    }
+                },
                 "description": "List of sections with 'title' and 'content' (for PDFs)."
             }
         },
