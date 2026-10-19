@@ -67,6 +67,8 @@ config/.zaya-config-*.tmp
 memory/projects.json
 memory/coding_jobs.json
 memory/coding_jobs.tmp
+memory/missions.json
+memory/missions.tmp
 memory/*_state.json
 memory/*_state.tmp
 zayabar.tmp
