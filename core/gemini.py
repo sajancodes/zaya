@@ -443,20 +443,47 @@ def _live_call(contents, config, timeout_ms: int, key: str):
         raise RuntimeError("no free Live slot — leaving them for the conversation")
 
     box: dict = {}
+    cancelled = threading.Event()
+    control_lock = threading.Lock()
+    control: dict = {}
+
+    async def execute():
+        with control_lock:
+            control.update(loop=asyncio.get_running_loop(), task=asyncio.current_task())
+        if cancelled.is_set():
+            return None
+        return await _live_turn(parts, str(system), key, max(10.0, timeout_ms / 1000.0))
 
     def runner():
         try:
-            box["text"] = asyncio.run(
-                _live_turn(parts, str(system), key, max(10.0, timeout_ms / 1000.0)))
+            text = asyncio.run(execute())
+            if not cancelled.is_set():
+                box["text"] = text
         except BaseException as e:                     # noqa: BLE001
-            box["error"] = e
+            if not cancelled.is_set():
+                box["error"] = e
+        finally:
+            # A stuck worker still owns its slot: never accumulate more Live
+            # sessions than the limit by releasing before the worker exits.
+            _LIVE_SLOTS.release()
 
     try:
         th = threading.Thread(target=runner, daemon=True, name="gemini-live-oneshot")
         th.start()
-        th.join(timeout=max(15.0, timeout_ms / 1000.0 + 20.0))
-    finally:
+    except BaseException:
         _LIVE_SLOTS.release()
+        raise
+    th.join(timeout=max(15.0, timeout_ms / 1000.0 + 20.0))
+    if th.is_alive():
+        cancelled.set()
+        with control_lock:
+            loop, task = control.get('loop'), control.get('task')
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass  # The worker already closed its loop.
+        raise TimeoutError('One-shot Live request exceeded its deadline and was cancelled.')
     if "error" in box:
         raise box["error"]
     text = box.get("text")

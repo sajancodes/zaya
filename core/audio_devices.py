@@ -35,7 +35,7 @@ DEFAULT_LABEL = "System default"
 DEFAULT_VALUE = ""
 
 _cache: dict[str, list[str]] | None = None
-_cache_lock = threading.Lock()
+_cache_lock = threading.RLock()
 
 # Which host API each direction settled on, so resolve() opens the same endpoint
 # the picker listed. Filled in by _query().
@@ -117,6 +117,11 @@ _probe_results: dict = {}
 
 
 def _transport_works(idx: int, kind: str, api_key) -> bool:
+    with _cache_lock:
+        return _probe_transport(idx, kind, api_key)
+
+
+def _probe_transport(idx: int, kind: str, api_key) -> bool:
     """Does this host API actually move audio, or only pretend to?
 
     Probed once per API per direction and cached. Output writes silence, so the
@@ -207,9 +212,11 @@ def configure(input_rate: int, output_rate: int) -> None:
     Drops any cached list: which devices are usable depends on the rate, so a
     list built under the old rates would be stale."""
     global _cache
-    _RATES["input"]  = int(input_rate)
-    _RATES["output"] = int(output_rate)
     with _cache_lock:
+        _RATES["input"] = int(input_rate)
+        _RATES["output"] = int(output_rate)
+        _probe_results.clear()
+        _chosen_api.update(input=None, output=None)
         _cache = None
 
 
@@ -262,10 +269,16 @@ def _is_pseudo(name: str) -> bool:
 
 
 def _query() -> dict[str, list[str]]:
+    with _cache_lock:
+        return _query_locked()
+
+
+def _query_locked() -> dict[str, list[str]]:
     """Return {'input': [names...], 'output': [names...]}. Never raises.
 
     Only real, selectable devices — see the note above."""
     out: dict[str, list[str]] = {"input": [], "output": []}
+    _chosen_api.update(input=None, output=None)
     try:
         import platform
         import sounddevice as sd
@@ -329,25 +342,24 @@ def prefetch() -> None:
     """Warm the cache on a background thread. Called once at startup so the
     settings drawer never pays for enumeration on the Qt thread."""
     def _work():
-        global _cache
-        result = _query()
-        with _cache_lock:
-            _cache = result
+        result = _device_snapshot()
         print(f"[Audio] {len(result['input'])} input / "
               f"{len(result['output'])} output devices found")
     threading.Thread(target=_work, daemon=True, name="audio-devices").start()
 
 
+def _device_snapshot(refresh: bool = False) -> dict[str, list[str]]:
+    global _cache
+    with _cache_lock:
+        if refresh or _cache is None:
+            _cache = _query()
+        return _cache
+
+
 def list_devices(kind: str, refresh: bool = False) -> list[str]:
     """Device names for 'input' or 'output'. Falls back to a synchronous query
     if the prefetch has not landed yet — correctness over the cache."""
-    global _cache
-    with _cache_lock:
-        cached = None if refresh else _cache
-    if cached is None:
-        cached = _query()
-        with _cache_lock:
-            _cache = cached
+    cached = _device_snapshot(refresh)
     return list(cached.get(kind, []))
 
 
@@ -395,7 +407,8 @@ def resolve(name: str, kind: str):
         # setting means something different from what it says. list_devices()
         # populates it; calling it here is a no-op once the cache is warm.
         list_devices(kind)
-        chosen = _chosen_api.get(kind)
+        with _cache_lock:
+            chosen = _chosen_api.get(kind)
         orders = ([chosen] if chosen is not None else []) \
             + [a for a in _PREFERRED_APIS.get(platform.system(), ()) if a != chosen] \
             + [None]

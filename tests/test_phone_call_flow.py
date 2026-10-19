@@ -109,6 +109,23 @@ class PhoneCallFlowTests(unittest.TestCase):
         self.assertIsNone(self.calls.request_call(title='Automatic update'))
         self.assertIsNotNone(self.calls.request_call(title='Owner requested a test', requested=True))
 
+    def test_missed_call_attempts_keep_hourly_spam_cap_without_creating_ghost_calls(self):
+        now = [1000.0]
+        self.calls._clock = lambda: now[0]
+        events = []
+        with patch.object(self.bridge, 'emit', side_effect=events.append):
+            for index in range(self.calls.max_per_hour):
+                call = self.calls.request_call(title=f'Alert {index}')
+                self.assertIsNotNone(call)
+                self.calls.miss(call.call_id)
+                now[0] += self.calls.min_interval + 1
+            self.assertEqual(self.calls._blocked_reason('', now[0]), 'the hourly call limit is reached')
+            count = len(self.calls._calls)
+            self.assertIsNone(self.calls.request_call(title='One more automatic alert'))
+        self.assertEqual(len(self.calls._calls), count)
+        self.assertIsNone(self.calls.active())
+        self.assertEqual(events[-1]['type'], 'system.notify')
+
     def test_unavailable_zaya_does_not_answer_and_stop_cancels_delayed_answer(self):
         call = self.calls.dial('phone-a')
         self.calls.set_available_provider(lambda: False)
