@@ -24,9 +24,8 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 def _get_api_key() -> str:
-    path = _get_base_dir() / "config" / "api_keys.json"
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core import gemini
+    return gemini.api_key()
     
 def _get_desktop() -> Path:
     if _OS == "Linux":
@@ -81,6 +80,9 @@ def _build_sandbox() -> dict:
 
 
 def _execute_generated_code(code: str, player=None) -> str:
+    from core.execution_policy import require_owner
+    from core import confirm
+    require_owner()
     if not code or code.strip() == "UNSAFE":
         return "This action cannot be performed safely."
 
@@ -89,6 +91,13 @@ def _execute_generated_code(code: str, player=None) -> str:
         lines = code.split("\n")
         code  = "\n".join(lines[1:-1]).strip()
 
+    # The convenience namespace below is not a security sandbox. Generated
+    # automation is controlled by the same real interface gate as other code.
+    return confirm.request('desktop_generated_code', 'Run desktop automation',
+                           code, lambda: _run_generated_code(code))
+
+
+def _run_generated_code(code: str) -> str:
     sandbox      = _build_sandbox()
     output_lines = []
     sandbox["__builtins__"]["print"] = lambda *a: output_lines.append(" ".join(str(x) for x in a))
@@ -166,7 +175,8 @@ def set_wallpaper(image_path: str) -> str:
             if path.suffix.lower() in {".webp", ".png"}:
                 try:
                     from PIL import Image
-                    bmp_path = Path(tempfile.mktemp(suffix=".bmp"))
+                    with tempfile.NamedTemporaryFile(suffix=".bmp", delete=False) as stream:
+                        bmp_path = Path(stream.name)
                     Image.open(path).convert("RGB").save(bmp_path, "BMP")
                     path = bmp_path
                 except ImportError:
@@ -241,14 +251,13 @@ def set_wallpaper_from_url(url: str) -> str:
     try:
         import urllib.request
         suffix = Path(url.split("?")[0]).suffix or ".jpg"
-        tmp    = Path(tempfile.mktemp(suffix=suffix))
-        urllib.request.urlretrieve(url, str(tmp))
-        result = set_wallpaper(str(tmp))
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as stream:
+            tmp = Path(stream.name)
         try:
-            tmp.unlink()
-        except Exception:
-            pass
-        return result
+            urllib.request.urlretrieve(url, str(tmp))
+            return set_wallpaper(str(tmp))
+        finally:
+            tmp.unlink(missing_ok=True)
     except Exception as e:
         return f"Could not download wallpaper: {e}"
 
@@ -310,6 +319,15 @@ def organize_desktop(mode: str = "by_type") -> str:
     desktop       = _get_desktop()
     skip_exts     = _SKIP_EXTENSIONS.get(_OS, set())
     moved, skipped = [], []
+    moves = []
+
+    def undo_moves():
+        restored = 0
+        for original, destination in reversed(moves):
+            if destination.exists() and not original.exists():
+                shutil.move(str(destination), str(original))
+                restored += 1
+        return f'Restored {restored} file(s); existing files were preserved.'
 
     for item in desktop.iterdir():
         if item.is_dir() or item.name.startswith("."):
@@ -337,6 +355,10 @@ def organize_desktop(mode: str = "by_type") -> str:
             continue
 
         shutil.move(str(item), str(new_path))
+        moves.append((item, new_path))
+        if len(moves) == 1:
+            from core.undo import push_undo
+            push_undo('organize desktop', undo_moves)
         moved.append(f"{item.name} → {folder_name}/")
 
     result = f"Desktop organized ({mode}): {len(moved)} files moved."

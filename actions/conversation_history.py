@@ -15,7 +15,7 @@ def conversation_history(parameters, **_kwargs):
         if remaining <= 0:
             break
         message = dict(message)
-        message['text'] = message['text'][-remaining:]
+        message['text'] = message['text'][:remaining]
         remaining -= len(message['text'])
         bounded.append(message)
     messages = list(reversed(bounded))

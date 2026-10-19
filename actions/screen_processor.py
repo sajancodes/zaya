@@ -54,9 +54,8 @@ def _load_config() -> dict:
 
 def _save_config_key(key: str, value) -> None:
     try:
-        cfg = _load_config()
-        cfg[key] = value
-        _CONFIG_PATH.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
+        from memory.config_manager import _patch_config
+        _patch_config(**{key: value})
     except Exception as e:
         print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
 
@@ -179,5 +178,7 @@ def _capture_camera() -> tuple[bytes, str]:
         img.save(buf, format="JPEG", quality=_JPEG_Q)
         return buf.getvalue(), "image/jpeg"
 
-    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_Q])
+    encoded, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_Q])
+    if not encoded or buf is None:
+        raise RuntimeError('Camera frame could not be encoded as JPEG.')
     return buf.tobytes(), "image/jpeg"

@@ -58,8 +58,8 @@ _YT_VIDEO_FILTER = "EgIQAQ%3D%3D"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core import gemini
+    return gemini.api_key()
 
 
 def _open_url(url: str) -> None:
@@ -117,6 +117,7 @@ def _is_valid_youtube_url(url: str) -> bool:
 
 
 def _ask_for_url(prompt_text: str = "YouTube video URL:") -> str | None:
+    owned_root = None
     try:
         import tkinter as tk
         from tkinter import simpledialog
@@ -125,19 +126,26 @@ def _ask_for_url(prompt_text: str = "YouTube video URL:") -> str | None:
         if root is None:
             root = tk.Tk()
             root.withdraw()
+            owned_root = root
 
-        url = simpledialog.askstring("J.A.R.V.I.S", prompt_text, parent=root)
+        url = simpledialog.askstring("Zaya", prompt_text, parent=root)
         return url.strip() if url else None
     except Exception as e:
         print(f"[YouTube] ⚠️ URL dialog failed: {e}")
         return None
+    finally:
+        if owned_root is not None:
+            owned_root.destroy()
 
 
 def _get_transcript(video_id: str) -> str | None:
     if not _TRANSCRIPT_OK:
         return None
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        if hasattr(YouTubeTranscriptApi, 'list'):
+            transcript_list = YouTubeTranscriptApi().list(video_id)
+        else:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript      = None
 
         lang_priority = ["en", "tr", "de", "fr", "es", "it", "pt", "ru", "ja", "ko", "ar", "zh"]
@@ -159,7 +167,8 @@ def _get_transcript(video_id: str) -> str | None:
             return None
 
         fetched = transcript.fetch()
-        return " ".join(entry["text"] for entry in fetched)
+        return " ".join(entry.get('text', '') if isinstance(entry, dict)
+                        else getattr(entry, 'text', '') for entry in fetched)
 
     except Exception as e:
         print(f"[YouTube] ⚠️ Transcript fetch failed: {e}")

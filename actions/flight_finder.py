@@ -5,6 +5,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 from config import is_windows, is_mac, is_linux
 
@@ -19,8 +20,8 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core import gemini
+    return gemini.api_key()
 
 _MONTH_MAP: dict[str, int] = {
 
@@ -105,18 +106,12 @@ def _build_google_flights_url(
 
     # Google Flights accepts these query params for pre-filling
     if return_date:
-        trip = f"Flights+from+{origin}+to+{destination}+on+{date}+returning+{return_date}"
+        trip = f"Flights from {origin} to {destination} on {date} returning {return_date}"
     else:
-        trip = f"Flights+from+{origin}+to+{destination}+on+{date}"
+        trip = f"Flights from {origin} to {destination} on {date}"
 
-    return (
-        f"{base}"
-        f"?q={trip}"
-        f"&tfs=CBwQAhoeEgoyMDI1LTAzLTE1agcIARIDSVNUcgcIARIDTEhS"   
-        f"&curr=USD"
-        f"&cabin={cabin_code}"
-        f"&adults={passengers}"
-    )
+    return base + '?' + urlencode({'q': trip, 'curr': 'USD', 'cabin': cabin_code,
+                                   'adults': passengers})
 
 
 
@@ -174,7 +169,7 @@ def _parse_flights_with_gemini(
                 )
             ),
         )
-        text     = re.sub(r"```(?:json)?", "", response.text).strip().rstrip("`").strip()
+        text     = re.sub(r"```(?:json)?", "", response.text or '').strip().rstrip("`").strip()
         flights  = json.loads(text)
         return flights if isinstance(flights, list) else []
     except Exception as e:

@@ -1,5 +1,6 @@
 import json
 import subprocess
+from core.tool_result import ToolResult
 import sys
 import time
 from pathlib import Path
@@ -238,7 +239,7 @@ def send_message(
     response=None,
     player=None,
     session_memory=None,
-) -> str:
+) -> str | ToolResult:
     params       = parameters or {}
     receiver     = params.get("receiver", "").strip()
     message_text = params.get("message_text", "").strip()
@@ -249,7 +250,6 @@ def send_message(
     if not message_text:
         return "Please specify the message content."
     if platform.lower() in {"whatsapp", "whats app", "wa", "wp", "wapp"}:
-        from core.tool_result import ToolResult
         return ToolResult("failed", "Use the whatsapp tool with action=send, chat and message. This legacy tool does not send WhatsApp messages.")
     if not _PYAUTOGUI:
         return "PyAutoGUI is not installed — cannot control the desktop."

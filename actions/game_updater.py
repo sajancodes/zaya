@@ -790,11 +790,9 @@ def _update_epic_games(epic_exe: Path, game_name: str = None) -> str:
             else:
 
                 if _is_epic_running():
-                    for g in games[:10]:
-                        subprocess.Popen([str(epic_exe),
-                            f"com.epicgames.launcher://apps/{g['id']}?action=launch&silent=true"])
-                        time.sleep(0.5)
-                    return f"Triggered update check for {len(games)} Epic game(s)."
+                    subprocess.Popen([str(epic_exe)])
+                    return ('Epic Games Launcher opened. Automatic updates are managed '
+                            'by its update settings; no games were launched.')
                 else:
                     subprocess.Popen([str(epic_exe)])
             count = len(games)

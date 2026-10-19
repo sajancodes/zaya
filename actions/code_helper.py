@@ -22,8 +22,7 @@ from core import gemini
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return gemini.api_key()
 
 
 def _get_gemini(tier: str = gemini.SMART):
@@ -91,7 +90,16 @@ def _preview(code: str, lines: int = 10) -> str:
     return preview + suffix
 
 
+class _ExecutionOutput(str):
+    def __new__(cls, text, returncode):
+        value = super().__new__(cls, text)
+        value.returncode = returncode
+        return value
+
+
 def _has_error(output: str) -> bool:
+    if isinstance(output, _ExecutionOutput):
+        return output.returncode != 0
     error_signals = ["error", "exception", "traceback", "syntaxerror",
                      "nameerror", "typeerror", "stderr", "failed", "crash"]
     return any(s in output.lower() for s in error_signals)
@@ -234,7 +242,8 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
         parts  = []
         if output: parts.append(f"Output:\n{output}")
         if error:  parts.append(f"Stderr:\n{error}")
-        return "\n\n".join(parts) if parts else "Executed with no output."
+        text = "\n\n".join(parts) if parts else "Executed with no output."
+        return _ExecutionOutput(text, result.returncode)
 
     except subprocess.TimeoutExpired:
         return f"Timed out after {timeout}s."

@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -29,9 +30,7 @@ from datetime import datetime
 from core import gemini
 
 def _get_api_key() -> str:
-    config_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return gemini.api_key()
 
 
 def _gemini_client(tier: str = gemini.SMART):
@@ -301,8 +300,9 @@ def _process_text_doc(path: Path, file_type: str, action: str,
 
     if action not in prompt_map:
 
-        action  = "custom"
-        instruction = action
+        instruction = instruction or action
+        action = "custom"
+        prompt_map[action] = f"{instruction}\n\n{content[:40000]}"
 
     try:
         model    = _gemini_client()
@@ -466,7 +466,7 @@ def _process_code(path: Path, action: str, params: dict, speak=None) -> str:
         if ext == "py":
             try:
                 result = subprocess.run(
-                    ["python", str(path)],
+                    [sys.executable, str(path)],
                     capture_output=True, text=True, timeout=30
                 )
                 out = result.stdout or result.stderr
@@ -684,7 +684,8 @@ def _process_video(path: Path, action: str, params: dict, speak=None) -> str:
     if action == "transcribe":
         if not _ffmpeg_available():
             return "ffmpeg not found. Needed for video transcription."
-        tmp_audio = Path(tempfile.mktemp(suffix=".mp3"))
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as stream:
+            tmp_audio = Path(stream.name)
         try:
             subprocess.run(
                 ["ffmpeg", "-i", str(path), "-q:a", "0", "-map", "a",

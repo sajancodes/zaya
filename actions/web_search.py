@@ -74,8 +74,17 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core import gemini
+    return gemini.api_key()
+
+
+def _response_text(response) -> str:
+    candidates = getattr(response, 'candidates', None) or []
+    if not candidates:
+        return ''
+    content = getattr(candidates[0], 'content', None)
+    return ''.join(getattr(part, 'text', '') or ''
+                   for part in (getattr(content, 'parts', None) or []))
 
 
 def _gemini_search(query: str) -> str:
@@ -96,10 +105,7 @@ def _gemini_search(query: str) -> str:
         _note_gemini_error(e)
         raise
 
-    text = ""
-    for part in response.candidates[0].content.parts:
-        if hasattr(part, "text") and part.text:
-            text += part.text
+    text = _response_text(response)
 
     text = text.strip()
     if not text:
@@ -217,10 +223,7 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
     if response is None:
         return [], ""
 
-    raw = ""
-    for part in response.candidates[0].content.parts:
-        if hasattr(part, "text") and part.text:
-            raw += part.text
+    raw = _response_text(response)
 
     headlines = []
     for line in raw.strip().split("\n"):

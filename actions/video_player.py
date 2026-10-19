@@ -218,6 +218,8 @@ def video_player(parameters: dict = None, response=None, player=None,
             return ToolResult('partial', 'Media request canceled before the browser opened.', {'canceled': True})
         result = browser_control({'action': 'go_to', 'url': url,
                                   'browser': params.get('browser') or '', 'mode': 'native'}, player=player)
+        from core.tool_result import normalize
+        result = normalize(result)
         with _open_lock:
             _last_source = source
         result.data.update(media_source=source, target='browser', playback_verified=False)
