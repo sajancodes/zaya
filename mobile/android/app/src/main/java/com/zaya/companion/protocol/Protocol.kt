@@ -108,6 +108,9 @@ object Protocol {
         const val AUTO_REPLY = "mobile.auto_reply"
         const val DEVICE_STATUS = "mobile.device_status"
         const val DOUBLE_CLAP_CONFIG = "mobile.double_clap_config"
+        const val MEDIA_CONTROL = "mobile.media_control"
+        const val OPEN_DEEP_LINK = "mobile.deep_link"
+        const val LAUNCH_APP = "mobile.launch_app"
     }
 
     // ── uplink control messages (phone → laptop) ─────────────────────────────
@@ -127,6 +130,7 @@ object Protocol {
         const val NOTIFICATION_EVENT = "notification.event"
         const val HARDWARE_STATUS = "hardware.status"
         const val DOUBLE_CLAP_DETECTED = "double_clap.detected"
+        const val ACTION_RESULT = "action.result"
     }
 
     // ── command lifecycle (mirrors core/remote_commands.py) ──────────────────

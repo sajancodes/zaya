@@ -131,6 +131,8 @@ class ZayaRuntime(
     private val callAudio = CallAudioRoute(context)
     val hardwareController by lazy { com.zaya.companion.service.HardwareController(context) }
     val cellularCallManager by lazy { com.zaya.companion.service.CellularCallManager(context) }
+    val mediaPlaybackController by lazy { com.zaya.companion.service.MediaPlaybackController(context) }
+    val appLauncher by lazy { com.zaya.companion.service.AppLauncher(context) }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -457,6 +459,9 @@ class ZayaRuntime(
                             val enabled = envelope.payload.flag("enabled", true)
                             micCapture?.clapDetector?.enabled = enabled
                         }
+                        Protocol.Type.MEDIA_CONTROL -> handleMediaControl(envelope.payload)
+                        Protocol.Type.OPEN_DEEP_LINK -> handleDeepLink(envelope.payload)
+                        Protocol.Type.LAUNCH_APP -> handleLaunchApp(envelope.payload)
                     }
 
                     dispatch(effects)
@@ -990,6 +995,37 @@ class ZayaRuntime(
                 cellularCallManager.announceCaller(caller)
             }
         }
+    }
+
+    private fun handleMediaControl(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        val success = mediaPlaybackController.executeAction(action)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("action", action).put("success", success).put("module", "media"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
+    }
+
+    private fun handleDeepLink(payload: JSONObject) {
+        val app = payload.str("target_app", 60)
+        val query = payload.str("query", 200)
+        val success = appLauncher.openDeepLink(app, query)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("target_app", app).put("success", success).put("module", "deep_link"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
+    }
+
+    private fun handleLaunchApp(payload: JSONObject) {
+        val name = payload.str("name", 80)
+        val success = appLauncher.launchAppByName(name)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("name", name).put("success", success).put("module", "app_launcher"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
     }
 
     private companion object {
