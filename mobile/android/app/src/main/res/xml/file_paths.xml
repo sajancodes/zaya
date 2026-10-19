@@ -3,4 +3,5 @@
 <paths>
     <external-files-path name="zaya_downloads" path="Documents/Zaya/" />
     <files-path name="zaya_files" path="received/" />
+    <cache-path name="app_updates" path="updates/" />
 </paths>

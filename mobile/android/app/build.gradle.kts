@@ -12,8 +12,8 @@ android {
         applicationId = "com.zaya.companion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = providers.environmentVariable("ZAYA_VERSION_CODE").orElse("4").get().toInt()
+        versionName = providers.environmentVariable("ZAYA_VERSION_NAME").orElse("0.4.0").get()
     }
 
     sourceSets {
@@ -23,8 +23,19 @@ android {
         getByName("main").assets.srcDirs("src/main/assets", "assets")
     }
 
+    signingConfigs {
+        create("updates") {
+            storeFile = file(providers.environmentVariable("ZAYA_SIGNING_STORE").orElse(
+                System.getProperty("user.home") + "/.android/debug.keystore").get())
+            storePassword = providers.environmentVariable("ZAYA_STORE_PASSWORD").orElse("android").get()
+            keyAlias = providers.environmentVariable("ZAYA_KEY_ALIAS").orElse("androiddebugkey").get()
+            keyPassword = providers.environmentVariable("ZAYA_KEY_PASSWORD").orElse("android").get()
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("updates")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -36,6 +47,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {

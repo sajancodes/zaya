@@ -126,6 +126,8 @@ class ZayaRuntime(
     private var downlinkRate: Int = Protocol.DOWNLINK_RATE
 
     private var supervisor: Job? = null
+    val updates = com.zaya.companion.updates.AppUpdates(context)
+    private var updateChecks: Job? = null
     private val callAudio = CallAudioRoute(context)
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
@@ -190,11 +192,19 @@ class ZayaRuntime(
             combine(store.pairing, reconnectSignal.onStart { emit(Unit) }) { pair, _ -> pair }
                 .collectLatest { pair -> runConnection(pair) }
         }
+        updateChecks = scope.launch {
+            while (isActive) {
+                updates.check()
+                delay(6 * 60 * 60 * 1000L)
+            }
+        }
     }
 
     fun stop() {
         supervisor?.cancel()
         supervisor = null
+        updateChecks?.cancel()
+        updateChecks = null
         teardownSession()
         model.connectionLost("Disconnected")
         _connection.value = ConnectionStatus(ConnectionPhase.UNPAIRED, "Disconnected")
@@ -378,6 +388,7 @@ class ZayaRuntime(
                     _connection.value = ConnectionStatus(ConnectionPhase.ONLINE, "Connected")
                     sendHello(socket)
                     openVoiceSocket(base, token)
+                    scope.launch { updates.check() }
                     flushOutbox(socket)
                 }
 

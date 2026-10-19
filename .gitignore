@@ -61,6 +61,8 @@ screenshots/
 .benchmarks/
 
 # Private operator state
+*.keystore
+*.jks
 config/.zaya-config-*.tmp
 memory/projects.json
 memory/coding_jobs.json

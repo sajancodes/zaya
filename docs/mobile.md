@@ -319,3 +319,30 @@ presentation over the launcher and lock screen, Answer/Decline controls, camera
 capture and transport, and no further frames after Video off. The emulator used
 a local fixture server, not the owner's real provider session. Physical ringtone,
 OEM permission behavior and provider vision responses still require a phone test.
+
+
+## App updates
+
+APK-only updates are published at [Zaya Companion releases](https://github.com/sajancodes/zaya-companion-releases/releases/latest).
+The source repository stays private. The phone checks the public release channel
+on startup/connect and every six hours, with **Check for updates** in Settings.
+When a newer version is available, **Update now** appears on Home and in Settings.
+It downloads directly from GitHub, checks size, SHA-256, app identity, version and
+signing certificate, then opens Android's installer. Allow **Install unknown apps
+from Zaya** once when Android asks. Pairing and settings survive the update. App
+installation waits until a call is finished; no GitHub token is stored on the phone.
+
+The private source repository's Android release workflow runs for Android changes
+on main, after Android unit tests and signed release assembly. It publishes only
+`Zaya-Companion.apk` and `update.json` to the separate public repository. The
+version code is greater than the latest published code. Signing material and the
+release-publishing credential live in encrypted Actions secrets, never in source
+or the APK. Retaining the existing app signing identity lets the current manually
+installed APK upgrade in place. The workflow can also be started manually through
+GitHub Actions → Android app releases → Run workflow.
+
+If private-repository Actions cannot run (for example, account billing restrictions),
+use `tools/publish_android_release.ps1` from the owner terminal after committing
+and pushing verified changes. It chooses a newer code, runs Android tests, builds
+with the same signing identity and publishes only the two public release assets.
+The phone's public update checks do not depend on Actions or laptop availability.

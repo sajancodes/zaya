@@ -199,6 +199,9 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
+        UpdateCard(runtime)
+
+        Spacer(Modifier.height(12.dp))
         CallPermissionCard()
 
         Spacer(Modifier.height(12.dp))

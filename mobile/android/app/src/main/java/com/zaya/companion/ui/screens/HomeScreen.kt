@@ -107,6 +107,7 @@ fun HomeScreen(
         )
 
         Column(Modifier.padding(horizontal = 16.dp)) {
+            UpdateCard(runtime, showWhenCurrent = false)
             CallPermissionCard(compact = true, onConfigure = onOpenSettings)
             if (caption.text.isNotBlank()) {
                 SectionCard {
