@@ -41,9 +41,14 @@ history is also available on `zaya-updates`.
 | Media | Play local files and supported streams in a separate window, with sound on and the microphone active. |
 | Audio priority | Lower background computer audio during detected speech, prioritize Zaya's voice, and restore previous levels afterward. |
 | WhatsApp | Reconnect a linked Hermes session, observe incoming messages, announce sender/context, and support per-chat observation, drafts, or assistant auto replies. |
+| Memory & recall | Archive every conversation locally; recall at most five messages on demand; semantic long-term memory; no preload on fresh startup. |
+| Proactive assistance | Morning/evening briefings, contextual check-ins, anomaly alerts, commitment tracking, and quiet-hour respect. |
 | Task visibility | Keep durable task state, bounded retries, diagnostics, and evidence instead of assuming every tool response means success. |
 | Extensions | Load action modules and optional productivity, reminder, and remote-control plugins. |
 | Phone companion | A native Android app (`mobile/android/`) mirrors Zaya's state, transcript, tasks, WhatsApp views and files, and carries two-way voice and Zaya-initiated calls over the same runtime. |
+| Phone calls | Zaya rings the phone for urgent messages, owner-requested decisions, failed tasks, and finished work while the owner is away; missed calls leave one summary. |
+| Phone video | Opt-in camera sharing during an answered call; the laptop receives frames and can use them as live visual context. |
+| Native call controls | Answer, decline, and mute directly from the phone's incoming-call notification. |
 
 Provider APIs, external applications, authentication, and optional integrations
 must be available for their features to work. Browser launch alone is reported
@@ -384,6 +389,7 @@ WhatsApp link answer the phone.
 | --- | --- |
 | Home / Chat | Zaya's state and emotion exactly as the laptop reports them, never decided locally; text commands go through the same owner-scope approval path |
 | Voice and calls | Two-way PCM16 voice on its own sockets; Zaya can call the phone (P0/P1 ring the phone like a real call, P2 notifies, P3 stays silent), a task that finishes while the owner is away rings him, and a missed call leaves one summary, never a repeat |
+| Video | Opt-in camera sharing during an answered call; the laptop receives frames and can use them as live visual context. |
 | Output | Desktop, phone or both; a call routes her voice to the phone automatically and restores the previous route afterwards |
 | Tasks | The laptop's task runtime, newest first, read-only |
 | WhatsApp | Read-only views plus owner mode switches; message text is never treated as a command |
