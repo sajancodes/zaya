@@ -22,6 +22,7 @@ history is also available on `zaya-updates`.
 - [Full Access and command permissions](#full-access-and-command-permissions)
 - [Browser automation and recovery](#browser-automation-and-recovery)
 - [WhatsApp connection and chat modes](#whatsapp-connection-and-chat-modes)
+- [The Zaya phone companion (Android)](#the-zaya-phone-companion-android)
 - [Optional integrations](#optional-integrations)
 - [Configuration and private data](#configuration-and-private-data)
 - [Architecture](#architecture)
@@ -42,6 +43,7 @@ history is also available on `zaya-updates`.
 | WhatsApp | Reconnect a linked Hermes session, observe incoming messages, announce sender/context, and support per-chat observation, drafts, or assistant auto replies. |
 | Task visibility | Keep durable task state, bounded retries, diagnostics, and evidence instead of assuming every tool response means success. |
 | Extensions | Load action modules and optional productivity, reminder, and remote-control plugins. |
+| Phone companion | A native Android app (`mobile/android/`) mirrors Zaya's state, transcript, tasks, WhatsApp views and files, and carries two-way voice and Zaya-initiated calls over the same runtime. |
 
 Provider APIs, external applications, authentication, and optional integrations
 must be available for their features to work. Browser launch alone is reported
@@ -371,6 +373,28 @@ Optional hook/project setup:
 Restart an independently managed Hermes gateway when needed to load its hook.
 Pairing credentials are separate from browser automation state.
 
+## The Zaya phone companion (Android)
+
+`mobile/android/` is a native Android companion — Kotlin and Jetpack Compose, no
+Flutter — that talks to the Zaya already running on the laptop. It is an interface,
+not a second assistant: the same runtime, Gemini session, memory, task list and
+WhatsApp link answer the phone.
+
+| On the phone | Behavior |
+| --- | --- |
+| Home / Chat | Zaya's state and emotion exactly as the laptop reports them, never decided locally; text commands go through the same owner-scope approval path |
+| Voice and calls | Two-way PCM16 voice on its own sockets; Zaya can call the phone (P0/P1 ring full-screen, P2 notifies, P3 stays silent) and a missed call leaves one summary, never a repeat |
+| Output | Desktop, phone or both; a call routes her voice to the phone automatically and restores the previous route afterwards |
+| Tasks | The laptop's task runtime, newest first, read-only |
+| WhatsApp | Read-only views plus owner mode switches; message text is never treated as a command |
+| Files | Download from and upload to the laptop's uploads folder |
+
+Pair once with the six-character key from **Settings & Controls → Remote Control**:
+the credential is Keystore-encrypted on the phone and stored as a hash on the
+laptop, so both sides survive restarts. The phone holds no API keys, and a laptop
+command from the phone starts a fresh owner goal and scope. Full setup, build
+steps and troubleshooting: [docs/mobile.md](docs/mobile.md).
+
 ## Optional integrations
 
 Settings & Controls exposes remote control, plugin settings, memory, audio
@@ -410,6 +434,7 @@ services/zayabar.py       Taskbar character, expressions and poke playback
 services/whatsapp/       Pairing, identity, transport, inbox and chat policy
 memory/                  Configuration helpers and private state interfaces
 dashboard/               Optional phone dashboard
+mobile/android/          Native Android companion app
 tests/                   Offline regression and integration tests
 tools/                   Setup helpers and poke-voice generation
 docs/                    Character, implementation and validation documentation
@@ -447,6 +472,7 @@ success and hosted CI status are reported separately.
 | No WhatsApp announcements | Check connection, complete live feed, mute-alert settings, and whether speech is busy. |
 | Telegram reports no token | Configure that optional integration or leave it unused; it does not establish WhatsApp readiness. |
 | Second launch shows the controls | The single-instance guard is activating the running Zaya. |
+| Phone app cannot reach the laptop | Both devices must be on the same tailnet, the dashboard must be running (port 8000), and a pairing key works once and expires after ten minutes. See [docs/mobile.md](docs/mobile.md). |
 | Hosted checks do not start | Inspect the Actions annotation; billing/spending limits are separate from test failures. |
 
 See [validation and rollback notes](docs/VALIDATION.md),

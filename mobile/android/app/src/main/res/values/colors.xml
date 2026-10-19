@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dashboard's own palette, so the phone looks like the same Zaya. -->
+<resources>
+    <color name="zaya_background">#07090F</color>
+    <color name="zaya_surface">#11141C</color>
+    <color name="zaya_surface_alt">#1B1E27</color>
+    <color name="zaya_accent">#6366F1</color>
+    <color name="zaya_accent_light">#8B8FF8</color>
+    <color name="zaya_text">#DDE3ED</color>
+    <color name="zaya_muted">#5E6A7E</color>
+    <color name="zaya_green">#22C55E</color>
+    <color name="zaya_red">#EF4444</color>
+    <color name="zaya_amber">#F59E0B</color>
+    <color name="ic_launcher_background">#1B1E27</color>
+</resources>

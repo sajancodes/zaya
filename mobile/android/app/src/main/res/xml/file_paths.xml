@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files this phone may hand to another app: only the downloads it made. -->
+<paths>
+    <external-files-path name="zaya_downloads" path="Documents/Zaya/" />
+    <files-path name="zaya_files" path="received/" />
+</paths>

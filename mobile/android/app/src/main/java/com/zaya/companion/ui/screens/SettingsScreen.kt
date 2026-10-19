@@ -1,0 +1,222 @@
+package com.zaya.companion.ui.screens
+
+import android.os.Build
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zaya.companion.core.ZayaBuild
+import com.zaya.companion.net.AuthResult
+import com.zaya.companion.protocol.ConnectionPhase
+import com.zaya.companion.protocol.Protocol
+import com.zaya.companion.runtime.ZayaRuntime
+import com.zaya.companion.service.ZayaService
+import com.zaya.companion.ui.ConnectionDetail
+import com.zaya.companion.ui.ConnectionPill
+import com.zaya.companion.ui.KeyValue
+import com.zaya.companion.ui.Note
+import com.zaya.companion.ui.OutlinedToggle
+import com.zaya.companion.ui.SectionCard
+import com.zaya.companion.ui.theme.ZayaAccent
+import kotlinx.coroutines.launch
+
+/**
+ * Pairing, and the few switches that belong to the owner.
+ *
+ * The only secret involved is the one-time key from the laptop's Remote Control
+ * panel; the device credential that replaces it is sealed with the Android
+ * Keystore and is never typed, shown or backed up.
+ */
+@Composable
+fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pairing by runtime.pairing.collectAsStateWithLifecycle()
+    val status by runtime.connection.collectAsStateWithLifecycle()
+    val output by runtime.model.outputTarget.collectAsStateWithLifecycle()
+    val serverName by runtime.model.serverName.collectAsStateWithLifecycle()
+
+    var address by remember(pairing) { mutableStateOf(pairing?.address ?: "") }
+    var key by remember { mutableStateOf("") }
+    var deviceName by remember { mutableStateOf(pairing?.deviceName?.ifBlank { Build.MODEL } ?: Build.MODEL) }
+    var message by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        ScreenHeader("Settings", "This phone is a second way into the same Zaya", onBack)
+
+        SectionCard(title = "Connection") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ConnectionPill(status)
+                Spacer(Modifier.padding(horizontal = 4.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            KeyValue("Server", serverName)
+            KeyValue("Address", pairing?.address ?: "not paired")
+            KeyValue("Device", pairing?.deviceId?.take(12) ?: "—")
+            KeyValue("Protocol", "v${Protocol.VERSION} · app ${ZayaBuild.VERSION}")
+            ConnectionDetail(status)
+            if (status.phase == ConnectionPhase.INCOMPATIBLE) {
+                Spacer(Modifier.height(8.dp))
+                Note(
+                    "This app and the laptop disagree about the protocol version. Update " +
+                        "whichever is older; nothing else will fix this.",
+                    ZayaAccent.red,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { runtime.reconnectNow() }) { Text("Reconnect") }
+                OutlinedButton(
+                    onClick = {
+                        runtime.stop()
+                        ZayaService.request(context, ZayaService.ACTION_DISCONNECT)
+                        message = "Background link stopped."
+                    },
+                ) { Text("Stop background") }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        SectionCard(
+            title = if (pairing == null) "Pair with your laptop" else "Pair a different laptop",
+            subtitle = "On the laptop: Zaya's Settings & Controls → Remote Control → the 6-character key",
+        ) {
+            OutlinedTextField(
+                value = address,
+                onValueChange = { address = it },
+                label = { Text("Laptop address") },
+                placeholder = { Text("laptop.tailnet.ts.net:8000") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it.take(12) },
+                label = { Text("Pairing key") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = deviceName,
+                onValueChange = { deviceName = it.take(60) },
+                label = { Text("Name for this phone") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    busy = true
+                    message = ""
+                    scope.launch {
+                        val result = runtime.pair(address, key, deviceName)
+                        message = when (result) {
+                            is AuthResult.Ok -> "Paired with ${result.serverName}."
+                            is AuthResult.Denied -> result.message
+                            is AuthResult.Unavailable -> result.message
+                        }
+                        if (result is AuthResult.Ok) key = ""
+                        busy = false
+                    }
+                },
+                enabled = !busy && address.isNotBlank() && key.isNotBlank(),
+            ) { Text(if (busy) "Pairing…" else "Pair") }
+            if (message.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Note(message, ZayaAccent.amber)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Use the name Tailscale gives the laptop, for example " +
+                    "laptop.tailnet.ts.net:8000. Plain HTTP is allowed only inside " +
+                    "your tailnet; anything else needs HTTPS.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        SectionCard(
+            title = "Where Zaya's voice comes out",
+            subtitle = "During a call the laptop routes her voice here automatically",
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedToggle(
+                    label = "Laptop",
+                    active = output == Protocol.Output.DESKTOP,
+                    onClick = { runtime.changeOutputInBackground(Protocol.Output.DESKTOP) },
+                )
+                OutlinedToggle(
+                    label = "Phone",
+                    active = output == Protocol.Output.PHONE,
+                    onClick = { runtime.changeOutputInBackground(Protocol.Output.PHONE) },
+                )
+                OutlinedToggle(
+                    label = "Both",
+                    active = output == Protocol.Output.BOTH,
+                    onClick = { runtime.changeOutputInBackground(Protocol.Output.BOTH) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        SectionCard(title = "This phone") {
+            KeyValue("Microphone", "only while you are in a call")
+            KeyValue("Faces", "mobile/android/assets (see image.txt)")
+            KeyValue("Secrets", "device credential sealed with the Android Keystore")
+            Spacer(Modifier.height(10.dp))
+            if (pairing != null) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val revoked = runtime.forgetDevice()
+                            message = if (revoked) {
+                                "Removed from the laptop and forgotten here."
+                            } else {
+                                "Forgotten here. Revoke it on the laptop too if it is not listed."
+                            }
+                        }
+                    },
+                ) { Text("Forget this laptop") }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Note(
+            "Nothing on this phone holds a copy of Zaya's memory, her tools or her " +
+                "WhatsApp session: it renders what the laptop sends and forwards your " +
+                "voice and text to it.",
+        )
+        Spacer(Modifier.height(32.dp))
+    }
+}

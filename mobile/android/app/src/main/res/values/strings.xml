@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zaya</string>
+
+    <string name="channel_connection">Zaya connection</string>
+    <string name="channel_connection_desc">Shows that this phone is still connected to Zaya on your laptop.</string>
+    <string name="channel_calls">Zaya calls</string>
+    <string name="channel_calls_desc">Rings when Zaya calls you.</string>
+    <string name="channel_messages">Zaya messages</string>
+    <string name="channel_messages_desc">Things Zaya wants you to know: task updates, WhatsApp alerts, warnings.</string>
+    <string name="channel_missed">Missed Zaya calls</string>
+    <string name="channel_missed_desc">A short summary when you missed a call. Never repeats.</string>
+
+    <string name="notif_connected">Connected to Zaya</string>
+    <string name="notif_connecting">Connecting to Zaya…</string>
+    <string name="notif_offline">Zaya is unreachable — retrying</string>
+    <string name="notif_unpaired">Not paired with a laptop yet</string>
+    <string name="notif_revoked">This phone was removed from Zaya</string>
+    <string name="action_open">Open</string>
+    <string name="action_reconnect">Reconnect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_answer">Answer</string>
+    <string name="action_decline">Decline</string>
+    <string name="action_end">End</string>
+    <string name="action_mute">Mute</string>
+    <string name="action_unmute">Unmute</string>
+    <string name="call_ringing">Zaya is calling</string>
+
+    <string name="label_phone">Phone</string>
+    <string name="label_laptop">Laptop</string>
+    <string name="label_both">Both</string>
+</resources>

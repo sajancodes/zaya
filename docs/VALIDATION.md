@@ -402,3 +402,49 @@ Multiple keys cannot bypass shared project quota.
 Validation: 207 regression/integration tests passed in 73.881 seconds. Ruff
 error checks and `git diff --check` passed. The live three-request probe passed
 separately; actual speaker-room microphone behavior remains an owner check.
+
+## Phone companion: the same runtime, one more interface
+
+`mobile/android/` is a native Kotlin/Compose app; the laptop side lives in
+`core/mobile_protocol.py`, `core/mobile_bridge.py`, `core/mobile_calls.py`,
+`core/remote_commands.py`, `core/device_registry.py`, `actions/mobile_call.py`
+and `dashboard/mobile_api.py` registered onto the existing dashboard app. No new
+server, session, memory store, task runtime or WhatsApp worker was added.
+
+Four earlier defects were reproduced and fixed with the runtime's own behaviour
+preserved:
+
+- A remote dashboard/phone command now begins a fresh owner goal and scope per
+  command (`submitted → acknowledged → executing → completed/failed`, request-id
+  dedupe, 2.5 s same-text folding) instead of reusing the desktop's last goal.
+- The dashboard's transport encryption derived a different AES salt on the server
+  than the browser used; `ZAYA-DASHBOARD-v1` is now the derivation on both sides,
+  with the legacy salt accepted only for decrypting an existing session.
+- Paired devices are stored in `memory/zaya_runtime.db` as PBKDF2-SHA256 hashes
+  and survive restarts; a failed check is indistinguishable from an unknown
+  device, and repeated failures lock the device out for a cooldown.
+- Both audio queues are bounded by bytes, not frames, and drop the *oldest*
+  audio; a dead or slow phone cannot stall the desktop's audio loop, and the
+  control socket, the voice socket, event delivery and command execution each
+  fail independently.
+
+The phone never decides an emotion or a state: `zaya.state` is composed on the
+laptop from `zaya.state.changed` plus `avatar.emotion` and rendered verbatim, and
+contact text reaching the phone cannot enter the command queue. Voice runs as raw
+PCM16 on two separate sockets (16 kHz up, 24 kHz down) with an app-level ping and
+a stale-link threshold, and calls ring only for P0/P1 while a missed call leaves
+one summary notification that never repeats.
+
+Validation at the time of writing: the full offline suite passed (444 tests, 6
+skipped), 34 of them driving the mobile routes, pairing, revocation and both
+WebSockets through the real FastAPI app; a separate 48-test JVM suite covers the
+phone-side logic (envelope parsing, request dedupe, backoff bounds, the audio byte
+budget and every laptop event → screen transition) with no device or emulator;
+`:app:assembleDebug` builds the APK with the committed Gradle wrapper. Those two
+temporary suites were removed after their final run, per owner preference.
+
+The JVM suite found one real bug: `CommandTracker.prune` compared an absolute
+cutoff against an entry's age, so with a real clock no entry ever expired and with
+a small clock every entry was deleted — a double-tap could then run twice. It now
+compares ages, and the regression is pinned by a test that advances a fake clock.
+

@@ -28,12 +28,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import deque
 from pathlib import Path
 
 from fastapi import Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+
+try:                                              # phone uploads are optional
+    from fastapi import File as FastAPIFile, UploadFile
+    try:
+        import python_multipart  # noqa: F401  FastAPI >= 0.113
+    except Exception:                         # pragma: no cover - old FastAPI
+        import multipart  # noqa: F401
+    _MULTIPART_OK = True
+except Exception:                                 # pragma: no cover - import guard
+    _MULTIPART_OK = False
 
 from core import mobile_protocol as protocol
 from core.mobile_bridge import get_bridge
@@ -52,6 +63,14 @@ EVENT_QUEUE = 200
 MAX_UPLOAD_MB = 500
 TOKEN_TTL = 7 * 24 * 3600
 MAX_TRACKED_TOKENS = 500
+
+
+def _safe_filename(raw: str) -> str:
+    """Same rule as the dashboard's own upload: a name, never a path."""
+    name = Path(raw).name
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name).strip('. ')
+    return name or 'upload'
+
 
 
 class RateLimiter:
@@ -432,6 +451,72 @@ class MobileApi:
             if not safe or not path.is_file():
                 return JSONResponse({'error': 'Not found'}, status_code=404)
             return FileResponse(str(path), filename=safe)
+
+        # Phone → laptop uploads. The dashboard's /api/upload only accepts an
+        # owner token, which a paired phone deliberately never holds; this route
+        # keeps the same folder, naming rule and byte limit but authenticates the
+        # device instead, so a phone can hand Zaya a file to work on.
+        if _MULTIPART_OK:
+            @app.post('/api/mobile/upload')
+            async def mobile_upload(request: Request, file: UploadFile = FastAPIFile(...)):
+                device = self._device_from_request(request)
+                if device is None:
+                    return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+                folder = Path(self.server._uploads_dir)
+                safe = _safe_filename(file.filename or 'upload')
+                dest = folder / safe
+                stem, suffix = Path(safe).stem, Path(safe).suffix
+                counter = 1
+                while dest.exists():
+                    dest = folder / f'{stem}_{counter}{suffix}'
+                    counter += 1
+                size = 0
+                max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+                try:
+                    folder.mkdir(parents=True, exist_ok=True)
+                    with open(dest, 'wb') as out:
+                        while True:
+                            chunk = await file.read(65536)
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > max_bytes:
+                                out.close()
+                                dest.unlink(missing_ok=True)
+                                return JSONResponse(
+                                    {'error': f'File too large (max {MAX_UPLOAD_MB} MB)'},
+                                    status_code=413,
+                                )
+                            out.write(chunk)
+                except Exception as error:
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return JSONResponse({'error': str(error)}, status_code=500)
+
+                # The desktop's transfer list should show it, exactly like an
+                # upload from the dashboard does.
+                try:
+                    asyncio.create_task(self.server.broadcast({
+                        'type': 'file_received',
+                        'name': dest.name,
+                        'size': size,
+                        'saved_to': str(folder),
+                    }))
+                except Exception:
+                    log.debug('file broadcast failed', exc_info=True)
+                return JSONResponse({'ok': True, 'name': dest.name, 'size': size})
+        else:
+            @app.post('/api/mobile/upload')
+            async def mobile_upload_unavailable(request: Request):
+                device = self._device_from_request(request)
+                if device is None:
+                    return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+                return JSONResponse(
+                    {'error': 'File uploads require: pip install python-multipart'},
+                    status_code=503,
+                )
 
     # ── data used by both transports ─────────────────────────────────────────
 

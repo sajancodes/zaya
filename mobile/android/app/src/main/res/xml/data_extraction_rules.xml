@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing on the phone is a copy of Zaya. The runtime, the memory and the
+  WhatsApp session all stay on the laptop, so there is nothing here worth
+  backing up or handing to another device: only the paired-device credential,
+  which is encrypted with a key in this phone's Keystore and cannot be restored
+  onto a different phone anyway.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore" />
+    </device-transfer>
+</data-extraction-rules>

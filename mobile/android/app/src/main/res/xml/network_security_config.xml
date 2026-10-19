@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The phone is a remote control for the owner's own laptop, so the transport is
+  the security boundary. HTTPS is required everywhere; plain HTTP is permitted
+  only inside a Tailscale tailnet (*.ts.net), where the tunnel already encrypts
+  the traffic, and on the loopback interface. A raw LAN IP over HTTP is
+  deliberately refused by the platform: use the machine's Tailscale name
+  (`tailscale cert <machine>` on the laptop gives it a real certificate) instead.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ts.net</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+</network-security-config>

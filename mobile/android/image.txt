@@ -1,0 +1,50 @@
+ZAYA PHONE — REQUIRED IMAGES
+============================
+
+Drop the PNG files in this folder:   mobile/android/assets/
+(that folder is packaged into the app automatically — no Gradle changes needed)
+
+The app looks for these exact file names. Any file you do not add falls back to
+a crop of the existing desktop art in assets/, so a missing image is never a
+crash — only a slightly different picture.
+
+
+REQUIRED (the phone's normal face)
+----------------------------------
+zaya_neutral.png      calm / default face              (also used for: muted, listening)
+zaya_happy.png        happy face                       (used when the laptop reports emotion "happy")
+zaya_angry.png        annoyed face                     (emotion "angry")
+zaya_surprised.png    surprised face                   (emotion "surprised")
+
+OPTIONAL (fall back to zaya_neutral.png when absent)
+----------------------------------------------------
+zaya_sad.png          caring / soft face              (emotion "sad")
+zaya_thinking.png     concentrating                    (state THINKING / TASK_RUNNING)
+zaya_standby.png      idle / resting                   (state STANDBY / SLEEPING / reconnecting)
+zaya_poked.png        the "poked" reaction             (when the owner pokes Zaya on the phone)
+zaya_background.png   home screen backdrop             (falls back to a plain dark background)
+
+
+HOW TO MAKE THEM (one line, no new art)
+---------------------------------------
+Same picture as the desktop, cropped chest-up so the head and shoulders fill the
+phone screen. Anything from the desktop set works:
+
+    neutral.png  happy.png  angry.png  surprised.png  poked.png  standby.png
+
+You can just copy those files here with the names above, or crop them:
+ - transparent background (PNG with alpha), same as the desktop images
+ - roughly square or 4:3, ideally 1000-1400 px wide
+ - head in the upper third, shoulders below, no legs
+ - keep every emotion cropped the same way, so Zaya does not jump between them
+
+
+RULES THE APP FOLLOWS (so you know what it will do with your files)
+-------------------------------------------------------------------
+1. The phone never invents an emotion. The laptop sends state + emotion and the
+   phone shows exactly that image.
+2. If an image is missing: that emotion -> zaya_neutral.png -> the bundled crop
+   of the desktop art. Never a blank screen and never a new drawing.
+3. Nothing in this folder is uploaded anywhere. These files stay on the phone.
+4. Do not put secrets here. Pairing credentials are encrypted with the Android
+   Keystore and are not part of this folder.
