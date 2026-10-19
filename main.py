@@ -1621,6 +1621,10 @@ class JarvisLive:
             return False
         if coding and item.get('id') and not get_jobs().notice_current(item):
             return False
+        if item.get('call_id'):
+            active = self._calls.active()
+            if active is None or active.call_id != item['call_id'] or active.state != 'answered':
+                return False
         if mode == 'reminder':
             from core.reminders import get_reminders
             current = get_reminders().get(item['id'])
@@ -1730,6 +1734,10 @@ class JarvisLive:
         loop; retain the initial speech blocks until the echo guard agrees.
         """
         self._voice_mark('microphone', gate='checking', level=round(_pcm_level(indata), 3))
+        if self._phone_call_active():
+            self._voice_mark('blocked', gate='phone-call')
+            self._barge_audio.clear()
+            return  # Do not even feed the laptop wake-word detector during a phone call.
         if self._wake_enabled and not self._awake:
             self._voice_mark('blocked', gate='sleep')
             self._barge_audio.clear()
@@ -1775,7 +1783,7 @@ class JarvisLive:
         def deliver():
             if queue is not self.out_queue:
                 return  # A callback from a closed session must not feed its replacement.
-            if self.ui.muted or self._phone_active or (self._wake_enabled and not self._awake):
+            if self.ui.muted or self._phone_active or self._phone_call_active() or (self._wake_enabled and not self._awake):
                 return
             if self._ptt_enabled and not self._ptt_held:
                 return
@@ -2542,17 +2550,26 @@ class JarvisLive:
                 chunk = await asyncio.wait_for(q.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 # No audio for 1 s → phone mic inactive, give PC mic back
-                self._phone_active = False
+                self._phone_active = self._phone_call_active()
                 continue
+            if chunk.get('call_id'):
+                call = self._calls.active()
+                if (call is None or call.call_id != chunk['call_id'] or call.state != 'answered'
+                        or call.muted or call.device_id != chunk.get('device_id')):
+                    continue
             self._phone_active = True   # phone is streaming — silence PC mic
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
+            if (self._phone_call_active() or not speaking) and (self._phone_call_active() or not self.ui.muted):
                 try:
                     self._audio_ducker.microphone(chunk['data'])
                     self.out_queue.put_nowait(chunk)
                 except asyncio.QueueFull:
                     pass
+
+    def _phone_call_active(self):
+        bridge = getattr(self, '_bridge', None)
+        return bridge is not None and bridge.call_active is True
 
     def _on_phone_connected(self) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
@@ -2596,6 +2613,17 @@ class JarvisLive:
 
         async def _speak():
             try:
+                self._phone_active = True
+                self.interrupt()
+                self._barge_audio.clear()
+                while not self.out_queue.empty():
+                    self.out_queue.get_nowait()
+                if call.source == 'whatsapp':
+                    # Contact content may be spoken by the isolated announcer,
+                    # never injected into the privileged Live session as an owner turn.
+                    await self._deliver_owner_notice({'summary': 'An urgent WhatsApp message needs you.',
+                        'announcement': call.detail or call.reason, 'call_id': call.call_id})
+                    return
                 await self.session.send_client_content(
                     turns={'role': 'user', 'parts': [{'text': instruction}]},
                     turn_complete=True,
@@ -2729,6 +2757,7 @@ class JarvisLive:
         self._calls.set_away_provider(
             lambda: owner_is_away(phone_call_settings().away_seconds))
         self._calls.set_reachable_provider(self._phone_reachable)
+        self._calls.set_available_provider(lambda: self.session is not None)
 
         while True:
             _resumed_with = False

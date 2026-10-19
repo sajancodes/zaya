@@ -27,6 +27,7 @@ import logging
 import threading
 import time
 import uuid
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -145,6 +146,9 @@ class ZayaCall:
     created_at: float = field(default_factory=time.time)
     answered_at: float = 0.0
     ended_at: float = 0.0
+    direction: str = 'incoming'
+    device_id: str = ''
+    muted: bool = False
 
     def payload(self) -> dict:
         return {
@@ -157,6 +161,8 @@ class ZayaCall:
             'source': protocol.clip(self.source, 40),
             'state': self.state,
             'created_at': float(self.created_at),
+            'direction': self.direction,
+            'device_id': self.device_id,
         }
 
     def public(self) -> dict:
@@ -181,6 +187,8 @@ class MobileCallManager:
         self._order: list[str] = []
         self._last_key: dict[str, float] = {}
         self._ring_timer: threading.Timer | None = None
+        self._answer_timer: threading.Timer | None = None
+        self._available_provider = None
         self._answer_hook = None
         self._away_provider = None
         self._reachable_provider = None
@@ -199,6 +207,15 @@ class MobileCallManager:
         """Called with the ZayaCall when the owner answers. The hook is what makes
         Zaya aware of her own call, so it must run in the session's context."""
         self._answer_hook = fn
+
+    def set_available_provider(self, fn):
+        self._available_provider = fn
+
+    def available(self):
+        try:
+            return self._available_provider is None or bool(self._available_provider())
+        except Exception:
+            return False
 
     def set_away_provider(self, fn) -> None:
         """Where the runtime reports whether the owner is somewhere else.
@@ -243,6 +260,7 @@ class MobileCallManager:
         with self._lock:
             unsubscribe, self._unsubscribe = self._unsubscribe, None
             timer, self._ring_timer = self._ring_timer, None
+            answer_timer, self._answer_timer = self._answer_timer, None
         if unsubscribe is not None:
             try:
                 unsubscribe()
@@ -250,6 +268,11 @@ class MobileCallManager:
                 log.debug('call manager unsubscribe failed', exc_info=True)
         if timer is not None:
             timer.cancel()
+        if answer_timer is not None:
+            answer_timer.cancel()
+        active = self.active()
+        if active is not None:
+            self.end(active.call_id, outcome='runtime_stopped')
 
     # ── bus policy ───────────────────────────────────────────────────────────
 
@@ -303,6 +326,12 @@ class MobileCallManager:
         state = str(task.get('state') or '')
         if not task_id:
             return
+        quiet_tools = {'coding_job', 'avatar_expression', 'runtime_status', 'runtime_logs',
+                       'system_diagnostics', 'call_owner', 'owner_presence'}
+        if state == 'completed' and task.get('source') != 'coding_job':
+            effects = task.get('side_effects') or []
+            if not any(row.get('step') not in quiet_tools for row in effects):
+                return  # A status query or accepted background start is not finished work.
         if state == 'waiting_confirmation':
             self.request_call(
                 title='Task needs your decision',
@@ -405,7 +434,8 @@ class MobileCallManager:
 
     def request_call(self, *, title: str, detail: str = '', priority=protocol.P1_IMMEDIATE,
                      reason: str = '', briefing: str = '', source: str = 'runtime',
-                     key: str = '') -> ZayaCall | None:
+                     key: str = '', requested: bool = False, direction: str = 'incoming',
+                     device_id: str = '') -> ZayaCall | None:
         """Ring the phone if the policy allows it. Returns the call, or None when
         the request was downgraded to a notification."""
         try:
@@ -424,13 +454,13 @@ class MobileCallManager:
 
         now = self._clock()
         with self._lock:
-            blocked = self._blocked_reason(key, now)
+            blocked = self._blocked_reason(key, now, requested=requested)
             if blocked:
                 self.suppressed += 1
             else:
                 call = ZayaCall(call_id=uuid.uuid4().hex, title=title, detail=detail,
                                 priority=priority, reason=reason, briefing=briefing,
-                                source=source, key=key, created_at=now)
+                                source=source, key=key, created_at=now, direction=direction, device_id=device_id)
                 self._calls[call.call_id] = call
                 self._order.append(call.call_id)
                 self._trim()
@@ -444,13 +474,34 @@ class MobileCallManager:
                         key=key)
             return None
 
-        self.bridge().emit(protocol.envelope('call.incoming', call.payload()))
+        self.bridge().emit(protocol.envelope('call.dialing' if direction == 'outgoing' else 'call.incoming', call.payload()))
         return call
 
-    def _blocked_reason(self, key: str, now: float) -> str:
+    def dial(self, device_id):
+        call = self.request_call(title='Zaya', detail='Calling Zaya', reason='The owner called Zaya.',
+                                 briefing='The owner called you. Greet him naturally and listen to what he needs.',
+                                 source='phone', requested=True, direction='outgoing', device_id=device_id)
+        if call is not None:
+            with self._lock:
+                self._answer_timer = threading.Timer(random.uniform(5.0, 10.0), self._answer_outgoing, args=(call.call_id,))
+                self._answer_timer.daemon = True
+                self._answer_timer.start()
+        return call
+
+    def _answer_outgoing(self, call_id):
+        if self.available():
+            self.answer(call_id)
+        else:
+            self.end(call_id, outcome='unavailable')
+
+    def _blocked_reason(self, key: str, now: float, *, requested=False) -> str:
         active = self._active_locked()
         if active is not None and active.state in (RINGING, ANSWERED):
             return f'a call is already {active.state}'
+        if not self.phone_reachable():
+            return 'no connected phone'
+        if requested:
+            return ''  # Explicit calls/testing may redial; automatic calls keep their limits.
         if key and now - self._last_key.get(key, 0.0) < self.key_cooldown:
             return 'the same issue rang recently'
         recent = [self._calls[cid] for cid in self._order if cid in self._calls]
@@ -520,16 +571,24 @@ class MobileCallManager:
         }))
         return call
 
-    def answer(self, call_id: str) -> ZayaCall | None:
+    def answer(self, call_id: str, device_id: str = '') -> ZayaCall | None:
+        if not self.available():
+            self.end(call_id, outcome='unavailable')
+            return None
         with self._lock:
             call = self._calls.get((call_id or '').strip())
             if call is None or call.state != RINGING:
                 return None
             call.state = ANSWERED
+            if device_id:
+                call.device_id = device_id
             call.answered_at = self._clock()
             timer, self._ring_timer = self._ring_timer, None
+            answer_timer, self._answer_timer = self._answer_timer, None
         if timer is not None:
             timer.cancel()
+        if answer_timer is not None:
+            answer_timer.cancel()
         self.bridge().set_call_active(True)
         self.bridge().emit(protocol.envelope('call.answered', call.payload()))
         hook = self._answer_hook
@@ -562,8 +621,11 @@ class MobileCallManager:
             call.state = state
             call.ended_at = self._clock()
             timer, self._ring_timer = self._ring_timer, None
+            answer_timer, self._answer_timer = self._answer_timer, None
         if timer is not None:
             timer.cancel()
+        if answer_timer is not None:
+            answer_timer.cancel()
         self.bridge().set_call_active(False)
         return call
 
@@ -586,6 +648,15 @@ class MobileCallManager:
         with self._lock:
             active = self._active_locked()
             return bool(active and active.state == ANSWERED)
+
+    def set_muted(self, call_id, device_id, muted):
+        with self._lock:
+            call = self._calls.get(call_id)
+            if call is None or call.state != ANSWERED or call.device_id != device_id:
+                return False
+            call.muted = bool(muted)
+        self.bridge().emit(protocol.envelope('system.call.mute', {'call_id': call_id, 'muted': call.muted}))
+        return True
 
     def recent(self, limit: int = 20) -> list[dict]:
         with self._lock:

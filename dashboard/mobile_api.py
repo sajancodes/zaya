@@ -622,11 +622,14 @@ class MobileApi:
 
     def _accept_phone_audio(self, session: MobileSession, data: bytes) -> None:
         """Phone microphone PCM → the same queue the browser's mic uses."""
-        if not data or len(data) > 32768:
+        call = self.calls.active()
+        if (not data or len(data) > 32768 or len(data) % 2 or call is None
+                or call.state != 'answered' or call.device_id != session.device['device_id'] or call.muted):
             return
         queue = self.server._phone_audio_queue
         try:
-            queue.put_nowait({'data': bytes(data), 'mime_type': 'audio/pcm'})
+            queue.put_nowait({'data': bytes(data), 'mime_type': 'audio/pcm', 'call_id': call.call_id,
+                             'device_id': call.device_id})
             session.capabilities['mic_frames'] = session.capabilities.get('mic_frames', 0) + 1
         except asyncio.QueueFull:
             session.dropped += 1        # drop rather than block: Zaya's session wins
@@ -717,37 +720,41 @@ class MobileApi:
 
     def _call_control(self, session: MobileSession, kind: str, call_id: str, data: dict) -> None:
         calls = self.calls
+        device_id = session.device['device_id']
+        active = calls.active()
+        if kind in {'call.end', 'call.mute'}:
+            if active is None or active.device_id != device_id or (call_id and call_id != active.call_id):
+                return
+            call_id = active.call_id
         if kind == 'call.answer':
-            call = calls.answer(call_id)
+            if active is not None and active.direction == 'outgoing':
+                return  # Only the laptop's delayed answer may connect an outgoing call.
+            call = calls.answer(call_id, device_id=device_id)
             if call is None:
                 session.enqueue(protocol.envelope('error', {'error': 'That call is no longer ringing'}))
         elif kind == 'call.decline':
+            if active is None or active.state != 'ringing' or active.direction != 'incoming':
+                return
             if calls.decline(call_id) is None:
                 session.enqueue(protocol.envelope('error', {'error': 'That call is no longer ringing'}))
         elif kind == 'call.end':
             calls.end(call_id)
         elif kind == 'call.start':
             # Owner-initiated call from the phone: they are asking to talk now.
-            call = calls.request_call(title='Owner requested a call',
-                                      detail='You asked to talk to Zaya from your phone.',
-                                      priority=protocol.P1_IMMEDIATE,
-                                      reason='Owner placed a call to Zaya.',
-                                      briefing='The owner called you from the phone and is ready to talk.',
-                                      source='phone', key=f'owner-call:{time.time() // 60}')
-            if call is not None:
-                calls.answer(call.call_id)
-            else:
+            call = calls.dial(device_id)
+            if call is None:
                 session.enqueue(protocol.envelope('error',
-                                                  {'error': 'Zaya could not start the call right now'}))
+                                                  {'error': 'Zaya could not start the call right now', 'call_start_failed': True}))
         elif kind == 'call.mute':
-            self.bridge.emit(protocol.envelope('system.call.mute',
-                                               {'muted': bool(data.get('muted'))}))
+            calls.set_muted(call_id, device_id, data.get('muted'))
+        if kind in {'call.answer', 'call.start'} and getattr(self.server, '_wake_callback', None):
+            self.server._wake_callback()
 
     def _socket_closed(self, session: MobileSession) -> None:
         """Losing the voice socket during a call ends the call: the phone can no
         longer hear Zaya, and a 'call' that is one-way is worse than a clean end."""
         active = self.calls.active()
-        if active is not None and active.state == 'answered':
+        if active is not None and active.device_id == session.device['device_id']:
             self.calls.end(active.call_id, outcome='disconnected')
         self.server.note_remote_connection('Phone interface disconnected.')
 
@@ -784,6 +791,9 @@ class MobileApi:
                 if not frames:
                     continue
                 for frame in frames:
+                    active = self.calls.active()
+                    if active is not None and active.state == 'answered' and active.device_id != device['device_id']:
+                        continue
                     await asyncio.wait_for(websocket.send_bytes(frame), timeout=5.0)
                     self.audio_frames += 1
                     self.audio_seconds += len(frame) / 2 / PHONE_DOWN_RATE
@@ -798,7 +808,7 @@ class MobileApi:
         finally:
             self.bridge.remove_audio_listener(listener)
             active = self.calls.active()
-            if active is not None and active.state == 'answered':
+            if active is not None and active.state == 'answered' and active.device_id == device['device_id']:
                 self.calls.end(active.call_id, outcome='disconnected')
 
 

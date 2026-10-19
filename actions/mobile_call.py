@@ -42,6 +42,7 @@ def call_owner(parameters, **_kwargs):
                                    else 'Open the call with what you need in one or two sentences.')),
         source='tool',
         key=f'tool:{reason[:80]}',
+        requested=parameters.get('requested') is True,
     )
     if call is None:
         # The policy downgraded it. Say that plainly: the owner should look at
@@ -54,7 +55,7 @@ def call_owner(parameters, **_kwargs):
             side_effect=True)
     return ToolResult(
         'success',
-        'Calling the owner on his phone now.',
+        'Sent an incoming-call request to the connected phone; awaiting answer.',
         {'delivery': 'call', 'call_id': call.call_id,
          'priority': protocol.priority_name(call.priority)},
         side_effect=True)
@@ -65,7 +66,10 @@ TOOL = {
     'description': (
         'Ring the owner on his phone when you genuinely need him: a decision only he can '
         'make, something important that failed, a critical system or security problem, or a '
-        'request he made earlier to be told directly. Do NOT use it for ordinary updates, '
+        'request he made earlier to be told directly. Also use it when the owner explicitly says '
+        '"call me" or asks to test a phone call: set requested=true so the phone rings even '
+        'while he is at the laptop or recently tested a call. Never set requested=true '
+        'for an automatic update. Do NOT use it for ordinary updates, '
         'routine progress, or anything that can wait for a normal reply — the laptop decides '
         'the priority and will downgrade a call that is not warranted. State the concrete '
         'reason; the owner hears it when he answers, so he never has to ask what happened.'
@@ -73,6 +77,7 @@ TOOL = {
     'parameters': {
         'type': 'OBJECT',
         'properties': {
+            'requested': {'type': 'BOOLEAN', 'description': 'True only when the owner explicitly requests an immediate/test call; false for proactive calls.'},
             'reason': {'type': 'STRING',
                        'description': 'One short sentence: why you need the owner now.'},
             'question': {'type': 'STRING',

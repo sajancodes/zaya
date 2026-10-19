@@ -259,6 +259,8 @@ class MobileBridge:
         if name not in TARGETS:
             raise ValueError(f'Unknown output target: {target!r}')
         with self._lock:
+            if self._call_active:
+                return 'phone'  # In-call speaker selection is a phone hardware route.
             self._output_target = name
             if not self._call_active:
                 self._pre_call_target = name
@@ -270,6 +272,11 @@ class MobileBridge:
             'call_active': call_active,
         }))
         return name
+
+    @property
+    def call_active(self):
+        with self._lock:
+            return self._call_active
 
     def set_call_active(self, active: bool) -> None:
         """While a phone call is running, Zaya's voice belongs on the phone."""

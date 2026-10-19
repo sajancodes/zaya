@@ -65,6 +65,7 @@ memory/projects.json
 memory/coding_jobs.json
 memory/coding_jobs.tmp
 memory/*_state.json
+memory/*_state.tmp
 zayabar.tmp
 assets/zayabar/
 memory/backups/

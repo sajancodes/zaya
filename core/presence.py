@@ -14,11 +14,39 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+import json
+from pathlib import Path
+import time
 
 log = logging.getLogger(__name__)
 
 DEFAULT_AWAY_SECONDS = 600.0
 _MIN_AWAY_SECONDS = 60.0
+PRESENCE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'presence_state.json'
+
+
+def declared_presence():
+    try:
+        state = json.loads(PRESENCE_PATH.read_text(encoding='utf-8'))
+        if state.get('mode') in {'away', 'present'} and float(state.get('until', 0)) > time.time():
+            return state
+    except (OSError, ValueError, TypeError):
+        pass
+    return {'mode': 'auto', 'until': 0}
+
+
+def set_presence(mode, hours=12):
+    from core.execution_policy import require_owner
+    require_owner()
+    if mode not in {'away', 'present', 'auto'}:
+        raise ValueError('Use away, present or auto.')
+    hours = max(1 / 60, min(24, float(hours)))
+    state = {'mode': mode, 'until': time.time() + hours * 3600 if mode != 'auto' else 0}
+    PRESENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp = PRESENCE_PATH.with_suffix('.tmp')
+    temp.write_text(json.dumps(state), encoding='utf-8')
+    temp.replace(PRESENCE_PATH)
+    return state
 
 
 def desktop_idle_seconds() -> float | None:
@@ -45,6 +73,9 @@ def desktop_idle_seconds() -> float | None:
 
 def owner_is_away(idle_seconds: float = DEFAULT_AWAY_SECONDS) -> bool:
     """True only when we can prove the owner has been gone for a while."""
+    declared = declared_presence()
+    if declared['mode'] != 'auto':
+        return declared['mode'] == 'away'
     idle = desktop_idle_seconds()
     if idle is None:
         return False
