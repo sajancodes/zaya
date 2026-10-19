@@ -1569,7 +1569,9 @@ class JarvisLive:
                         elif coding:
                             get_jobs().notice_failed(item)
                         if time.monotonic() - last_voice_error > 30:
-                            self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); notification retained for retry.")
+                            retry_detail = ('coding speech retries are bounded and delayed' if coding else
+                                            'notification retained for retry')
+                            self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); {retry_detail}.")
                             last_voice_error = time.monotonic()
                         continue  # retain notification until a live session accepts it
         finally:
@@ -2853,6 +2855,8 @@ def main():
     if not instance.acquire():
         return
     try:
+        from core.runtime_logging import install_runtime_logging
+        install_runtime_logging()
         ui = JarvisUI("face.png")
         instance.on_activate = ui.activate_existing
         stopping = threading.Event()

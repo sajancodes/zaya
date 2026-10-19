@@ -25,6 +25,7 @@ from core.opencode_events import Tally, parse_line
 from core.opencode_narrator import Narrator
 from core.shell_session import terminate_tree
 from core.task_runtime import get_runtime
+from core.runtime_logging import log_line
 
 STORE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json'
 ACTIVE = {'starting', 'planning', 'working', 'reviewing'}
@@ -220,6 +221,10 @@ class CodingJobs:
             job = self.latest()
             if job is None or not job.session_id:
                 raise ValueError('There is no saved coding session to continue.')
+            if job.agent.strip().lower() in {'auto', 'default'}:
+                job.agent = ''
+            if job.model.strip().lower() in {'auto', 'default'}:
+                job.model = ''
             if job.purpose == 'coding':
                 resolve_project(job.project, allow_empty=True)
             else:
@@ -245,6 +250,7 @@ class CodingJobs:
         job.runtime_id = task.id
         self.runtime.transition(task.id, 'executing', active_step='opencode')
         self._save()
+        log_line({'job': job.id, 'phase': 'planning', 'cwd': job.project, 'purpose': job.purpose}, source='opencode')
         self._thread = threading.Thread(target=self._run, args=(job,), name='zaya-coding', daemon=True)
         self._thread.start()
 
@@ -323,6 +329,8 @@ class CodingJobs:
                                     evidence=[{'session_id': job.session_id, 'exit_code': job.exit_code,
                                                'changed_files': job.changed_files, 'passes': job.pass_number,
                                                'review': job.review}])
+            log_line({'job': job.id, 'phase': job.phase, 'session_id': job.session_id,
+                      'exit_code': job.exit_code, 'error': job.error, 'review': job.review}, source='opencode')
 
     def _run_pass(self, job, info, narrator, tally):
         argv = [str(info.path), 'run', '--format', 'json']
@@ -345,6 +353,8 @@ class CodingJobs:
                                        encoding='utf-8', errors='replace', bufsize=1, **_HIDDEN)
             with self._lock:
                 self._process = process
+            log_line({'job': job.id, 'pid': process.pid, 'executable': str(info.path),
+                      'cwd': job.project, 'pass': job.pass_number, 'session_id': job.session_id}, source='opencode')
             messages = queue.Queue()
             readers = [threading.Thread(target=self._pump, args=(stream, kind, messages), daemon=True)
                        for stream, kind in ((process.stdout, 'out'), (process.stderr, 'err'))]
@@ -363,10 +373,15 @@ class CodingJobs:
                     continue
                 if kind == 'err':
                     diagnostics = audit.redact((diagnostics + line)[-2000:])
+                    log_line({'job': job.id, 'stderr': line[:2000]}, source='opencode')
                     continue
                 event = parse_line(line)
                 if event is None:
                     continue
+                log_line({'job': job.id, 'session_id': event.session_id, 'event': event.kind,
+                          'tool': event.tool, 'status': event.status, 'path': event.path,
+                          'command': event.command, 'exit_code': event.exit_code,
+                          'text': event.text, 'error': event.error}, source='opencode')
                 tally.add(event)
                 if event.session_id:
                     job.session_id = event.session_id
@@ -380,11 +395,13 @@ class CodingJobs:
                         'command': event.command, 'exit_code': event.exit_code,
                         'error': event.error[:500]})])[-40:]
                 job.changed_files = list(tally.changed)
+                if event.is_change and event.status == 'completed':
+                    self._notice(f'OpenCode has recorded completed changes in {len(tally.changed)} file(s).')
                 for beat in narrator.feed(event):
                     job.progress = narrator.progress
                     # Search, read, planning and heartbeat ticks stay silent.
                     if (event.failed or (event.kind == 'tool' and event.status == 'completed'
-                            and (event.is_change or (event.tool in {'shell', 'bash'} and narrator.tests is not None)))):
+                            and event.tool in {'shell', 'bash'} and narrator.tests is not None)):
                         self._notice(beat)
                 job.updated_at = time.time()
                 if time.monotonic() - last_save > 1:
@@ -410,6 +427,8 @@ class CodingJobs:
             self._notices.clear()
             job = self.active()
             process = self._process
+        log_line({'event': 'cancellation_requested', 'job': job.id if job else None,
+                  'pid': process.pid if process is not None else None}, source='opencode')
         if process is not None:
             terminate_tree(process)
         if self._thread is not None:

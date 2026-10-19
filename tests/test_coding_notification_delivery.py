@@ -162,6 +162,45 @@ class QuietUpdateTests(unittest.TestCase):
             result = coding_job({'action': 'status'})
         self.assertFalse(result.data['process_running'])
         self.assertIn('Error:', result.summary)
+        job.session_id = 'ses_saved_fixture'
+        job.model = 'auto'  # Older saved jobs may contain the old invalid value.
+        with patch('core.coding_projects.APPROVED_ROOTS', (self.root,)), \
+                patch('core.opencode_cli.resolve', return_value=CliInfo(Path('opencode.exe'), '2.0.32')), \
+                patch('core.coding_jobs.subprocess.Popen', return_value=Process(record('text', text='Resumed.'))) as launch:
+            self.jobs.resume('Retry with installed settings.')
+            wait_for(self.jobs)
+        self.assertNotIn('--model', launch.call_args.args[0])
+
+    def test_completed_edits_are_announced_but_search_and_running_edits_are_silent(self):
+        from core.opencode_cli import CliInfo
+        entered, release = threading.Event(), threading.Event()
+        supervisor = Mock()
+        supervisor.prepare.side_effect = CompleteSupervisor().prepare
+        def review(*args):
+            entered.set()
+            release.wait(timeout=5)
+            return {'decision': 'complete'}
+        supervisor.review.side_effect = review
+        self.jobs._supervisor = supervisor
+        (self.root / 'app.py').write_text('pass')
+        stream = record('tool_use', tool='read', state={'status': 'completed', 'input': {'path': 'app.py'}})
+        stream += record('tool_use', tool='edit', state={'status': 'running', 'input': {'path': 'app.py'}})
+        stream += record('tool_use', tool='edit', state={'status': 'completed', 'input': {'path': 'app.py'}})
+        stream += record('text', text='Changes ready.')
+        with patch('core.coding_projects.APPROVED_ROOTS', (self.root,)), \
+                patch('core.opencode_cli.resolve', return_value=CliInfo(Path('opencode.exe'), '2.0.32')), \
+                patch('core.coding_jobs.subprocess.Popen', return_value=Process(stream)):
+            self.jobs.start(str(self.root), 'Fix app.py')
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertEqual(len(self.jobs._notices), 1)
+                self.assertIn('completed changes in 1 file', self.jobs._notices[0]['summary'])
+                self.assertIsNone(self.jobs.next_notice())
+                self.now[0] += 150
+                self.assertIn('completed changes', self.jobs.next_notice()['summary'])
+            finally:
+                release.set()
+                wait_for(self.jobs)
 
 
 if __name__ == '__main__':

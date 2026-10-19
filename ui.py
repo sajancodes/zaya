@@ -6044,6 +6044,8 @@ class JarvisUI:
         self._win._whatsapp_connect_sig.emit()
 
     def write_log(self, text: str):
+        from core.runtime_logging import log_line
+        log_line(text, source='activity')
         self._win._log_sig.emit(text)
 
     def restore_history(self, turns):
