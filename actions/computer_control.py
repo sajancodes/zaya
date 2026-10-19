@@ -1,4 +1,6 @@
 #computer_control.py
+from __future__ import annotations
+
 import io
 import json
 import platform
@@ -6,6 +8,7 @@ import re
 import string
 import subprocess
 import sys
+from typing import Any
 
 if platform.system() == "Windows":
     _WIN_HIDE: dict = {"creationflags": subprocess.CREATE_NO_WINDOW}
@@ -312,22 +315,132 @@ def _focus_window(title: str) -> str:
 
     return f"focus_window: unknown OS '{os_name}'"
 
-def _screen_find(description: str) -> tuple[int, int] | None:
-    api_key = _get_api_key()
-    if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
+def _find_via_uia(description: str) -> tuple[int, int] | None:
+    """Tier A: Inspect active/visible window accessibility hierarchy using pywinauto UIA."""
+    if platform.system() != "Windows":
+        return None
+    try:
+        from pywinauto import Desktop
+        desc_lower = description.lower().strip()
+        desktop = Desktop(backend="uia")
+        # Search among visible top-level windows
+        windows = desktop.windows(visible_only=True)
+        best_match = None
+        best_score = 0.0
+
+        for win in windows[:6]:
+            try:
+                # Iterate over interactable descendants
+                for ctrl in win.descendants():
+                    try:
+                        text = (ctrl.window_text() or "").strip()
+                        c_type = ctrl.element_info.control_type or ""
+                        auto_id = ctrl.element_info.automation_id or ""
+                        combined = f"{text} {c_type} {auto_id}".lower()
+
+                        if desc_lower in combined or (text and text.lower() in desc_lower):
+                            rect = ctrl.rectangle()
+                            if rect.width() > 0 and rect.height() > 0:
+                                score = 1.0 if desc_lower == text.lower() else 0.5
+                                if score > best_score:
+                                    best_score = score
+                                    best_match = (rect.mid_point().x, rect.mid_point().y)
+                                    if best_score == 1.0:
+                                        return best_match
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        return best_match
+    except Exception as e:
+        print(f"[ComputerControl] UIA element search failed: {e}")
         return None
 
-    try:
-        from google import genai
-        from google.genai import types as gtypes
 
-        _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
-        img.save(buf, format="PNG")
-        image_bytes = buf.getvalue()
+def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tuple[int, int] | None:
+    """Tier B: Set-of-Mark (SoM) visual candidate detection + structured LLM identification."""
+    try:
+        from PIL import ImageDraw
+        from google.genai import types as gtypes
+        from core import gemini
+
+        candidates: list[dict] = []
+        # Attempt to harvest interactive candidates via UIA if on Windows
+        if platform.system() == "Windows":
+            try:
+                from pywinauto import Desktop
+                desktop = Desktop(backend="uia")
+                for win in desktop.windows(visible_only=True)[:4]:
+                    for ctrl in win.descendants():
+                        try:
+                            if ctrl.element_info.control_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox"):
+                                r = ctrl.rectangle()
+                                if 5 < r.width() < w and 5 < r.height() < h:
+                                    candidates.append({
+                                        "box": (r.left, r.top, r.right, r.bottom),
+                                        "center": (r.mid_point().x, r.mid_point().y),
+                                    })
+                                    if len(candidates) >= 40:
+                                        break
+                        except Exception:
+                            continue
+                    if len(candidates) >= 40:
+                        break
+            except Exception:
+                pass
+
+        # If UIA candidate bounding boxes were not found or not on Windows, partition or fallback
+        if not candidates:
+            return None
+
+        # Draw Set-of-Mark bounding boxes and numeric badges
+        som_img = screenshot_img.copy()
+        draw = ImageDraw.Draw(som_img)
+        marks: dict[int, tuple[int, int]] = {}
+
+        for idx, cand in enumerate(candidates, start=1):
+            box = cand["box"]
+            center = cand["center"]
+            marks[idx] = center
+            draw.rectangle(box, outline=(255, 30, 30), width=2)
+            badge_box = [box[0], max(0, box[1] - 16), box[0] + 20, box[1]]
+            draw.rectangle(badge_box, fill=(255, 30, 30))
+            draw.text((box[0] + 3, max(0, box[1] - 15)), str(idx), fill=(255, 255, 255))
+
+        buf = io.BytesIO()
+        som_img.save(buf, format="PNG")
+        som_bytes = buf.getvalue()
+
+        prompt = (
+            f"You are given a Set-of-Mark screenshot with numbered tags [1..{len(marks)}] over UI elements. "
+            f"Identify the tag number corresponding to: '{description}'. "
+            f"Reply with ONLY a JSON object: {{\"id\": <number>}} or {{\"id\": null}} if not found."
+        )
+
+        resp = gemini.call(
+            [gtypes.Part.from_bytes(data=som_bytes, mime_type="image/png"), prompt],
+            tier=gemini.FAST,
+            timeout_ms=15_000,
+        )
+        if resp and resp.text:
+            text = resp.text.strip()
+            match = re.search(r'\{\s*"id"\s*:\s*(\d+)\s*\}', text)
+            if match:
+                mark_id = int(match.group(1))
+                if mark_id in marks:
+                    return marks[mark_id]
+    except Exception as e:
+        print(f"[ComputerControl] SoM element search failed: {e}")
+
+    return None
+
+
+def _find_via_coordinates(description: str, screenshot_bytes: bytes, w: int, h: int) -> tuple[int, int] | None:
+    """Tier C: Direct raw screenshot coordinate estimation via Gemini."""
+    try:
+        from google.genai import types as gtypes
+        from core import gemini
 
         prompt = (
             f"This is a screenshot of a {w}×{h} pixel screen. "
@@ -336,26 +449,61 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             f"If the element is not visible, reply: NOT_FOUND"
         )
 
-        from core import gemini
-        response = gemini.call(
-            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
-            tier=gemini.FAST, timeout_ms=20_000,
+        resp = gemini.call(
+            [gtypes.Part.from_bytes(data=screenshot_bytes, mime_type="image/png"), prompt],
+            tier=gemini.FAST,
+            timeout_ms=20_000,
         )
-        if response is None:
+        if resp is None:
             return None
 
-        text = (response.text or "").strip()
+        text = (resp.text or "").strip()
         if "NOT_FOUND" in text.upper():
             return None
 
         match = re.search(r"(\d+)\s*,\s*(\d+)", text)
         if match:
             return int(match.group(1)), int(match.group(2))
-
     except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+        print(f"[ComputerControl] Coordinate fallback failed: {e}")
 
     return None
+
+
+def _screen_find(description: str) -> tuple[int, int] | None:
+    """Robust 3-tier UI element grounding:
+    Tier A: Accessibility tree inspection (pywinauto UIA).
+    Tier B: Set-of-Mark (SoM) visual candidate tagging with structured LLM detection.
+    Tier C: Direct coordinate estimation fallback.
+    """
+    if not description:
+        return None
+
+    # Tier A: UIA accessibility inspection
+    coords = _find_via_uia(description)
+    if coords is not None:
+        return coords
+
+    # Capture screen for visual tiers
+    try:
+        _require_pyautogui()
+        w, h = pyautogui.size()
+        img = pyautogui.screenshot()
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        screenshot_bytes = buf.getvalue()
+    except Exception as e:
+        print(f"[ComputerControl] Screenshot capture failed: {e}")
+        return None
+
+    # Tier B: Set-of-Mark visual tagging
+    coords = _find_via_som(description, img, w, h)
+    if coords is not None:
+        return coords
+
+    # Tier C: Raw screenshot coordinate prediction
+    return _find_via_coordinates(description, screenshot_bytes, w, h)
+
 
 def computer_control(
     parameters: dict,
