@@ -586,6 +586,9 @@ class JarvisLive:
         import uuid
         self._operator_scope = uuid.uuid4().hex
         self._operator_goal = ""
+        # Remote requests waiting for a reply turn, oldest first. Each one is
+        # answered by the next completed Zaya turn in the same order.
+        self._pending_remote = deque(maxlen=32)
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -1225,13 +1228,21 @@ class JarvisLive:
 
         return out
 
-    def _begin_owner_goal(self, text: str, *, trust: str = 'local_owner') -> None:
+    def _begin_owner_goal(self, text: str, *, trust: str = 'local_owner',
+                          scope: str | None = None) -> None:
+        """Open a fresh owner scope for a new owner request.
+
+        The scope is what keys cached tool executions (`scope:tool:args`), so it
+        must never be inherited from a previous request — not when a phone
+        repeats a command, and not when a typed line follows a spoken one. A
+        remote transport may pass the scope it already registered, which keeps
+        its duplicate detection and this scope in agreement."""
         self._owner_activity()
         self._owner_request_pending = True
         import uuid
         from core.audit import redact
         from core.execution_policy import set_trust, TRUST_LOCAL_OWNER
-        self._operator_scope = uuid.uuid4().hex
+        self._operator_scope = str(scope) or uuid.uuid4().hex
         self._operator_goal = str(redact(text))[:300]
         self._operator_trust = trust or TRUST_LOCAL_OWNER
         set_trust(self._operator_trust)
@@ -1247,6 +1258,8 @@ class JarvisLive:
         from core.task_runtime import get_runtime
         from core.tool_result import normalize
         import hashlib
+        from core.execution_policy import (get_trust, with_trust, TRUST_LOCAL_OWNER,
+                                           TRUST_AUTHENTICATED_REMOTE_OWNER)
         response = None
         async def invoke():
             nonlocal response
@@ -1258,10 +1271,24 @@ class JarvisLive:
         trust = getattr(self, '_operator_trust', None)
         request_id = f"{scope}:{fc.name}:{signature}" if scope else ""
         self._tools_active = getattr(self, '_tools_active', 0) + 1
+        # Tool execution happens in the receive task, but the owner request that
+        # caused it was accepted somewhere else (the Qt thread, the phone
+        # socket, another task). The trust of THAT request has to apply here, or
+        # a remote command would execute under the ambient context — which is
+        # TRUST_UNKNOWN in production.
+        current = get_trust()
+        owner_levels = {TRUST_LOCAL_OWNER, TRUST_AUTHENTICATED_REMOTE_OWNER}
+        if current in owner_levels:
+            effective = current
+        elif trust in owner_levels:
+            effective = trust
+        else:
+            effective = current
         try:
-            result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
-                                                           goal=goal or fc.name,
-                                                           trust_level=trust or '')
+            with with_trust(effective):
+                result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
+                                                               goal=goal or fc.name,
+                                                               trust_level=trust or '')
         finally:
             self._tools_active -= 1
             self._last_tool_end = time.monotonic()
@@ -1603,6 +1630,19 @@ class JarvisLive:
         self._visemes.feed_text(transcript or item['summary'])
         self._turn_done_event.clear()
         self._notification_active = True
+        # The phone should see the same notice the desktop hears. It is a
+        # notification (never a ring): the spoken path already handled urgency,
+        # and the call policy decides separately whether something must ring.
+        try:
+            from core import mobile_protocol as protocol
+            calls = getattr(self, '_calls', None)
+            summary = item.get('summary') or transcript or 'Zaya has an update.'
+            if calls is not None:
+                calls.notify(title='Zaya', body=summary[:protocol.LIMITS['detail']],
+                             priority=protocol.P2_IMPORTANT, source='runtime',
+                             quiet=bool(item.get('quiet')))
+        except Exception:
+            pass
         for offset in range(0, len(audio), 2400):
             self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
         self._turn_done_event.set()
@@ -1980,7 +2020,15 @@ class JarvisLive:
                                 self._interrupted = False
                                 in_buf.append(txt)
                                 input_row = await self._conversation_write('record', 'user', ' '.join(in_buf), input_row)
-                                self._begin_owner_goal(" ".join(in_buf))
+                                # Which body is speaking? The phone microphone is
+                                # an authenticated remote interface, and saying so
+                                # keeps the audit trail and the tool source honest.
+                                from core.execution_policy import (TRUST_LOCAL_OWNER,
+                                                                   TRUST_AUTHENTICATED_REMOTE_OWNER)
+                                self._begin_owner_goal(
+                                    " ".join(in_buf),
+                                    trust=(TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
+                                           else TRUST_LOCAL_OWNER))
                                 self._last_user_speech = time.monotonic()
 
                         if getattr(sc, 'generation_complete', False) or getattr(sc, 'waiting_for_input', False):
@@ -2030,6 +2078,8 @@ class JarvisLive:
                                 await self._conversation_write('append', 'model', full_out)
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
+                                from core.event_bus import bus
+                                bus.publish('zaya.message', text=full_out)
                                 if self._dashboard:
                                     asyncio.create_task(self._dashboard.broadcast({
                                         "type": "log", "speaker": "jarvis",
@@ -2037,6 +2087,14 @@ class JarvisLive:
                                         "ts": datetime.now().isoformat(),
                                     }))
                             out_buf = []
+
+                            # A remote command has now been answered: move its
+                            # request from 'acknowledged' to 'completed' so the
+                            # phone can stop waiting (and stop resending).
+                            pending_remote = getattr(self, '_pending_remote', None)
+                            if pending_remote:
+                                from core.remote_commands import get_gate
+                                get_gate().complete(pending_remote.popleft(), ok=True)
 
                             if self._vision_close_pending:
                                 # This turn_complete IS the vision answer — close camera + release busy flag
@@ -2071,6 +2129,12 @@ class JarvisLive:
 
     async def _play_audio(self):
         print("[Zaya] 🔊 Play started")
+
+        try:
+            from core.mobile_bridge import get_bridge
+            mobile = get_bridge()
+        except Exception:
+            mobile = None
 
         _spk_name = get_output_device()
         _spk_dev  = audio_devices.resolve(_spk_name, "output")
@@ -2198,7 +2262,12 @@ class JarvisLive:
                     pass
 
                 try:
-                    await asyncio.to_thread(stream.write, bytes(batch))
+                    if mobile is None or mobile.desktop_enabled():
+                        await asyncio.to_thread(stream.write, bytes(batch))
+                    if mobile is not None:
+                        # The very same PCM Zaya is speaking with. Never a second
+                        # synthesis: the phone hears this session or nothing.
+                        mobile.push_output_audio(bytes(batch))
                     last_audio = time.monotonic()
                 except asyncio.CancelledError:
                     raise
@@ -2489,35 +2558,102 @@ class JarvisLive:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
         self.ui.notify_phone_connected()
 
+    # ── Zaya-initiated calls ───────────────────────────────────────────────
+
+    def _on_zaya_call_answered(self, call) -> None:
+        """The owner picked up. Zaya already knows why she rang.
+
+        The call payload carries a briefing compiled by the policy that decided
+        to ring, so the first thing the model says is grounded in the actual
+        event — the owner never has to explain the situation back to her.
+        """
+        loop = getattr(self, '_loop', None)
+        if not loop or not self.session:
+            return
+        instruction = (
+            "[PHONE CALL] The owner has just answered your call from his phone and can hear "
+            "you now. He is in a voice call with you: your voice plays from his phone speaker "
+            "and he speaks into his phone microphone.\n"
+            f"Reason you called: {call.reason or call.title}\n"
+            f"Context: {call.detail or call.title}\n"
+            f"Briefing: {call.briefing or 'Tell him what you need in one or two sentences.'}\n"
+            "Open the call yourself: state the situation in one or two sentences and ask for "
+            "the decision you need. Do not ask him to explain the situation."
+        )
+
+        async def _speak():
+            try:
+                await self.session.send_client_content(
+                    turns={'role': 'user', 'parts': [{'text': instruction}]},
+                    turn_complete=True,
+                )
+            except Exception as e:
+                print(f"[Call] Could not brief Zaya: {e}")
+
+        try:
+            asyncio.run_coroutine_threadsafe(_speak(), loop)
+        except Exception as e:
+            print(f"[Call] Could not brief Zaya: {e}")
+
     # ── dashboard command relay ─────────────────────────────────────────────
 
     async def _process_dashboard_commands(self) -> None:
+        """Run commands that arrived from a phone interface (dashboard or Android).
+
+        Every accepted command opens its OWN owner goal and scope before it is
+        sent to Zaya, with the authenticated-remote-owner trust level. Without
+        that, a remote request inherited whatever owner scope the laptop used
+        last: tools were keyed by the old scope, so a cached result could answer
+        a brand-new command and the audit trail showed the wrong request."""
+        from core.execution_policy import TRUST_AUTHENTICATED_REMOTE_OWNER
+        from core.remote_commands import get_gate
         while True:
             try:
-                text = await asyncio.wait_for(
+                item = await asyncio.wait_for(
                     self._dashboard._command_queue.get(), timeout=0.5
                 )
-                if not text:
-                    continue
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                print(f"[Dashboard] Command error: {e}")
+                await asyncio.sleep(0.5)
+                continue
+            if not item:
+                continue
+            if isinstance(item, str):      # a legacy caller queued plain text
+                item = {"text": item}
+            text = (item.get("text") or "").strip()
+            request_id = item.get("request_id") or ""
+            if not text:
+                get_gate().complete(request_id, ok=False, error="Empty command.")
+                continue
+            try:
                 # Wait up to 8s for session to become ready after a wake
                 for _ in range(80):
                     if self.session:
                         break
                     await asyncio.sleep(0.1)
-                if self.session:
-                    # A remote command is deliberate control and the phone user
-                    # has no desktop WAKE button — so it wakes JARVIS if asleep.
-                    if self._wake_enabled and not self._awake:
-                        self.wake(reason="remote command")
-                    await self._send_owner_text(text)
-                    self.ui.write_log(f"[Web]: {text}")
-                else:
+                if not self.session:
                     print(f"[Dashboard] Dropped command (no session): {text}")
-            except asyncio.TimeoutError:
-                pass
+                    get_gate().complete(request_id, ok=False,
+                                        error="Zaya's session is not connected.")
+                    continue
+                # A remote command is deliberate control and the phone user has
+                # no desktop WAKE button — so it wakes Zaya if asleep.
+                if self._wake_enabled and not self._awake:
+                    self.wake(reason="remote command")
+                self._begin_owner_goal(text, trust=TRUST_AUTHENTICATED_REMOTE_OWNER,
+                                       scope=item.get("scope"))
+                get_gate().begin(request_id)
+                self.ui.write_log(f"[{item.get('source', 'Web')}]: {text}")
+                from core.event_bus import bus
+                bus.publish('owner.message', text=text, source=item.get('source', 'remote'))
+                get_gate().acknowledge(request_id)
+                self._pending_remote.append(request_id)
+                await self._send_owner_text(text)
             except Exception as e:
                 print(f"[Dashboard] Command error: {e}")
-                await asyncio.sleep(0.5)
+                get_gate().complete(request_id, ok=False, error=str(e))
 
     # ── main loop ───────────────────────────────────────────────────────────
 
@@ -2561,6 +2697,17 @@ class JarvisLive:
         except Exception as e:
             print(f"[Dashboard] Disabled: {e}")
             self._dashboard = None
+
+        # ── Phone body: state, captions, calls and output routing ────────────
+        # The bridge mirrors this runtime onto any connected phone and decides
+        # where Zaya's voice goes. It must exist even when the dashboard is
+        # unavailable, so calls still become notifications.
+        from core.mobile_bridge import get_bridge
+        from core.mobile_calls import get_call_manager
+        self._bridge = get_bridge()
+        self._bridge.start()
+        self._calls = get_call_manager()
+        self._calls.set_answer_hook(self._on_zaya_call_answered)
 
         while True:
             _resumed_with = False
@@ -2833,6 +2980,11 @@ def _run_desktop_agent(ui, stopping):
         ui.write_log(f'ERR: Zaya could not start: {redact(str(error))[:180]}')
         from core.event_bus import bus
         bus.publish('avatar.caption', text='Could not connect. Check Settings & Controls.')
+        # Severity 'high' rather than 'critical': if Zaya cannot reach the model
+        # she has no voice to ring with either, so this is a notification the
+        # phone shows, not a call it cannot answer.
+        bus.publish('system.warning', severity='high',
+                    text=f'Zaya could not start: {redact(str(error))[:180]}')
         try:
             path = BASE_DIR / 'logs' / 'startup_failure.log'
             path.parent.mkdir(parents=True, exist_ok=True)

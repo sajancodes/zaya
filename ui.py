@@ -5770,6 +5770,14 @@ class MainWindow(QMainWindow):
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
         self._applied_state_sig.emit(state)
+        # The phone must render the SAME Zaya as the desktop, so every state the
+        # desktop applies is published once, from here. Remote bodies read this
+        # and never decide a state of their own.
+        try:
+            from core.event_bus import bus
+            bus.publish('zaya.state.changed', state=state)
+        except Exception:
+            pass
 
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False

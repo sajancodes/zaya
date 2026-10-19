@@ -70,12 +70,19 @@ _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]
 
 # ── AES-256-CBC ───────────────────────────────────────────────────────────────
-_AES_SALT = b'JARVIS-DASHBOARD-v1'
+# The salt must be the SAME string the browser derives its key with (see
+# dashboard/static/app.html). Server and client had drifted apart — the client
+# used 'ZAYA-DASHBOARD-v1' while the server still used the pre-rename
+# 'JARVIS-DASHBOARD-v1' — so every encrypted remote command failed to decrypt
+# and the dashboard silently fell back to plaintext. The current salt wins; the
+# old one stays only as a decrypt fallback for a page already open in a browser.
+_AES_SALT = b'ZAYA-DASHBOARD-v1'
+_AES_LEGACY_SALTS = (b'JARVIS-DASHBOARD-v1',)
 
 
-def _derive_key(session_key: str) -> bytes:
+def _derive_key(session_key: str, salt: bytes = _AES_SALT) -> bytes:
     """SHA-256(sessionKey‖salt) → 32-byte AES-256 key (microseconds, no PBKDF2 needed)."""
-    return hashlib.sha256(session_key.encode('utf-8') + _AES_SALT).digest()
+    return hashlib.sha256(session_key.encode('utf-8') + salt).digest()
 
 
 def _decrypt_cbc(aes_key: bytes, enc_b64: str) -> str:
@@ -462,16 +469,48 @@ class DashboardServer:
         self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
         self._clients: set[WebSocket]     = set()
         self._history: list[dict]         = []
-        self._command_queue               = asyncio.Queue()
+        self._command_queue               = asyncio.Queue(maxsize=64)
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
-        self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
+        self._device_sessions: dict[str, dict] = {}  # legacy in-memory device tokens
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._phone_audio_dropped         = 0
         self._uploads_dir                 = UPLOADS_DIR
+        self._devices                     = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._mobile                      = None
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
         self.app                          = self._build_app()
+
+    # ── persistent paired devices ────────────────────────────────────────────
+
+    def device_registry(self):
+        """Paired devices live in SQLite, not in a dict that dies with the run."""
+        if self._devices is None:
+            from core.device_registry import get_registry
+            self._devices = get_registry()
+        return self._devices
+
+    def mobile(self):
+        if self._mobile is None:
+            from dashboard.mobile_api import MobileApi
+            self._mobile = MobileApi(self)
+        return self._mobile
+
+    def push_mobile_event(self, envelope: dict) -> None:
+        """Thread-safe fan-out used by the runtime bridge."""
+        mobile = self.mobile()
+        mobile.push(envelope)
+
+    def note_remote_connection(self, text: str) -> None:
+        if self._connect_callback:
+            try:
+                self._connect_callback()
+            except Exception:
+                pass
+        asyncio.create_task(self.broadcast({"type": "sys", "text": text}))
 
     # ── one-time key management ───────────────────────────────────────────
 
@@ -506,10 +545,12 @@ class DashboardServer:
         sk = self._token_keys.get(token)
         if not sk:
             return None
-        try:
-            return _decrypt_cbc(self._aes_key(sk), enc_b64)
-        except Exception:
-            return None
+        for salt in (_AES_SALT, *_AES_LEGACY_SALTS):
+            try:
+                return _decrypt_cbc(_derive_key(sk, salt), enc_b64)
+            except Exception:
+                continue
+        return None
 
     # ── callbacks ────────────────────────────────────────────────────────
 
@@ -528,7 +569,9 @@ class DashboardServer:
         dead: set[WebSocket] = set()
         for ws in list(self._clients):
             try:
-                await ws.send_json(msg)
+                # A browser that stopped reading must not hold up the runtime
+                # path that produced this message.
+                await asyncio.wait_for(ws.send_json(msg), timeout=5.0)
             except Exception:
                 dead.add(ws)
         self._clients -= dead
@@ -604,11 +647,10 @@ class DashboardServer:
 
             del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
-            dev_tok = secrets.token_urlsafe(32)
             self._tokens.add(tok)
             self._token_keys[tok] = key
             self._aes_key(key)
-            self._device_sessions[dev_tok] = {"session_key": key}
+            dev_tok, device_id = self._pair_browser_device(key)
 
             if self._connect_callback:
                 self._connect_callback()
@@ -628,6 +670,7 @@ class DashboardServer:
   sessionStorage.setItem('jarvis_token','{tok}');
   sessionStorage.setItem('jarvis_key','{key}');
   localStorage.setItem('jarvis_device_token','{dev_tok}');
+  localStorage.setItem('jarvis_device_id','{device_id}');
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -635,15 +678,29 @@ class DashboardServer:
 
         @app.post("/api/device-login")
         async def device_login_ep(req: Request):
-            """Return a fresh auth token for a previously paired device token."""
+            """Fresh auth token for a device paired earlier.
+
+            Paired devices survive a Zaya restart (they are rows in the local
+            SQLite store, not dict entries), so a phone or browser that was
+            trusted yesterday reconnects by itself after the laptop reboots."""
             try:
                 body = await req.json()
             except Exception:
                 return JSONResponse({"ok": False}, status_code=400)
-            dev_tok = (body.get("device_token") or "").strip()
-            if not dev_tok or dev_tok not in self._device_sessions:
+            dev_tok  = (body.get("device_token") or "").strip()
+            device_id = (body.get("device_id") or "").strip()
+            if not dev_tok:
                 return JSONResponse({"ok": False}, status_code=401)
-            session_key = self._device_sessions[dev_tok]["session_key"]
+
+            session_key = None
+            if device_id:
+                session_key = self.device_registry().session_key_for(device_id, dev_tok)
+            if session_key is None and dev_tok in self._device_sessions:
+                # Legacy client that only ever stored its device token.
+                session_key = self._device_sessions[dev_tok]["session_key"]
+            if not session_key:
+                return JSONResponse({"ok": False}, status_code=401)
+
             tok = secrets.token_urlsafe(32)
             self._tokens.add(tok)
             self._token_keys[tok] = session_key
@@ -653,15 +710,39 @@ class DashboardServer:
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Known device reconnected automatically."}
             ))
-            return JSONResponse({"ok": True, "token": tok, "key": session_key})
+            return JSONResponse({"ok": True, "token": tok, "key": session_key,
+                                 "device_id": device_id})
+
+        def _pair_browser_device(session_key: str) -> tuple[str, str]:
+            """Register this browser as a durable paired device.
+
+            Its device secret is the local browser token, so the record can be
+            authenticated later while the store keeps only a hash of it."""
+            dev_tok = secrets.token_urlsafe(32)
+            try:
+                record, _secret = self.device_registry().pair(
+                    "Web browser", app_version="browser", platform="web",
+                    session_key=session_key, secret=dev_tok)
+                return dev_tok, record["device_id"]
+            except Exception:
+                # Storage failure must not cost the owner their remote session.
+                self._device_sessions[dev_tok] = {"session_key": session_key}
+                return dev_tok, ""
 
         @app.post("/api/revoke-devices")
         async def revoke_devices(req: Request):
-            """Invalidate all persistent device tokens (admin action)."""
+            """Invalidate every persistent device token (admin action)."""
             if not _auth(req):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             count = len(self._device_sessions)
             self._device_sessions.clear()
+            try:
+                count += self.device_registry().revoke_all()
+            except Exception:
+                pass
+            if self._mobile:
+                for token in list(self._mobile.tokens):
+                    self._mobile.tokens.pop(token, None)
             return JSONResponse({"ok": True, "revoked": count})
 
         @app.post("/api/command")
@@ -678,7 +759,8 @@ class DashboardServer:
             else:
                 text = (body.get("text") or "").strip()
             if text:
-                await self._command_queue.put(text)
+                self.submit_remote_command(text, source="dashboard",
+                                           request_id=str(body.get("request_id") or ""))
                 if self._wake_callback:
                     self._wake_callback()
             return JSONResponse({"ok": True})
@@ -711,7 +793,9 @@ class DashboardServer:
                             {"data": data, "mime_type": "audio/pcm"}
                         )
                     except asyncio.QueueFull:
-                        pass  # drop frame rather than block
+                        # Drop the frame rather than block the socket: Zaya's own
+                        # session must never pay for a phone that cannot keep up.
+                        self._phone_audio_dropped += 1
             except WebSocketDisconnect:
                 pass
             finally:
@@ -827,7 +911,9 @@ class DashboardServer:
                         enc = data.get("enc", "")
                         t   = self._decrypt(tok, enc) if enc else (data.get("text") or "").strip()
                         if t:
-                            await self._command_queue.put(t)
+                            self.submit_remote_command(
+                                t, source="dashboard",
+                                request_id=str(data.get("request_id") or ""))
                             if self._wake_callback:
                                 self._wake_callback()
             except WebSocketDisconnect:
@@ -835,7 +921,45 @@ class DashboardServer:
             finally:
                 self._clients.discard(websocket)
 
+        # ── Android companion ─────────────────────────────────────────────────
+
+        mobile = self.mobile()
+        mobile.register(app)
+
+        @app.websocket("/ws/mobile")
+        async def mobile_ws(websocket: WebSocket, token: str = ""):
+            await self.mobile().handle_mobile_socket(websocket, token.strip())
+
+        @app.websocket("/ws/phone-output")
+        async def phone_output_ws(websocket: WebSocket, token: str = ""):
+            await self.mobile().handle_phone_output(websocket, token.strip())
+
         return app
+
+    # ── remote command intake ────────────────────────────────────────────
+
+    def submit_remote_command(self, text: str, *, source: str = "dashboard",
+                              request_id: str = "") -> tuple[object, str]:
+        """Queue a remote command exactly once, with its own owner scope.
+
+        Every transport funnels through here so the dedupe rules and the
+        acknowledgement lifecycle are identical for the browser dashboard and
+        the Android app. Returns (command, 'accepted' | 'duplicate' | 'rejected').
+        """
+        from core.remote_commands import get_gate
+        command, outcome = get_gate().submit(text, request_id=request_id, source=source,
+                                            trust="authenticated_remote_owner")
+        if outcome != 'accepted' or command is None:
+            return command, outcome
+        try:
+            self._command_queue.put_nowait({
+                "text": command.text, "request_id": command.request_id,
+                "source": source, "scope": command.scope,
+            })
+        except asyncio.QueueFull:
+            get_gate().complete(command.request_id, ok=False, error="Zaya was busy.")
+            return command, "rejected"
+        return command, outcome
 
     # ── serve ─────────────────────────────────────────────────────────────
 
@@ -859,6 +983,14 @@ class DashboardServer:
             print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
             return
 
+        # The mobile bridge fans events in from worker threads, so it needs the
+        # loop that actually owns the sockets.
+        self._loop = asyncio.get_running_loop()
+        try:
+            self.mobile().loop = self._loop
+        except Exception as error:
+            print(f"[Dashboard] Mobile API unavailable: {error}")
+
         # Firewall setup runs in a thread — uvicorn starts immediately,
         # no waiting for UAC dialogs or subprocess timeouts.
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
@@ -881,4 +1013,5 @@ class DashboardServer:
         proto = "https" if use_ssl else "http"
         print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
         print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
+        print("[Dashboard] Android companion: enter this address and the same pairing key.")
         await uvicorn.Server(cfg).serve()

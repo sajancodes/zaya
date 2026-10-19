@@ -122,6 +122,19 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
         return f"Could not ask for confirmation: {e}. Nothing was done."
 
     _log(f"SYS: Awaiting confirmation — {title}")
+    # Anything behind this gate is irreversible, so a phone in another room has
+    # to know about it. Which phone treatment it gets depends on where the
+    # request came from: asked from the phone, the owner is not at the desktop
+    # and cannot see the banner, so the laptop may ring. Asked at the desktop,
+    # he is standing in front of it and a written note is the polite answer.
+    try:
+        from core.event_bus import bus
+        from core.execution_policy import get_trust, TRUST_AUTHENTICATED_REMOTE_OWNER
+        bus.publish('confirm.requested', title=title, detail=detail, key=f'confirm:{key}',
+                    remote=get_trust() == TRUST_AUTHENTICATED_REMOTE_OWNER)
+    except Exception:
+        pass
+
     def expire():
         with _lock:
             matches = _pending is current

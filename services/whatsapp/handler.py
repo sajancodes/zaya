@@ -115,7 +115,19 @@ class ReplyWorker:
                 notify = importance.get('notify_owner') is True
                 if incoming_score >= 40 or importance.get('needs_owner') or notify:
                     if self.store.alert(incoming, incoming_score, str(importance.get('category', 'normal')), str(importance.get('reason', 'Owner review needed.'))[:300], notify_owner=notify):
-                        bus.publish('whatsapp.alert.created', chat_id=incoming.chat_id, message_id=incoming.message_id, score=incoming_score)
+                        # Alert details travel with the event so the phone can
+                        # show who wrote and why it mattered — without the phone
+                        # ever classifying anything itself.
+                        alert = self.store.rows(
+                            'SELECT alert_id FROM wa_alerts WHERE message_id=?',
+                            (incoming.message_id,))
+                        bus.publish('whatsapp.alert.created', chat_id=incoming.chat_id,
+                                    message_id=incoming.message_id, score=incoming_score,
+                                    alert_id=(alert[0]['alert_id'] if alert else incoming.message_id),
+                                    title=self.store.chat(incoming.chat_id).get('title') or 'WhatsApp',
+                                    category=str(importance.get('category', 'normal')),
+                                    reason=str(importance.get('reason', ''))[:300],
+                                    needs_owner=bool(importance.get('needs_owner')))
                 if (incoming.message_id in visible_ids and state['mode'] in {'draft', 'auto'} and incoming.complete and incoming.source != 'hermes_hook'
                         and (state['mode'] == 'draft' or may_reply(incoming, state['mode'], importance))):
                     eligible.append(incoming)

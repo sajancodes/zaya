@@ -35,6 +35,7 @@ def agent():
     live.audio_in_queue = asyncio.Queue()
     live._turn_done_event = asyncio.Event()
     live._begin_owner_goal = Mock()
+    live._pending_remote = deque(maxlen=32)
     return live
 
 
