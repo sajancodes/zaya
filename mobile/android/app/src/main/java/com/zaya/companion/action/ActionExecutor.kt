@@ -17,6 +17,9 @@ import com.zaya.companion.service.MediaPlaybackController
 import com.zaya.companion.service.NotificationItem
 import com.zaya.companion.service.OutgoingCallOutcome
 import com.zaya.companion.service.ReplyOutcome
+import com.zaya.companion.service.ScreenCaptureManager
+import com.zaya.companion.service.ScreenFrameResult
+import com.zaya.companion.service.VisualAnalysis
 import com.zaya.companion.service.ZayaNotificationListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -34,6 +37,7 @@ class ActionExecutor(
     val appLauncher: AppLauncher = AppLauncher(context),
     val callManager: CellularCallManager = CellularCallManager(context),
     val contactManager: ContactManager = callManager.contactManager,
+    val screenCaptureManager: ScreenCaptureManager = ScreenCaptureManager(context),
 ) {
 
     companion object {
@@ -67,9 +71,10 @@ class ActionExecutor(
             is AndroidAction.SummarizeNotifications -> executeSummarizeNotifications(action.packageFilter)
             is AndroidAction.DraftNotificationReply -> executeDraftNotificationReply(action)
             is AndroidAction.ReplyToNotification -> executeReplyNotification(action)
-            is AndroidAction.CaptureScreen -> {
-                ActionResult.unsupported("Screen capture requires explicit system dialog authorization via MediaProjection.")
-            }
+            is AndroidAction.CaptureScreen -> executeCaptureScreen()
+            is AndroidAction.DescribeScreen -> executeDescribeScreen(action)
+            is AndroidAction.ExtractVisibleText -> executeExtractVisibleText(action)
+            is AndroidAction.SummarizeScreen -> executeSummarizeScreen(action)
             is AndroidAction.ScrollScreen -> {
                 ActionResult.unsupported("Screen scrolling requires Accessibility Service authorization.")
             }
@@ -775,6 +780,139 @@ class ActionExecutor(
             is ReplyOutcome.Failed -> {
                 ActionResult.failure("Could not dispatch reply: ${outcome.reason}", error = "reply_failed")
             }
+        }
+    }
+
+    private suspend fun executeCaptureScreen(): ActionResult {
+        if (!ScreenCaptureManager.hasConsent()) {
+            screenCaptureManager.requestConsent()
+            return ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = "Screen capture authorization is required. Please grant the screen recording dialog to proceed."
+            )
+        }
+
+        return when (val frame = screenCaptureManager.captureScreenFrame()) {
+            is ScreenFrameResult.Success -> {
+                ActionResult.success(
+                    spoken = "Screen captured at ${frame.width}x${frame.height}.",
+                    data = mapOf(
+                        "width" to frame.width,
+                        "height" to frame.height,
+                        "timestamp" to frame.timestamp,
+                        "captured" to true
+                    )
+                )
+            }
+            is ScreenFrameResult.ConsentRequired -> {
+                ActionResult.permissionRequired(
+                    permission = "android.permission.MEDIA_PROJECTION",
+                    spoken = "Screen capture authorization is required."
+                )
+            }
+            is ScreenFrameResult.Timeout -> {
+                ActionResult.failure("Screen capture timed out waiting for display frame.", error = "TimeoutException")
+            }
+            is ScreenFrameResult.Failed -> {
+                ActionResult.failure("Screen capture failed: ${frame.reason}", error = "CaptureError")
+            }
+        }
+    }
+
+    private suspend fun executeDescribeScreen(action: AndroidAction.DescribeScreen): ActionResult {
+        if (!ScreenCaptureManager.hasConsent()) {
+            screenCaptureManager.requestConsent()
+            return ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = "Screen capture authorization is required to describe what is on screen."
+            )
+        }
+
+        val analysis = screenCaptureManager.analyzeScreen(action.prompt)
+        return if (analysis.summary.contains("consent is required", ignoreCase = true)) {
+            ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = analysis.summary
+            )
+        } else if (analysis.extractedLines.isEmpty() && analysis.resolution == "0x0") {
+            ActionResult.failure(analysis.summary, error = "ScreenAnalysisError")
+        } else {
+            ActionResult.success(
+                spoken = analysis.summary,
+                data = mapOf(
+                    "resolution" to analysis.resolution,
+                    "features" to analysis.extractedLines,
+                    "prompt" to (action.prompt ?: "describe"),
+                    "timestamp" to analysis.timestamp
+                )
+            )
+        }
+    }
+
+    private suspend fun executeExtractVisibleText(action: AndroidAction.ExtractVisibleText): ActionResult {
+        if (!ScreenCaptureManager.hasConsent()) {
+            screenCaptureManager.requestConsent()
+            return ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = "Screen capture authorization is required to extract visible text."
+            )
+        }
+
+        val analysis = screenCaptureManager.analyzeScreen(
+            action.filter?.let { "Extract text matching: $it" } ?: "Extract visible text"
+        )
+        return if (analysis.summary.contains("consent is required", ignoreCase = true)) {
+            ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = analysis.summary
+            )
+        } else if (analysis.extractedLines.isEmpty() && analysis.resolution == "0x0") {
+            ActionResult.failure(analysis.summary, error = "ScreenAnalysisError")
+        } else {
+            val text = if (analysis.extractedLines.isNotEmpty()) {
+                analysis.extractedLines.joinToString("\n")
+            } else {
+                "No readable text detected on screen."
+            }
+            ActionResult.success(
+                spoken = "Visible text extracted from screen.",
+                data = mapOf(
+                    "text" to text,
+                    "lines" to analysis.extractedLines,
+                    "resolution" to analysis.resolution
+                )
+            )
+        }
+    }
+
+    private suspend fun executeSummarizeScreen(action: AndroidAction.SummarizeScreen): ActionResult {
+        if (!ScreenCaptureManager.hasConsent()) {
+            screenCaptureManager.requestConsent()
+            return ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = "Screen capture authorization is required to summarize the screen."
+            )
+        }
+
+        val analysis = screenCaptureManager.analyzeScreen(
+            action.focus?.let { "Summarize screen with focus on: $it" } ?: "Summarize visible screen"
+        )
+        return if (analysis.summary.contains("consent is required", ignoreCase = true)) {
+            ActionResult.permissionRequired(
+                permission = "android.permission.MEDIA_PROJECTION",
+                spoken = analysis.summary
+            )
+        } else if (analysis.extractedLines.isEmpty() && analysis.resolution == "0x0") {
+            ActionResult.failure(analysis.summary, error = "ScreenAnalysisError")
+        } else {
+            ActionResult.success(
+                spoken = analysis.summary,
+                data = mapOf(
+                    "resolution" to analysis.resolution,
+                    "focus" to (action.focus ?: "all"),
+                    "timestamp" to analysis.timestamp
+                )
+            )
         }
     }
 }

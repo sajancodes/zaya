@@ -136,7 +136,19 @@ sealed class AndroidAction(
         val confirmed: Boolean = false,
     ) : AndroidAction("reply_notification", ActionRisk.HIGH, requiresConfirmation = true)
 
-    data object CaptureScreen : AndroidAction("capture_screen", ActionRisk.HIGH)
+    data object CaptureScreen : AndroidAction("capture_screen", ActionRisk.LOW)
+
+    data class DescribeScreen(
+        val prompt: String? = null,
+    ) : AndroidAction("describe_screen", ActionRisk.LOW)
+
+    data class ExtractVisibleText(
+        val filter: String? = null,
+    ) : AndroidAction("extract_visible_text", ActionRisk.LOW)
+
+    data class SummarizeScreen(
+        val focus: String? = null,
+    ) : AndroidAction("summarize_screen", ActionRisk.LOW)
 
     data class ScrollScreen(val direction: String) : AndroidAction("scroll_screen", ActionRisk.MEDIUM)
 

@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -108,11 +109,18 @@
         <service
             android:name=".service.ZayaService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|microphone|specialUse">
+            android:foregroundServiceType="dataSync|microphone|specialUse|mediaProjection">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the owner's paired phone connected to their own Zaya runtime on their laptop, including Zaya-initiated calls." />
         </service>
+
+        <!-- MediaProjection screen capture consent handler -->
+        <activity
+            android:name=".ui.ScreenCaptureConsentActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true" />
 
         <!-- Real-Time Notification Listener with autonomous RemoteInput inline reply -->
         <service

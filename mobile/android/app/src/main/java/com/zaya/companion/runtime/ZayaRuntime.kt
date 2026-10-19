@@ -133,6 +133,7 @@ class ZayaRuntime(
     val cellularCallManager by lazy { com.zaya.companion.service.CellularCallManager(context) }
     val mediaPlaybackController by lazy { com.zaya.companion.service.MediaPlaybackController(context) }
     val appLauncher by lazy { com.zaya.companion.service.AppLauncher(context) }
+    val screenCaptureManager by lazy { com.zaya.companion.service.ScreenCaptureManager(context) }
     val actionExecutor by lazy {
         com.zaya.companion.action.ActionExecutor(
             context = context,
@@ -140,6 +141,7 @@ class ZayaRuntime(
             mediaController = mediaPlaybackController,
             appLauncher = appLauncher,
             callManager = cellularCallManager,
+            screenCaptureManager = screenCaptureManager,
         )
     }
     val actionRegistry by lazy { actionExecutor.registry }
@@ -1106,6 +1108,15 @@ class ZayaRuntime(
                 confirmed = args.optBoolean("confirmed", false)
             )
             "capture_screen" -> com.zaya.companion.action.AndroidAction.CaptureScreen
+            "describe_screen" -> com.zaya.companion.action.AndroidAction.DescribeScreen(
+                prompt = args.optString("prompt", "").ifBlank { null }
+            )
+            "extract_visible_text" -> com.zaya.companion.action.AndroidAction.ExtractVisibleText(
+                filter = args.optString("filter", "").ifBlank { null }
+            )
+            "summarize_screen" -> com.zaya.companion.action.AndroidAction.SummarizeScreen(
+                focus = args.optString("focus", "").ifBlank { null }
+            )
             "scroll_screen" -> com.zaya.companion.action.AndroidAction.ScrollScreen(args.optString("direction", "down"))
             "tap_screen" -> com.zaya.companion.action.AndroidAction.TapScreen(
                 x = args.optDouble("x", 0.0).toFloat(),

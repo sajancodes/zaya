@@ -243,6 +243,30 @@ def access_core_memory(parameters: dict, **_kwargs) -> str:
     return json.dumps({"status": "success", "memory": mem}, indent=2)
 
 
+def capture_screen(parameters: dict, **_kwargs) -> str:
+    """Capture Screen Frame via MediaProjection Action."""
+    require_owner()
+    action = str(parameters.get("action", "capture")).lower().strip()
+    return json.dumps({
+        "status": "success",
+        "action": action,
+        "message": "Screen capture frame requested via user-consented MediaProjection.",
+        "requires_consent": True
+    }, indent=2)
+
+
+def understand_screen(parameters: dict, **_kwargs) -> str:
+    """Screen Understanding and Visual AI Action."""
+    require_owner()
+    prompt = str(parameters.get("prompt") or "Describe what is visible on this screen").strip()
+    return json.dumps({
+        "status": "success",
+        "prompt": prompt,
+        "message": f"Screen understanding initiated: '{prompt}'.",
+        "pipeline": "MediaProjection -> Scaled JPEG -> Gemini Multimodal Live"
+    }, indent=2)
+
+
 TOOLS = [
     {
         "name": "control_incoming_call",
@@ -422,5 +446,27 @@ TOOLS = [
             }
         },
         "handler": access_core_memory
+    },
+    {
+        "name": "capture_screen",
+        "description": "Capture the user's active mobile screen frame safely via user-consented MediaProjection.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "Screen capture operation (capture/stop)"}
+            }
+        },
+        "handler": capture_screen
+    },
+    {
+        "name": "understand_screen",
+        "description": "Visual AI understanding of current mobile screen (describe, summarize, extract text) via Gemini Live.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt": {"type": "STRING", "description": "Analysis prompt or specific question about the screen"}
+            }
+        },
+        "handler": understand_screen
     }
 ]

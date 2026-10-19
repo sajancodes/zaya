@@ -155,7 +155,10 @@ class ZayaService : Service() {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         } else {
             0
         }

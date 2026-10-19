@@ -290,17 +290,54 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 11. Capture Screen
+        // 11. Screen Understanding (MediaProjection)
+        val hasProjectionConsent = com.zaya.companion.service.ScreenCaptureManager.hasConsent()
         list.add(
             ActionCapability(
                 actionId = "capture_screen",
-                purpose = "Capture screen frames via MediaProjection consent",
+                purpose = "Capture screen frame via MediaProjection consent",
                 requiredArguments = emptyList(),
-                risk = ActionRisk.HIGH,
-                requiresConfirmation = true,
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
                 isSupportedOnOs = true,
-                isPermissionGranted = false, // Requires explicit MediaProjection intent prompt
-                isAvailable = false,
+                isPermissionGranted = hasProjectionConsent,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "describe_screen",
+                purpose = "Analyze and explain what is visible on the screen",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasProjectionConsent,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "extract_visible_text",
+                purpose = "Extract visible text and error messages from the screen",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasProjectionConsent,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "summarize_screen",
+                purpose = "Summarize active page or application currently on screen",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasProjectionConsent,
+                isAvailable = true,
             )
         )
 

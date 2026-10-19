@@ -256,6 +256,14 @@ def normalize_event(event) -> list[dict]:
             'battery': int(event.get('battery', 100)),
         }, timestamp=stamp)]
 
+    if name == 'screen.frame':
+        return [envelope('screen.frame', {
+            'width': int(event.get('width', 0)),
+            'height': int(event.get('height', 0)),
+            'prompt': clip(event.get('prompt'), LIMITS['detail']),
+            'jpeg': event.get('jpeg', ''),
+        }, timestamp=stamp)]
+
     return []
 
 
