@@ -240,33 +240,70 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
  * can only point at it, never grant it.
  */
 @Composable
-private fun CallPermissionCard() {
+fun CallPermissionCard(compact: Boolean = false, onConfigure: () -> Unit = {}) {
     val context = LocalContext.current
     var allowed by remember { mutableStateOf(canTakeOverScreen(context)) }
+    var overApps by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var notifications by remember { mutableStateOf(callNotificationsAllowed(context)) }
+    var ringing by remember { mutableStateOf(phoneRings(context)) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) allowed = canTakeOverScreen(context)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allowed = canTakeOverScreen(context)
+                overApps = Settings.canDrawOverlays(context)
+                notifications = callNotificationsAllowed(context)
+                ringing = phoneRings(context)
+            }
         }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    if (allowed) return
-    SectionCard(
-        title = "Let calls take over the screen",
-        subtitle = "Without this, a call arrives as a notification instead of a call screen",
-    ) {
-        Text(
-            text = "Zaya can still ring, but the call will not open full screen the way a " +
-                "real phone call does.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(10.dp))
-        Button(onClick = { openTakeOverSettings(context) }) { Text("Open settings") }
-        Spacer(Modifier.height(6.dp))
-        Note("Allow \"Full screen notifications\" for Zaya there.", ZayaAccent.amber)
+    if (allowed && overApps && notifications && ringing) return
+    if (compact) {
+        OutlinedButton(onClick = onConfigure, modifier = Modifier.fillMaxWidth()) {
+            Text("Finish setting up ringing calls")
+        }
+        return
     }
+    SectionCard(title = "Set up incoming calls",
+        subtitle = "Answer and decline on screen, with a repeating ringtone") {
+        if (!notifications) {
+            Text("Call notifications are off or quiet.")
+            Button(onClick = {
+                runCatching { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }
+            }) { Text("Allow call notifications") }
+        }
+        if (!allowed) {
+            Text("Allow full-screen calls to wake the locked screen.")
+            Button(onClick = { openTakeOverSettings(context) }) { Text("Allow full-screen calls") }
+        }
+        if (!overApps) {
+            Text("Allow Zaya to show the call screen above other apps.")
+            Button(onClick = {
+                runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}"))) }
+            }) { Text("Allow calls over other apps") }
+        }
+        if (!ringing) {
+            Text("Your phone is in silent or vibrate mode. Calls respect that setting.")
+            Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) } }) {
+                Text("Ringtone and volume")
+            }
+        }
+    }
+}
+
+private fun phoneRings(context: Context): Boolean =
+    context.getSystemService(android.media.AudioManager::class.java)?.ringerMode ==
+        android.media.AudioManager.RINGER_MODE_NORMAL
+
+private fun callNotificationsAllowed(context: Context): Boolean {
+    val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+    val channel = manager.getNotificationChannel(com.zaya.companion.service.Notifications.CHANNEL_CALLS)
+    return manager.areNotificationsEnabled() &&
+        (channel == null || channel.importance >= NotificationManager.IMPORTANCE_HIGH)
 }
 
 private fun canTakeOverScreen(context: Context): Boolean {

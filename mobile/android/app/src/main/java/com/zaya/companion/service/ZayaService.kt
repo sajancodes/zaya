@@ -107,6 +107,7 @@ class ZayaService : Service() {
                 ringingCallId = effect.call.callId
                 Ringer.start(this)
                 Notifications.post(this, Notifications.ID_CALL, Notifications.incomingCall(this, effect.call))
+                Notifications.showIncomingScreen(this, effect.call)
             }
 
             RuntimeEffect.StopRinging -> {

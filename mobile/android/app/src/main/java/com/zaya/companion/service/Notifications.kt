@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
+import androidx.core.app.Person
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.zaya.companion.MainActivity
@@ -137,7 +139,15 @@ object Notifications {
                 .putExtra(IncomingCallActivity.EXTRA_CALL_ID, call.callId),
             pendingFlags(),
         )
+        val answer = PendingIntent.getActivity(context, 32,
+            Intent(context, IncomingCallActivity::class.java)
+                .setAction(ZayaService.ACTION_ANSWER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(IncomingCallActivity.EXTRA_CALL_ID, call.callId), pendingFlags())
+        val decline = serviceAction(context, ZayaService.ACTION_DECLINE, 33, call.callId)
+        val caller = Person.Builder().setName("Zaya").setImportant(true).build()
         return NotificationCompat.Builder(context, CHANNEL_CALLS)
+            .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, answer))
             .setSmallIcon(R.drawable.ic_zaya_notification)
             .setContentTitle(title)
             .setContentText(body)
@@ -149,21 +159,17 @@ object Notifications {
             .setShowWhen(false)
             .setContentIntent(fullScreen)
             .setFullScreenIntent(fullScreen, true)
-            .addAction(
-                0,
-                context.getString(R.string.action_answer),
-                PendingIntent.getActivity(context, 32,
-                    Intent(context, IncomingCallActivity::class.java)
-                        .setAction(ZayaService.ACTION_ANSWER)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        .putExtra(IncomingCallActivity.EXTRA_CALL_ID, call.callId), pendingFlags()),
-            )
-            .addAction(
-                0,
-                context.getString(R.string.action_decline),
-                serviceAction(context, ZayaService.ACTION_DECLINE, 33, call.callId),
-            )
             .build()
+    }
+
+    /** A user-granted overlay exemption lets calls open above an unlocked app. */
+    fun showIncomingScreen(context: Context, call: CallInfo) {
+        if (!Settings.canDrawOverlays(context)) return
+        runCatching {
+            context.startActivity(Intent(context, IncomingCallActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(IncomingCallActivity.EXTRA_CALL_ID, call.callId))
+        }
     }
 
     /** Everything the laptop asked the owner to see, priority honoured. */

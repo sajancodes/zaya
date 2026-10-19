@@ -109,6 +109,20 @@ class PhoneCallFlowTests(unittest.TestCase):
         self.assertIsNone(self.calls.request_call(title='Automatic update'))
         self.assertIsNotNone(self.calls.request_call(title='Owner requested a test', requested=True))
 
+    def test_explicit_call_rings_even_when_model_labels_it_important_or_normal(self):
+        from actions.mobile_call import call_owner
+        events = []
+        with patch('actions.mobile_call.get_call_manager', return_value=self.calls), \
+                patch.object(self.bridge, 'emit', side_effect=events.append):
+            for urgency in ('important', 'normal'):
+                result = call_owner({'reason': 'Owner requested a test', 'requested': True, 'urgency': urgency})
+                self.assertEqual(result.data['delivery'], 'call')
+                self.assertEqual(events[-1]['type'], 'call.incoming')
+                self.assertEqual(self.calls.active().priority, 1)
+                self.calls.end(self.calls.active().call_id)
+            result = call_owner({'reason': 'Ordinary update', 'urgency': 'important'})
+            self.assertEqual(result.data['delivery'], 'notification')
+
     def test_missed_call_attempts_keep_hourly_spam_cap_without_creating_ghost_calls(self):
         now = [1000.0]
         self.calls._clock = lambda: now[0]

@@ -288,3 +288,34 @@ checkable without a device or an emulator.
 | A command stays "submitted" | The laptop was asleep; the phone resends in-flight commands after a reconnect and the laptop dedupes by request id, so it will not run twice. |
 | "This phone was removed from Zaya" | It was revoked on the laptop; pair again with a fresh key. |
 | Build fails on `compileSdk 36` | Install Android SDK Platform 36 and set `sdk.dir` in `mobile/android/local.properties`. |
+
+
+## Ringing calls and optional video (0.3.0)
+
+An explicit “call me” request always has ringing priority, even if the model
+calls its content “important” or “normal.” Automatic updates retain their quiet
+notification policy. Android uses CallStyle with Answer/Decline, a looping
+ringtone and vibration. Ringing respects silent/vibrate mode and Do Not Disturb.
+
+Install the updated APK, open Zaya → Settings and finish **Set up incoming calls**:
+allow call notifications, full-screen calls, and display over other apps. Android
+requires the owner to grant these special permissions. Full-screen intents wake
+the lock screen; the display-over-apps permission lets Zaya open the incoming call
+screen while another app is in front. Without it, Android can use a heads-up call
+notification. These permissions cannot be silently enabled on a real phone.
+
+During a connected call, tap **Video** and grant camera permission. Zaya receives
+bounded live JPEG samples at about one frame per second, using the front camera
+when available. The preview shows what is being sent. Tap **Video off** to stop.
+Camera capture also stops on hang-up, disconnect, minimizing, or leaving the call
+screen. Frames remain in memory, are never recorded to disk, and only the answering
+device may supply them. Laptop microphone input remains blocked throughout the
+call. Zaya continues to use her existing avatar and voice; this does not fabricate
+a remote human video feed.
+
+Validation for 0.3.0: 369 desktop tests completed (six skipped); 52 Android unit
+tests and debug APK assembly passed. An isolated Android emulator verified call
+presentation over the launcher and lock screen, Answer/Decline controls, camera
+capture and transport, and no further frames after Video off. The emulator used
+a local fixture server, not the owner's real provider session. Physical ringtone,
+OEM permission behavior and provider vision responses still require a phone test.

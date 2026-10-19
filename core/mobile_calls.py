@@ -149,6 +149,7 @@ class ZayaCall:
     direction: str = 'incoming'
     device_id: str = ''
     muted: bool = False
+    video_enabled: bool = False
 
     def payload(self) -> dict:
         return {
@@ -444,6 +445,10 @@ class MobileCallManager:
             priority = protocol.P1_IMMEDIATE
         if priority not in protocol.PRIORITIES:
             priority = protocol.P1_IMMEDIATE
+        if requested is True:
+            # "Call me" is an explicit ringing request even when the model
+            # labels its content important/normal rather than urgent.
+            priority = min(priority, protocol.P1_IMMEDIATE)
         if priority not in protocol.CALL_PRIORITIES:
             # P2 is a written notification; P3 is quiet activity that only shows
             # up in the phone's activity list.
@@ -656,6 +661,14 @@ class MobileCallManager:
                 return False
             call.muted = bool(muted)
         self.bridge().emit(protocol.envelope('system.call.mute', {'call_id': call_id, 'muted': call.muted}))
+        return True
+
+    def set_video(self, call_id, device_id, enabled):
+        with self._lock:
+            call = self._calls.get(call_id)
+            if call is None or call.state != ANSWERED or call.device_id != device_id:
+                return False
+            call.video_enabled = enabled is True
         return True
 
     def recent(self, limit: int = 20) -> list[dict]:

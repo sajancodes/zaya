@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
 import re
 import time
 from collections import deque
@@ -155,6 +156,8 @@ class MobileApi:
         self.audio_frames = 0
         self.bridge = get_bridge()
         self.calls = get_call_manager()
+        self.video_frames = queue.Queue(maxsize=1)
+        self._last_video = ('', 0.0)
         self.gate = get_gate()
         self._detach_sink = self.bridge.add_sink(self.push, name='mobile')
         self._started_at = time.time()
@@ -645,6 +648,10 @@ class MobileApi:
             return
         kind = str(data.get('type') or '')
 
+        if kind in {'call.video.toggle', 'call.video.frame'}:
+            self._call_video(session, data)
+            return
+
         if kind == 'ping':
             session.enqueue(protocol.envelope('pong', {'time': time.time()}))
             return
@@ -717,6 +724,50 @@ class MobileApi:
             'role': 'user', 'text': command.text, 'request_id': command.request_id,
             'source': 'phone',
         }))
+
+    def _call_video(self, session: MobileSession, data: dict) -> None:
+        """A single bounded camera frame, only from the answering phone's opt-in."""
+        call = self.calls.active()
+        if (call is None or call.state != 'answered' or call.call_id != data.get('call_id')
+                or call.device_id != session.device['device_id']):
+            return
+        if data.get('type') == 'call.video.toggle':
+            self.calls.set_video(call.call_id, call.device_id, data.get('enabled'))
+            self._last_video = ('', 0.0)
+            while not self.video_frames.empty():
+                try:
+                    self.video_frames.get_nowait()
+                except queue.Empty:
+                    break
+            return
+        if not call.video_enabled:
+            return
+        now = time.monotonic()
+        if self._last_video[0] == call.call_id and now - self._last_video[1] < .8:
+            return
+        import base64
+        import binascii
+        import io
+        from PIL import Image
+        encoded = data.get('jpeg')
+        if not isinstance(encoded, str) or len(encoded) > 240000:
+            return
+        try:
+            jpeg = base64.b64decode(encoded, validate=True)
+            if not jpeg.startswith(b'\xff\xd8') or len(jpeg) > 180000:
+                return
+            with Image.open(io.BytesIO(jpeg)) as image:
+                if image.format != 'JPEG' or image.width * image.height > 1024 * 1024:
+                    return
+                image.verify()
+        except (ValueError, OSError, binascii.Error, Image.DecompressionBombError):
+            return
+        self._last_video = (call.call_id, now)
+        try:
+            self.video_frames.get_nowait()
+        except queue.Empty:
+            pass
+        self.video_frames.put_nowait({'call_id': call.call_id, 'device_id': call.device_id, 'data': jpeg})
 
     def _call_control(self, session: MobileSession, kind: str, call_id: str, data: dict) -> None:
         calls = self.calls

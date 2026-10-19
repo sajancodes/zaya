@@ -2567,6 +2567,28 @@ class JarvisLive:
                 except asyncio.QueueFull:
                     pass
 
+    async def _relay_phone_video(self):
+        """Opt-in phone camera samples; no recording or laptop webcam access."""
+        import queue
+        while True:
+            await asyncio.sleep(.2)
+            mobile = self._dashboard.mobile()
+            if mobile is None:
+                continue
+            try:
+                frame = mobile.video_frames.get_nowait()
+            except queue.Empty:
+                continue
+            call = self._calls.active()
+            if (call is None or call.state != 'answered' or not call.video_enabled
+                    or call.call_id != frame['call_id'] or call.device_id != frame['device_id']):
+                continue
+            if self.session is not None:
+                try:
+                    await self.session.send_realtime_input(video=types.Blob(data=frame['data'], mime_type='image/jpeg'))
+                except Exception as error:
+                    print(f'[Phone video] Frame unavailable ({type(error).__name__}).')
+
     def _phone_call_active(self):
         bridge = getattr(self, '_bridge', None)
         return bridge is not None and bridge.call_active is True
@@ -2853,6 +2875,7 @@ class JarvisLive:
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())
+                        tg.create_task(self._relay_phone_video())
 
                     # Morning briefing — fires once per process launch (if enabled).
                     # Skipped in wake-word mode: it comes up asleep, and a briefing

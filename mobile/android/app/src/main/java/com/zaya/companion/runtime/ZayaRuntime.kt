@@ -6,6 +6,9 @@ import android.net.Uri
 import android.os.Environment
 import com.zaya.companion.audio.MicCapture
 import com.zaya.companion.audio.CallAudioRoute
+import com.zaya.companion.audio.PhoneCamera
+import android.graphics.Bitmap
+import android.util.Base64
 import com.zaya.companion.audio.SpeakerOutput
 import com.zaya.companion.core.Backoff
 import com.zaya.companion.core.ZayaBuild
@@ -126,6 +129,51 @@ class ZayaRuntime(
     private val callAudio = CallAudioRoute(context)
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
+    private val _videoEnabled = MutableStateFlow(false)
+    val videoEnabled: StateFlow<Boolean> = _videoEnabled.asStateFlow()
+    private val _videoPreview = MutableStateFlow<Bitmap?>(null)
+    val videoPreview: StateFlow<Bitmap?> = _videoPreview.asStateFlow()
+    private var phoneCamera: PhoneCamera? = null
+    private var videoCallId = ""
+
+    fun setVideoEnabled(enabled: Boolean) {
+        if (!enabled) {
+            _videoEnabled.value = false
+            phoneCamera?.stop()
+            phoneCamera = null
+            _videoPreview.value = null
+            if (videoCallId.isNotEmpty()) control?.send(JSONObject()
+                .put("type", "call.video.toggle").put("call_id", videoCallId).put("enabled", false).toString())
+            videoCallId = ""
+            return
+        }
+        val call = (model.call.value as? CallUiState.Active)?.call ?: return
+        if (_videoEnabled.value) return
+        if (context.checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            model.setVoice(note = "Allow the camera to turn video on")
+            return
+        }
+        val sent = control?.send(JSONObject().put("type", "call.video.toggle")
+            .put("call_id", call.callId).put("enabled", true).toString()) == true
+        if (!sent) { model.setVoice(note = "No link to Zaya for video"); return }
+        videoCallId = call.callId
+        _videoEnabled.value = true
+        model.setVoice(note = "")
+        phoneCamera = PhoneCamera(context,
+            onFrame = { jpeg, preview ->
+                if (_videoEnabled.value && videoCallId == call.callId && model.call.value is CallUiState.Active) {
+                    _videoPreview.value = preview
+                    val delivered = control?.send(JSONObject().put("type", "call.video.frame").put("call_id", call.callId)
+                        .put("jpeg", Base64.encodeToString(jpeg, Base64.NO_WRAP)).toString()) == true
+                    if (!delivered) {
+                        setVideoEnabled(false)
+                        model.setVoice(note = "Video link unavailable")
+                    }
+                }
+            },
+            onError = { message -> setVideoEnabled(false); model.setVoice(note = message) },
+        ).also { it.start() }
+    }
 
     fun setSpeakerphone(enabled: Boolean) {
         if (model.call.value !is CallUiState.Active) return
@@ -202,6 +250,7 @@ class ZayaRuntime(
     // ── connection loop ──────────────────────────────────────────────────────
 
     private suspend fun runConnection(pair: Pairing?) {
+        _pairing.value = pair
         if (pair == null) {
             // A revoked device lands here after its credential is dropped; keep
             // the explanation instead of flattening it into "not paired".
@@ -592,6 +641,7 @@ class ZayaRuntime(
     }
 
     private fun stopVoice() {
+        setVideoEnabled(false)
         micCapture?.stop()
         micCapture = null
         speaker?.stop()
