@@ -1,6 +1,8 @@
 import os
 import shutil
 import platform
+import heapq
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -491,7 +493,7 @@ def find_files(name: str = "", extension: str = "",
 
 
 def get_largest_files(path: str = "downloads", count: int = 10) -> str:
-    count = min(count, 50)  # maksimum 50
+    count = max(1, min(int(count), 50))
     try:
         search_path = _resolve_path(path)
         if not _is_safe_path(search_path):
@@ -499,23 +501,36 @@ def get_largest_files(path: str = "downloads", count: int = 10) -> str:
         if not search_path.exists():
             return f"Path not found: {path}"
 
-        files = []
-        for item in search_path.rglob("*"):
-            if item.is_file():
-                try:
-                    files.append((item.stat().st_size, item))
-                except Exception:
-                    continue
-
-        files.sort(reverse=True)
-        top = files[:count]
+        deadline, visited, partial = time.monotonic() + 5, 0, False
+        def candidates():
+            nonlocal visited, partial
+            for folder, directories, names in os.walk(search_path, followlinks=False):
+                directories[:] = [name for name in directories if not (Path(folder) / name).is_symlink()]
+                for name in names:
+                    visited += 1
+                    if visited > 100000 or time.monotonic() >= deadline:
+                        partial = True
+                        return
+                    item = Path(folder) / name
+                    try:
+                        if not item.is_symlink() and _is_safe_path(item):
+                            yield item.stat().st_size, str(item)
+                    except OSError:
+                        continue
+                if time.monotonic() >= deadline:
+                    partial = True
+                    return
+        top = heapq.nlargest(count, candidates())
 
         if not top:
-            return "No files found."
+            return "No files found within the scan limit; choose a smaller folder." if partial else "No files found."
 
         lines = [f"Top {len(top)} largest files in {search_path.name}/:"]
         for size, f in top:
+            f = Path(f)
             lines.append(f"  {_format_size(size):>10}  {f.name}  ({f.parent})")
+        if partial:
+            lines.append('Partial scan: the time or file limit was reached. Choose a smaller folder for complete results.')
 
         return "\n".join(lines)
 

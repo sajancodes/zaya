@@ -138,7 +138,20 @@ class TaskRuntime:
     def cached(self, request_id: str) -> ToolResult | None:
         with self._lock:
             row = self.db.execute('SELECT payload FROM tool_results WHERE request_id=?', (request_id,)).fetchone()
-        return ToolResult(**json.loads(row[0])) if row else None
+        if not row:
+            return None
+        try:
+            payload = json.loads(row[0])
+            if (not isinstance(payload, dict) or not isinstance(payload.get('summary'), str)
+                    or not isinstance(payload.get('data', {}), dict)
+                    or not isinstance(payload.get('evidence', []), list)):
+                raise ValueError('Invalid cached result')
+            return ToolResult(**payload)
+        except (ValueError, TypeError):
+            # A recorded request must not execute again just because its stored
+            # result is unreadable: the original action may already have run.
+            return ToolResult('failed', 'The recorded result is unreadable. This request was not repeated.',
+                              {'cached_result_invalid': True}, retryable=False)
 
     def remember(self, request_id: str, result: ToolResult) -> None:
         with self._lock, self.db:
