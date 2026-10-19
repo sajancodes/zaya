@@ -66,6 +66,29 @@ def _get_gemini_key() -> str | None:
     except Exception:
         return None
 
+
+def _dashboard_https_setting() -> str:
+    """`auto` (default) or `off`, from config/api_keys.json → `dashboard_https`.
+
+    The native phone companion reaches Zaya over the Tailscale tailnet, which is
+    already encrypted end to end, and it only permits plain HTTP for `*.ts.net`
+    names: a locally generated self-signed certificate can never be trusted by
+    the app, so HTTPS would lock the phone out. An owner who pairs a phone sets
+    this to `false` and the dashboard serves HTTP on its usual port — still
+    encrypted on the wire by the tailnet. `true`/`auto` keep the dashboard's
+    own TLS (and the `PORT+1` alias) exactly as before.
+    """
+    try:
+        import json as _json
+        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
+            value = _json.load(f).get("dashboard_https", "auto")
+    except Exception:
+        return "auto"
+    if isinstance(value, bool):
+        return "auto" if value else "off"
+    text = str(value).strip().lower()
+    return "off" if text in ("off", "false", "no", "0", "http") else "auto"
+
 _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]
 
@@ -523,6 +546,8 @@ class DashboardServer:
 
     @staticmethod
     def _ssl_enabled() -> bool:
+        if _dashboard_https_setting() == "off":
+            return False
         certs = BASE_DIR / "config" / "certs"
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
@@ -996,7 +1021,10 @@ class DashboardServer:
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
 
         # Generate the TLS pair on first run so no private key ships in the repo.
-        _ensure_certs()
+        # Skipped when the owner has asked for plain HTTP (see dashboard_https):
+        # regenerating it there would silently put the phone back behind TLS.
+        if _dashboard_https_setting() != "off":
+            _ensure_certs()
 
         use_ssl  = self._ssl_enabled()
         ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"

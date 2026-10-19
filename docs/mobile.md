@@ -22,12 +22,34 @@ state, emotion, tasks, alerts and calls all originate on the laptop.
 | Both devices on the same Tailscale tailnet | The documented transport; the dashboard serves port 8000 and `*.ts.net` is the only cleartext-allowed host besides localhost |
 | JDK 17+ and the Android SDK, only if you build the APK yourself | The repo ships sources, not a signed release APK |
 
-The laptop's dashboard serves plain HTTP on its usual port, so the address to type
-is `http://<machine>.your-tailnet.ts.net:8000`. Cleartext is allowed only for
-`*.ts.net`, `localhost`, `127.0.0.1` and `::1`: a Tailscale name is safe because
-the tailnet itself is WireGuard-encrypted, while any other host must be reached
-over `https://`. See
+The phone reaches Zaya over the tailnet, so the address is
+`http://<machine>.your-tailnet.ts.net:8000`: cleartext inside the tailnet, which
+is already WireGuard-encrypted. Cleartext is allowed only for `*.ts.net`,
+`localhost`, `127.0.0.1` and `::1`; any other host must be reached over
+`https://`. See
 `mobile/android/app/src/main/res/xml/network_security_config.xml`.
+
+### If the laptop serves HTTPS
+
+Zaya's dashboard has its own TLS mode: on first run it generates a self-signed
+certificate, then serves HTTPS on 8000 plus an alias on 8001. The app cannot trust
+a self-signed certificate, so the phone needs the dashboard to speak plain HTTP
+inside the tailnet. Add one line to `config/api_keys.json` and restart Zaya:
+
+```json
+"dashboard_https": false
+```
+
+Port 8000 then serves HTTP and the 8001 alias is not started; the browser
+dashboard keeps working (type the scheme explicitly, e.g. `http://…:8000`, since
+browsers upgrade a bare host to HTTPS). Leave the setting out — or set it to
+`true` — to keep the dashboard's own TLS exactly as before.
+
+Keeping HTTPS *and* the phone is possible only with a real certificate: run
+`tailscale cert <machine>.your-tailnet.ts.net` (enable HTTPS certificates in the
+Tailscale admin console first), then point Zaya's dashboard at the issued pair.
+Zaya's own certificate is local, self-signed and regenerates on demand, so it can
+never satisfy the app on its own.
 
 ## Pairing (once per phone)
 
@@ -190,6 +212,8 @@ checkable without a device or an emulator.
 | Settings says "not paired" after a reboot | Expected until you pair once; after pairing the credential is in the Keystore and survives restarts. |
 | "Zaya is unreachable — retrying" | The laptop's dashboard must be running and both devices on the tailnet. Retry pacing is exponential (1 s → 30 s) with jitter, so a short outage heals by itself. |
 | Pairing fails with 401 | The key expires after ten minutes and works exactly once — press **Remote Control** again. |
+| The dashboard opens in a browser but the phone says it cannot reach the laptop | Check the scheme: a self-signed HTTPS dashboard cannot be paired with. Set `"dashboard_https": false` in `config/api_keys.json`, restart Zaya, and use `http://<machine>.ts.net:8000`. |
+| The address does not resolve on the phone | Tailscale must be installed, signed in to the same account and toggled on there; `*.ts.net` names resolve only inside the tailnet (MagicDNS). |
 | Connected but silent on a call | Check the phone's media volume and that the call is *answered* (the microphone only opens then). Output routing is on the Settings screen. |
 | Zaya's voice comes from the laptop, not the phone | Output route is `desktop`; switch to `Phone` or `Both`, or answer a call (a call routes to the phone automatically). |
 | A command stays "submitted" | The laptop was asleep; the phone resends in-flight commands after a reconnect and the laptop dedupes by request id, so it will not run twice. |
