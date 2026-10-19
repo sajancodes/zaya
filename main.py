@@ -1268,7 +1268,8 @@ class JarvisLive:
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
-        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper', 'coding_job'}
+        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
+                or (fc.name == 'coding_job' and dict(fc.args or {}).get('action') in {'start', 'continue'})
                 or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
                     {'stage', 'commit', 'push', 'pull', 'checkout', 'create_branch'})):
             from core.session_activity import activity
@@ -1565,6 +1566,8 @@ class JarvisLive:
                     except Exception as error:
                         if reminder_notice:
                             reminders.voice_failed(item, error)
+                        elif coding:
+                            get_jobs().notice_failed(item)
                         if time.monotonic() - last_voice_error > 30:
                             self.ui.write_log(f"ERR: Notification speech unavailable ({type(error).__name__}); notification retained for retry.")
                             last_voice_error = time.monotonic()
@@ -1575,6 +1578,10 @@ class JarvisLive:
 
     async def _deliver_owner_notice(self, item, *, coding=False, mode=''):
         from core.notification_voice import synthesize_notice
+        if coding and item.get('id'):
+            from core.coding_jobs import get_jobs
+            if not get_jobs().notice_current(item):
+                return False
         epoch = getattr(self, '_owner_epoch', 0)
         text = item.get('announcement', item['summary'])
         kwargs = {'mode': mode} if mode else {'coding': True} if coding else {}
@@ -1582,6 +1589,8 @@ class JarvisLive:
         # Owner speech wins if it arrived while synthesis ran. The notice is
         # acknowledged by its queue only after it actually reaches playback.
         if not self._can_announce(epoch, allow_sleep=mode == 'reminder'):
+            return False
+        if coding and item.get('id') and not get_jobs().notice_current(item):
             return False
         if mode == 'reminder':
             from core.reminders import get_reminders
@@ -1595,7 +1604,12 @@ class JarvisLive:
         for offset in range(0, len(audio), 2400):
             self.audio_in_queue.put_nowait(audio[offset:offset + 2400])
         self._turn_done_event.set()
-        await self._conversation_write('append', 'assistant', transcript or item['summary'])
+        # Audio is already queued. An archive failure must never make the
+        # caller retry a spoken notification (ConversationStore uses model).
+        try:
+            await self._conversation_write('append', 'model', transcript or item['summary'])
+        except Exception as error:
+            self.ui.write_log(f'ERR: Notification archive failed ({type(error).__name__}); audio was already queued and will not be repeated.')
         return True
 
     def _voice_mark(self, stage, **fields):

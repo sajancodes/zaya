@@ -14,9 +14,11 @@ import subprocess
 import time
 
 import psutil
+from core.tool_result import ToolResult
 
 
 _ALIASES = {
+    "open code": "opencode.exe",
     "task manager": "taskmgr.exe",
     "taskmanager": "taskmgr.exe",
     "notepad": "notepad.exe",
@@ -143,18 +145,29 @@ def _terminate_portable(processes):
     return errors
 
 
-def terminate_app(parameters: dict = None, **_kwargs) -> str:
+def terminate_app(parameters: dict = None, **_kwargs) -> ToolResult:
     from core.execution_policy import require_owner
     require_owner()
 
     params = parameters or {}
     app = _clean(str(params.get("app") or params.get("name") or ""))
     if not app:
-        return "No application name was provided."
+        return ToolResult('failed', 'No application name was provided.')
+
+    coding_state = {}
+    if _stem(_target_name(app)) in {'opencode', 'opencode-cli'}:
+        from core.coding_jobs import get_jobs
+        jobs = get_jobs()
+        jobs.stop()  # Invalidate queued speech and cancel planning as well as the child.
+        coding_state = jobs.execution_status()
 
     _target, matches = _find_matches(app)
     if not matches:
-        return f"{app} is not running."
+        pending = coding_state.get('worker_running', False)
+        return ToolResult('partial' if pending else 'success',
+                          f'{app} has no matching running app process.' +
+                          (' The coding worker cancellation is still pending.' if pending else ''),
+                          coding_state, [{'matched_processes': 0, **coding_state}], side_effect=bool(coding_state))
 
     chosen_pids = {p.pid for p in matches}
     if platform.system() == "Windows":
@@ -171,10 +184,15 @@ def terminate_app(parameters: dict = None, **_kwargs) -> str:
 
     if alive:
         detail = f"; {'; '.join(errors[:2])}" if errors else ""
-        return (f"Tried to terminate {app}, but {len(alive)} selected process(es) "
-                f"are still running{detail}.")
+        return ToolResult('partial', f'Tried to terminate {app}, but {len(alive)} selected process(es) '
+                          f'are still running{detail}.', {'remaining_pids': sorted(alive), **coding_state},
+                          [{'selected_pids': sorted(chosen_pids), 'remaining_pids': sorted(alive)}], side_effect=True)
 
-    return f"Closed {app} from its process tree ({len(chosen_pids)} process(es) terminated)."
+    pending = coding_state.get('worker_running', False)
+    return ToolResult('partial' if pending else 'success',
+                      f'Closed {app} from its process tree ({len(chosen_pids)} process(es) terminated).' +
+                      (' Coding worker cancellation is still pending.' if pending else ''), coding_state,
+                      [{'selected_pids': sorted(chosen_pids), 'remaining_pids': []}], side_effect=True)
 
 
 # computer_settings historically mapped close_app to Alt+F4.  Keep close_window

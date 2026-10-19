@@ -115,7 +115,8 @@ class CodingSupervisionTests(unittest.TestCase):
         self.assertEqual(len(job.passes), 2)
         self.assertEqual(job.observations[-1]['exit_code'], 0)
         self.assertEqual(self.runtime.get(job.runtime_id).state, 'completed')
-        self.assertTrue(any('focused follow-up' in item['summary'] for item in self.jobs._notices))
+        self.assertEqual(len(self.jobs._notices), 1)
+        self.assertEqual(self.jobs._notices[0]['kind'], 'complete')
 
     def test_review_loop_stops_at_budget_and_blockers_never_relaunch(self):
         self.supervisor.review.return_value = {'decision': 'continue', 'requirements': [1], 'checks': []}

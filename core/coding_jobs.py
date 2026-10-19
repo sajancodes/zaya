@@ -63,7 +63,7 @@ class CodingJob:
 
 
 class CodingJobs:
-    def __init__(self, store_path=None, *, runtime=None, supervisor=None):
+    def __init__(self, store_path=None, *, runtime=None, supervisor=None, clock=time.monotonic):
         self._path = Path(store_path) if store_path else STORE_PATH
         self._runtime = runtime
         self._supervisor = supervisor or Supervisor()
@@ -73,7 +73,12 @@ class CodingJobs:
         self._thread = None
         self._stop = threading.Event()
         self._closed = False
+        self._clock = clock
+        self.updates_enabled = True
+        self.update_interval = 150
         self._notices = deque(maxlen=16)
+        self._notice_seen = set()
+        self._notice_retry_at = 0.0
         self._last_notice = 0.0
         self._load()
 
@@ -86,6 +91,10 @@ class CodingJobs:
     def _load(self):
         try:
             payload = json.loads(self._path.read_text(encoding='utf-8'))
+            if isinstance(payload, dict):
+                settings = payload.get('updates', {})
+                self.updates_enabled = settings.get('enabled') is not False
+                self.update_interval = max(120, min(180, int(settings.get('interval_seconds', 150))))
             rows = payload.get('jobs', []) if isinstance(payload, dict) else []
             for row in rows if isinstance(rows, list) else []:
                 if not isinstance(row, dict):
@@ -105,7 +114,8 @@ class CodingJobs:
         with self._lock:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             temp = self._path.with_suffix('.tmp')
-            temp.write_text(json.dumps({'version': 1, 'jobs': [j.public() for j in self._jobs.values()]}), encoding='utf-8')
+            temp.write_text(json.dumps({'version': 1, 'updates': self.update_settings(),
+                                        'jobs': [j.public() for j in self._jobs.values()]}), encoding='utf-8')
             temp.replace(self._path)
 
     def all(self):
@@ -118,17 +128,54 @@ class CodingJobs:
     def latest(self):
         return next(iter(self.all()), None)
 
-    def _notice(self, text):
+    def update_settings(self):
+        return {'enabled': self.updates_enabled, 'interval_seconds': self.update_interval}
+
+    def configure_updates(self, *, enabled=None, interval_seconds=None):
+        require_owner()
+        if interval_seconds is not None and not 120 <= float(interval_seconds) <= 180:
+            raise ValueError('Coding updates must be two to three minutes apart.')
         with self._lock:
-            if not self._closed:
-                self._notices.append({'id': uuid.uuid4().hex, 'summary': text, 'at': time.monotonic()})
+            if enabled is not None:
+                self.updates_enabled = bool(enabled)
+            if interval_seconds is not None:
+                self.update_interval = int(interval_seconds)
+            self._notices.clear()
+            self._last_notice = self._clock()
+            self._save()
+        return self.update_settings()
+
+    def _notice(self, text, *, kind='progress'):
+        with self._lock:
+            if self._closed or self._stop.is_set() or not self.updates_enabled or text in self._notice_seen:
+                return
+            self._notice_seen.add(text)
+            # Keep the newest development, not a backlog of narration beats.
+            self._notices.clear()
+            self._notices.append({'id': uuid.uuid4().hex, 'summary': text, 'kind': kind,
+                                  'at': self._clock(), 'attempts': 0})
+
+    def notice_current(self, item):
+        with self._lock:
+            return (not self._closed and not self._stop.is_set() and self.updates_enabled
+                    and any(row['id'] == item.get('id') for row in self._notices))
+
+    def notice_failed(self, item):
+        with self._lock:
+            for row in list(self._notices):
+                if row['id'] == item.get('id'):
+                    row['attempts'] += 1
+                    self._notice_retry_at = self._clock() + self.update_interval
+                    if row['attempts'] >= 2:
+                        self._notices.remove(row)
 
     def next_notice(self):
         with self._lock:
-            now = time.monotonic()
-            while self._notices and now - self._notices[0]['at'] > 180:
+            now = self._clock()
+            while self._notices and now - self._notices[0]['at'] > 600:
                 self._notices.popleft()
-            if not self._notices or now - self._last_notice < 5:
+            if (not self._notices or not self.updates_enabled or self._stop.is_set()
+                    or now - self._last_notice < self.update_interval or now < self._notice_retry_at):
                 return None
             return dict(self._notices[0])
 
@@ -136,7 +183,14 @@ class CodingJobs:
         with self._lock:
             if self._notices and self._notices[0]['id'] == item['id']:
                 self._notices.popleft()
-                self._last_notice = time.monotonic()
+                self._last_notice = self._clock()
+
+    def execution_status(self):
+        with self._lock:
+            running = self._process is not None and self._process.poll() is None
+            return {'process_running': running, 'pid': self._process.pid if running else None,
+                    'worker_running': self._thread is not None and self._thread.is_alive(),
+                    'cancellation_requested': self._stop.is_set(), 'updates': self.update_settings()}
 
     def _available(self):
         if self._closed:
@@ -151,6 +205,9 @@ class CodingJobs:
         with self._lock:
             self._available()
             project = prepare_workspace(str(project), purpose=purpose, create=create_project)
+            # "auto"/"default" mean installed CLI settings, not model IDs.
+            agent = '' if agent.strip().lower() in {'auto', 'default'} else agent.strip()
+            model = '' if model.strip().lower() in {'auto', 'default'} else model.strip()
             job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model, purpose=purpose)
             self._jobs[job.id] = job
             self._begin(job)
@@ -177,6 +234,9 @@ class CodingJobs:
     def _begin(self, job):
         self._stop.clear()
         self._notices.clear()
+        self._notice_seen.clear()
+        self._last_notice = self._clock()
+        self._notice_retry_at = 0.0
         job.phase, job.response, job.error, job.exit_code = 'planning', '', '', None
         job.pass_number, job.passes, job.observations = 0, [], []
         job.requirements, job.checks, job.review, job.prompt = [], [], '', ''
@@ -200,8 +260,6 @@ class CodingJobs:
     def _run(self, job):
         narrator, tally = Narrator(Path(job.project).name), Tally()
         try:
-            self._notice("I'm preparing your software setup request for OpenCode, sir." if job.purpose == 'setup'
-                         else "I'm turning your request into a clear coding brief, sir.")
             brief = self._supervisor.prepare(job.goal, job.project)
             if self._stop.is_set():
                 return
@@ -224,12 +282,11 @@ class CodingJobs:
                 if job.exit_code != 0 or job.error or not job.response:
                     job.phase = 'failed'
                     job.error = job.error or 'OpenCode ended without a usable response.'
-                    self._notice("I couldn't finish this coding pass. I've kept the response so I can check it.")
+                    self._notice("OpenCode reported a failure. I have the error details ready.", kind='error')
                     break
                 job.phase, job.progress = 'reviewing', 'checking the result against your request'
                 self.runtime.transition(job.runtime_id, 'verifying', active_step=f'review pass {number}')
                 self._save()
-                self._notice("I'm reviewing the result against your request now.")
                 review = self._supervisor.review(job.goal, brief, job.response, job.observations)
                 if self._stop.is_set():
                     break
@@ -237,7 +294,7 @@ class CodingJobs:
                 job.passes[-1]['review'] = review
                 if job.review == 'complete':
                     job.phase, job.progress = 'completed', 'reviewed against the request brief'
-                    self._notice("I've reviewed the result against your request, sir. I have the changes and check results ready.")
+                    self._notice("OpenCode returned a result that passed the brief review. I have the reported changes and check results ready.", kind='complete')
                     break
                 if job.review != 'continue' or number == MAX_PASSES:
                     job.phase = 'waiting_owner'
@@ -245,16 +302,15 @@ class CodingJobs:
                     job.error = ('The automatic review limit was reached; I have kept the remaining work.'
                                  if job.review == 'continue' else
                                  'The review needs owner input or could not be completed reliably.')
-                    self._notice("I've kept the result, sir. I need your input before taking this further.")
+                    self._notice("I've kept the result, sir. I need your input before taking this further.", kind='blocked')
                     break
                 if not job.session_id:
                     raise RuntimeError('OpenCode returned no session ID for a safe follow-up.')
                 job.prompt = followup_prompt(brief, review)
-                self._notice("I found work still missing. I'm sending a focused follow-up in the same session.")
         except Exception as error:
             job.phase, job.error = 'failed', audit.redact(str(error))[:2000]
             job.progress = 'could not finish'
-            self._notice("I couldn't finish the coding request. I've kept the session details so I can check it.")
+            self._notice("The OpenCode request failed. I have the error details ready.", kind='error')
         finally:
             with self._lock:
                 if self._stop.is_set():
@@ -301,9 +357,6 @@ class CodingJobs:
                 try:
                     kind, line = messages.get(timeout=.2)
                 except queue.Empty:
-                    beat = narrator.heartbeat()
-                    if beat and not self._stop.is_set():
-                        self._notice(beat)
                     continue
                 if line is None:
                     closed += 1
@@ -329,7 +382,10 @@ class CodingJobs:
                 job.changed_files = list(tally.changed)
                 for beat in narrator.feed(event):
                     job.progress = narrator.progress
-                    self._notice(beat)
+                    # Search, read, planning and heartbeat ticks stay silent.
+                    if (event.failed or (event.kind == 'tool' and event.status == 'completed'
+                            and (event.is_change or (event.tool in {'shell', 'bash'} and narrator.tests is not None)))):
+                        self._notice(beat)
                 job.updated_at = time.time()
                 if time.monotonic() - last_save > 1:
                     self._save()
@@ -350,14 +406,14 @@ class CodingJobs:
     def stop(self):
         require_owner()
         with self._lock:
-            job = self.active()
-            if job is None:
-                raise ValueError('There is no coding work to stop.')
             self._stop.set()
             self._notices.clear()
+            job = self.active()
             process = self._process
         if process is not None:
             terminate_tree(process)
+        if self._thread is not None:
+            self._thread.join(timeout=1)
         return job
 
     def close(self):

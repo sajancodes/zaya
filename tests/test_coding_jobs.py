@@ -94,9 +94,9 @@ class CodingJobsTests(unittest.TestCase):
         self.assertEqual(job.changed_files, ['app.py'])
         self.assertEqual(self.runtime.get(job.runtime_id).state, 'completed')
         notices = [item['summary'] for item in self.jobs._notices]
-        self.assertTrue(any("got the file" in item for item in notices))
-        self.assertTrue(any('found an issue' in item for item in notices))
-        self.assertTrue(any('making the changes' in item for item in notices))
+        self.assertEqual(len(notices), 1)  # Coalesced actual outcome, no startup narration backlog.
+        self.assertEqual(self.jobs._notices[0]['kind'], 'complete')
+        self.assertIsNone(self.jobs.next_notice())  # Wait the 150-second update interval.
         self.assertFalse(any('Tests were not run' in item for item in notices))
         reopened = CodingJobs(self.root / 'jobs.json', runtime=self.runtime)
         self.assertEqual(reopened.latest().response, job.response)
@@ -154,7 +154,7 @@ class CodingJobsTests(unittest.TestCase):
         self.jobs.delivered(item)
         self.jobs._notice("I'm fixing it now.")
         self.assertIsNone(self.jobs.next_notice())
-        self.jobs._last_notice -= 6
+        self.jobs._last_notice -= 151
         self.assertIn('fixing', self.jobs.next_notice()['summary'])
 
     def test_stop_and_app_close_terminate_real_hidden_process_and_leave_session(self):
