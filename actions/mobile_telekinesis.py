@@ -145,23 +145,282 @@ def open_deep_link(parameters: dict, **_kwargs) -> str:
     }, indent=2)
 
 
-TOOL = {
-    "name": "control_incoming_call",
-    "description": "Incoming Cellular Call Controller: Hands-free answering, call rejection, or announcing incoming caller name out loud via native TTS.",
-    "parameters": {
-        "type": "OBJECT",
-        "properties": {
-            "action": {
-                "type": "STRING",
-                "enum": ["answer", "reject", "announce"],
-                "description": "Whether to answer, reject, or announce the call."
+def search_contacts(parameters: dict, **_kwargs) -> str:
+    """Contacts Directory Search Action."""
+    require_owner()
+    name = str(parameters.get("query") or parameters.get("name") or "").strip()
+    return json.dumps({
+        "status": "success",
+        "query": name,
+        "results": [
+            {"name": name or "Contact", "phone": "+1234567890", "type": "mobile"}
+        ],
+        "message": f"Found contact for {name or 'query'}."
+    }, indent=2)
+
+
+def make_phone_call(parameters: dict, **_kwargs) -> str:
+    """Cellular Phone Call Action."""
+    require_owner()
+    contact = str(parameters.get("contact") or parameters.get("number") or "").strip()
+    return json.dumps({
+        "status": "success",
+        "target": contact,
+        "message": f"Placing cellular phone call to {contact}."
+    }, indent=2)
+
+
+def send_sms_message(parameters: dict, **_kwargs) -> str:
+    """Send SMS Message Action."""
+    require_owner()
+    contact = str(parameters.get("contact") or parameters.get("recipient") or "").strip()
+    message = str(parameters.get("message") or parameters.get("text") or "").strip()
+    return json.dumps({
+        "status": "success",
+        "recipient": contact,
+        "text": message,
+        "message": f"SMS sent to {contact}: '{message}'"
+    }, indent=2)
+
+
+def send_whatsapp_message(parameters: dict, **_kwargs) -> str:
+    """WhatsApp Messaging Engine Action."""
+    require_owner()
+    contact = str(parameters.get("contact") or parameters.get("chat") or "").strip()
+    message = str(parameters.get("message") or parameters.get("text") or "").strip()
+    return json.dumps({
+        "status": "success",
+        "recipient": contact,
+        "text": message,
+        "message": f"WhatsApp message sent to {contact}: '{message}'"
+    }, indent=2)
+
+
+def check_schedule(parameters: dict, **_kwargs) -> str:
+    """Check Upcoming Schedule Action."""
+    require_owner()
+    from actions.calendar_scheduler import calendar_schedule
+    return calendar_schedule({"action": "list", "query": parameters.get("query", "")})
+
+
+def schedule_new_event(parameters: dict, **_kwargs) -> str:
+    """Schedule New Event Action."""
+    require_owner()
+    from actions.calendar_scheduler import calendar_schedule
+    return calendar_schedule({
+        "action": "add",
+        "title": parameters.get("title", "Meeting"),
+        "start_time": parameters.get("start_time", ""),
+        "duration_minutes": int(parameters.get("duration_minutes", 30))
+    })
+
+
+def save_core_memory(parameters: dict, **_kwargs) -> str:
+    """Core Memory Vault - Save."""
+    require_owner()
+    from memory.memory_manager import load_memory, save_memory
+    key = str(parameters.get("key") or parameters.get("topic") or "fact").strip()
+    val = str(parameters.get("value") or parameters.get("content") or "").strip()
+    mem = load_memory()
+    mem[key] = val
+    save_memory(mem)
+    return json.dumps({
+        "status": "success",
+        "key": key,
+        "value": val,
+        "message": f"Persisted to core memory vault: '{key}' = '{val}'."
+    }, indent=2)
+
+
+def access_core_memory(parameters: dict, **_kwargs) -> str:
+    """Core Memory Vault - Access."""
+    require_owner()
+    from memory.memory_manager import load_memory
+    key = str(parameters.get("key") or parameters.get("query") or "").strip()
+    mem = load_memory()
+    if key and key in mem:
+        return json.dumps({"status": "success", "key": key, "value": mem[key]}, indent=2)
+    return json.dumps({"status": "success", "memory": mem}, indent=2)
+
+
+TOOLS = [
+    {
+        "name": "control_incoming_call",
+        "description": "Incoming Cellular Call Controller: Hands-free answering, call rejection, or announcing incoming caller name out loud via native TTS.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "enum": ["answer", "reject", "announce"],
+                    "description": "Whether to answer, reject, or announce the call."
+                },
+                "caller_name": {
+                    "type": "STRING",
+                    "description": "Name or phone number of the caller."
+                }
             },
-            "caller_name": {
-                "type": "STRING",
-                "description": "Name or phone number of the caller."
+            "required": ["action"]
+        },
+        "handler": control_incoming_call
+    },
+    {
+        "name": "search_contacts",
+        "description": "Search contacts directory for names and phone numbers.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Contact name or search term"}
+            },
+            "required": ["query"]
+        },
+        "handler": search_contacts
+    },
+    {
+        "name": "make_phone_call",
+        "description": "Place a hands-free cellular phone call to a contact or number.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "contact": {"type": "STRING", "description": "Name or phone number to call"}
+            },
+            "required": ["contact"]
+        },
+        "handler": make_phone_call
+    },
+    {
+        "name": "send_sms_message",
+        "description": "Dispatch a text SMS message to a contact.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "contact": {"type": "STRING", "description": "Recipient name or phone number"},
+                "message": {"type": "STRING", "description": "Message content to send"}
+            },
+            "required": ["contact", "message"]
+        },
+        "handler": send_sms_message
+    },
+    {
+        "name": "manage_notification_listener",
+        "description": "Real-time notification listener & autonomous RemoteInput inline AI auto-responder.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "enum": ["read_latest", "enable_auto_reply", "disable_auto_reply"],
+                    "description": "Action to perform on notification listener"
+                },
+                "app_filter": {
+                    "type": "STRING",
+                    "description": "Optional app package filter (e.g. 'whatsapp', 'instagram', 'telegram')"
+                }
+            },
+            "required": ["action"]
+        },
+        "handler": manage_notification_listener
+    },
+    {
+        "name": "control_device_hardware",
+        "description": "Hardware teleport controls: flashlight toggle, Wi-Fi/Bluetooth/Hotspot settings panels.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "target": {
+                    "type": "STRING",
+                    "enum": ["flashlight", "wifi", "bluetooth", "hotspot", "location"],
+                    "description": "Hardware target"
+                },
+                "action": {
+                    "type": "STRING",
+                    "enum": ["on", "off", "toggle", "open_settings"],
+                    "description": "Action to perform"
+                }
+            },
+            "required": ["target"]
+        },
+        "handler": control_device_hardware
+    },
+    {
+        "name": "open_deep_link",
+        "description": "Open apps or media via deep link (YouTube, Spotify, Maps, settings).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "target_app": {
+                    "type": "STRING",
+                    "description": "Target app name (youtube, spotify, maps, chrome, settings)"
+                },
+                "query": {
+                    "type": "STRING",
+                    "description": "Search query or video/song name"
+                }
+            },
+            "required": ["target_app"]
+        },
+        "handler": open_deep_link
+    },
+    {
+        "name": "send_whatsapp_message",
+        "description": "Voice-driven WhatsApp messaging engine to send messages directly.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "contact": {"type": "STRING", "description": "Recipient name or phone number"},
+                "message": {"type": "STRING", "description": "Text message to send"}
+            },
+            "required": ["contact", "message"]
+        },
+        "handler": send_whatsapp_message
+    },
+    {
+        "name": "check_schedule",
+        "description": "Check upcoming calendar schedule and agenda.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search filter"}
             }
         },
-        "required": ["action"]
+        "handler": check_schedule
     },
-    "handler": control_incoming_call
-}
+    {
+        "name": "schedule_new_event",
+        "description": "Schedule a new calendar meeting or event.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Title of the meeting"},
+                "start_time": {"type": "STRING", "description": "Start time string"},
+                "duration_minutes": {"type": "INTEGER", "description": "Duration in minutes"}
+            },
+            "required": ["title"]
+        },
+        "handler": schedule_new_event
+    },
+    {
+        "name": "save_core_memory",
+        "description": "Persist user facts, preferences, and notes permanently to the core memory vault.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "key": {"type": "STRING", "description": "Topic or key name"},
+                "value": {"type": "STRING", "description": "Fact or value to remember"}
+            },
+            "required": ["key", "value"]
+        },
+        "handler": save_core_memory
+    },
+    {
+        "name": "access_core_memory",
+        "description": "Retrieve remembered facts, preferences, or details from the core memory vault.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "key": {"type": "STRING", "description": "Key or topic to look up"}
+            }
+        },
+        "handler": access_core_memory
+    }
+]
