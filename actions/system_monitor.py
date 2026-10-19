@@ -165,9 +165,18 @@ class SystemMonitor:
         if cpu >= self.thresholds["cpu"]:
             self._cpu_streak += 1
             if self._cpu_streak >= _CPU_STREAK and self._can_alert("cpu"):
+                top_proc_msg = ""
+                try:
+                    from core.diagnostics import diagnose_bottleneck
+                    diag = diagnose_bottleneck(top_n=1)
+                    if diag.status == "success" and diag.data.get("top_cpu_processes"):
+                        top_p = diag.data["top_cpu_processes"][0]
+                        top_proc_msg = f" Offending process: {top_p['label']} ({top_p['cpu_percent']}% CPU)."
+                except Exception:
+                    pass
                 alerts.append(
                     f"[SYSTEM_ALERT] CPU usage has been critically high ({cpu:.0f}%) "
-                    "for several seconds. Warn the user in their language and suggest "
+                    f"for several seconds.{top_proc_msg} Warn the user in their language and suggest "
                     "closing heavy applications."
                 )
                 self._record("cpu")
@@ -176,8 +185,17 @@ class SystemMonitor:
             self._cpu_streak = 0
 
         if ram >= self.thresholds["ram"] and self._can_alert("ram"):
+            top_ram_msg = ""
+            try:
+                from core.diagnostics import diagnose_bottleneck
+                diag = diagnose_bottleneck(top_n=1)
+                if diag.status == "success" and diag.data.get("top_memory_processes"):
+                    top_m = diag.data["top_memory_processes"][0]
+                    top_ram_msg = f" Offending process: {top_m['label']} ({top_m['memory_percent']}% RAM)."
+            except Exception:
+                pass
             alerts.append(
-                f"[SYSTEM_ALERT] RAM is at {ram:.0f}% — nearly exhausted. "
+                f"[SYSTEM_ALERT] RAM is at {ram:.0f}% — nearly exhausted.{top_ram_msg} "
                 "Warn the user in their language and suggest freeing memory."
             )
             self._record("ram")

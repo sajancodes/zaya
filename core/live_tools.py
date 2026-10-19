@@ -1,6 +1,6 @@
 """Live session tool registry, declarations, and schema compaction.
 
-Provides tool declarations with schema compaction to minimize token usage
+Provides tool declarations with schema compaction to minimize serialized schema characters
 and latency on the Gemini Live API without losing structural parameter information.
 """
 from __future__ import annotations
