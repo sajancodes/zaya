@@ -1056,14 +1056,29 @@ class ZayaRuntime(
         val args = payload.optJSONObject("arguments") ?: JSONObject()
         val action: com.zaya.companion.action.AndroidAction = when (actionId) {
             "set_flashlight" -> com.zaya.companion.action.AndroidAction.SetFlashlight(args.optBoolean("enabled", true))
-            "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(args.optString("setting", "settings"))
+            "get_flashlight_state" -> com.zaya.companion.action.AndroidAction.GetFlashlightState
+            "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(
+                setting = args.optString("setting", "settings"),
+                packageName = args.optString("package_name", "").ifBlank { null }
+            )
             "control_media" -> com.zaya.companion.action.AndroidAction.ControlMedia(args.optString("action", "toggle"))
+            "get_media_status" -> com.zaya.companion.action.AndroidAction.GetMediaStatus
             "launch_app" -> com.zaya.companion.action.AndroidAction.LaunchApp(args.optString("name", ""))
             "lookup_contact" -> com.zaya.companion.action.AndroidAction.LookUpContact(args.optString("query", ""))
+            "initiate_call" -> com.zaya.companion.action.AndroidAction.InitiateCall(
+                queryOrNumber = args.optString("query", args.optString("phone_number", "")),
+                directCall = args.optBoolean("direct_call", false),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "get_incoming_call_state" -> com.zaya.companion.action.AndroidAction.GetIncomingCallState
+            "set_caller_announcement" -> com.zaya.companion.action.AndroidAction.SetCallerAnnouncement(
+                enabled = args.optBoolean("enabled", true)
+            )
             "compose_sms" -> com.zaya.companion.action.AndroidAction.ComposeSms(
                 recipient = args.optString("recipient", ""),
                 message = args.optString("message", ""),
-                confirmed = args.optBoolean("confirmed", false)
+                confirmed = args.optBoolean("confirmed", false),
+                directSend = args.optBoolean("direct_send", false)
             )
             "answer_call" -> com.zaya.companion.action.AndroidAction.AnswerCall
             "reject_call" -> com.zaya.companion.action.AndroidAction.RejectCall

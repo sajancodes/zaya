@@ -86,10 +86,22 @@ sealed class AndroidAction(
 
     data class LookUpContact(val query: String) : AndroidAction("lookup_contact", ActionRisk.LOW)
 
+    data class InitiateCall(
+        val queryOrNumber: String,
+        val directCall: Boolean = false,
+        val confirmed: Boolean = false,
+    ) : AndroidAction("initiate_call", ActionRisk.HIGH, requiresConfirmation = true)
+
+    data object GetIncomingCallState : AndroidAction("get_incoming_call_state", ActionRisk.LOW)
+
+    data class SetCallerAnnouncement(val enabled: Boolean) :
+        AndroidAction("set_caller_announcement", ActionRisk.LOW)
+
     data class ComposeSms(
         val recipient: String,
         val message: String,
         val confirmed: Boolean = false,
+        val directSend: Boolean = false,
     ) : AndroidAction("compose_sms", ActionRisk.CRITICAL, requiresConfirmation = true)
 
     data object AnswerCall : AndroidAction("answer_call", ActionRisk.HIGH)

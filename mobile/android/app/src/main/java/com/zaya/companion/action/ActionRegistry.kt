@@ -129,6 +129,50 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
+        // 5b. Initiate Call
+        val hasCallPhone = hasPermission(Manifest.permission.CALL_PHONE)
+        list.add(
+            ActionCapability(
+                actionId = "initiate_call",
+                purpose = "Place a phone call directly or open system dialer for a contact",
+                requiredArguments = listOf("query"),
+                risk = ActionRisk.HIGH,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasCallPhone,
+                isAvailable = true,
+            )
+        )
+
+        // 5c. Get Incoming Call State
+        val hasPhoneState = hasPermission(Manifest.permission.READ_PHONE_STATE)
+        list.add(
+            ActionCapability(
+                actionId = "get_incoming_call_state",
+                purpose = "Check if phone is currently ringing and identify caller",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasPhoneState,
+                isAvailable = true,
+            )
+        )
+
+        // 5d. Set Caller Announcement
+        list.add(
+            ActionCapability(
+                actionId = "set_caller_announcement",
+                purpose = "Enable or disable automatic TTS incoming caller announcements",
+                requiredArguments = listOf("enabled"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
         // 6. Compose SMS
         list.add(
             ActionCapability(
@@ -138,7 +182,7 @@ class ActionRegistry(private val context: Context) {
                 risk = ActionRisk.CRITICAL,
                 requiresConfirmation = true,
                 isSupportedOnOs = true,
-                isPermissionGranted = true, // Uses ACTION_SENDTO intent or SMS manager
+                isPermissionGranted = hasPermission(Manifest.permission.SEND_SMS),
                 isAvailable = true,
             )
         )

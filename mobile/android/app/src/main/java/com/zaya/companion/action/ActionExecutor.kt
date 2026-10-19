@@ -4,12 +4,17 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.ContactsContract
+import android.os.Build
+import android.telephony.SmsManager
 import android.util.Log
 import com.zaya.companion.service.AppLauncher
+import com.zaya.companion.service.CallOperationResult
 import com.zaya.companion.service.CellularCallManager
+import com.zaya.companion.service.ContactLookupResult
+import com.zaya.companion.service.ContactManager
 import com.zaya.companion.service.HardwareController
 import com.zaya.companion.service.MediaPlaybackController
+import com.zaya.companion.service.OutgoingCallOutcome
 import com.zaya.companion.service.ZayaNotificationListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -26,6 +31,7 @@ class ActionExecutor(
     val mediaController: MediaPlaybackController = MediaPlaybackController(context),
     val appLauncher: AppLauncher = AppLauncher(context),
     val callManager: CellularCallManager = CellularCallManager(context),
+    val contactManager: ContactManager = callManager.contactManager,
 ) {
 
     companion object {
@@ -48,6 +54,9 @@ class ActionExecutor(
             is AndroidAction.GetMediaStatus -> executeGetMediaStatus()
             is AndroidAction.LaunchApp -> executeLaunchApp(action.name)
             is AndroidAction.LookUpContact -> executeContactLookup(action.query)
+            is AndroidAction.InitiateCall -> executeInitiateCall(action)
+            is AndroidAction.GetIncomingCallState -> executeGetIncomingCallState()
+            is AndroidAction.SetCallerAnnouncement -> executeSetCallerAnnouncement(action.enabled)
             is AndroidAction.ComposeSms -> executeComposeSms(action)
             is AndroidAction.AnswerCall -> executeAnswerCall()
             is AndroidAction.RejectCall -> executeRejectCall()
@@ -187,6 +196,8 @@ class ActionExecutor(
         }
     }
 
+    // ── Contacts & Calls ────────────────────────────────────────────────────
+
     private fun executeContactLookup(query: String): ActionResult {
         if (!registry.hasPermission(Manifest.permission.READ_CONTACTS)) {
             return ActionResult.permissionRequired(
@@ -198,62 +209,281 @@ class ActionExecutor(
             return ActionResult.failure("Search query cannot be empty.", error = "invalid_argument")
         }
 
-        return try {
-            val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
-            val projection = arrayOf(
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                ContactsContract.CommonDataKinds.Phone.NUMBER,
-            )
-            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-            val selectionArgs = arrayOf("%$query%")
+        return when (val result = contactManager.lookupContact(query)) {
+            is ContactLookupResult.SingleMatch -> {
+                val contact = result.contact
+                val phone = contact.numbers.firstOrNull()?.number ?: "No number"
+                ActionResult.success(
+                    spoken = "Found contact ${contact.displayName}: $phone.",
+                    data = mapOf(
+                        "name" to contact.displayName,
+                        "numbers" to contact.numbers.map { mapOf("number" to it.number, "label" to it.typeLabel) }
+                    )
+                )
+            }
+            is ContactLookupResult.MultipleNumbers -> {
+                val contact = result.contact
+                val numList = contact.numbers.joinToString { "${it.typeLabel}: ${it.number}" }
+                ActionResult.success(
+                    spoken = "Found ${contact.displayName} with multiple numbers: $numList.",
+                    data = mapOf(
+                        "name" to contact.displayName,
+                        "numbers" to contact.numbers.map { mapOf("number" to it.number, "label" to it.typeLabel) }
+                    )
+                )
+            }
+            is ContactLookupResult.AmbiguousMatches -> {
+                val candidateNames = result.candidates.map { it.displayName }
+                ActionResult.failure(
+                    spoken = "Found multiple contacts matching '$query': ${candidateNames.joinToString(", ")}. Which one did you mean?",
+                    error = "ambiguous_contact",
+                    data = mapOf("candidates" to candidateNames)
+                )
+            }
+            is ContactLookupResult.NoNumbers -> {
+                ActionResult.failure(
+                    spoken = "${result.contactName} is in your contacts, but has no phone numbers saved.",
+                    error = "no_phone_number"
+                )
+            }
+            is ContactLookupResult.NotFound -> {
+                ActionResult.failure("No contacts found matching '$query'.", error = "not_found")
+            }
+            is ContactLookupResult.PermissionRequired -> {
+                ActionResult.permissionRequired(
+                    Manifest.permission.READ_CONTACTS,
+                    "Permission required to access contacts."
+                )
+            }
+            is ContactLookupResult.Failure -> {
+                ActionResult.failure("Failed to read contacts: ${result.reason}", error = "contact_lookup_failed")
+            }
+        }
+    }
 
-            val matches = mutableListOf<Map<String, String>>()
-            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                while (cursor.moveToNext() && matches.size < 5) {
-                    val name = cursor.getString(nameIdx) ?: ""
-                    val number = cursor.getString(numIdx) ?: ""
-                    if (name.isNotEmpty()) {
-                        matches.add(mapOf("name" to name, "number" to number))
+    private fun executeInitiateCall(action: AndroidAction.InitiateCall): ActionResult {
+        if (!action.confirmed) {
+            val targetLabel = if (action.queryOrNumber.all { it.isDigit() || it in "+-() " }) {
+                action.queryOrNumber
+            } else {
+                when (val lookup = contactManager.lookupContact(action.queryOrNumber)) {
+                    is ContactLookupResult.SingleMatch -> lookup.contact.displayName
+                    is ContactLookupResult.MultipleNumbers -> lookup.contact.displayName
+                    is ContactLookupResult.AmbiguousMatches -> {
+                        val names = lookup.candidates.map { it.displayName }.joinToString(", ")
+                        return ActionResult.failure(
+                            spoken = "Found multiple matching contacts: $names. Which one would you like to call?",
+                            error = "ambiguous_contact",
+                            data = mapOf("candidates" to lookup.candidates.map { it.displayName })
+                        )
                     }
+                    is ContactLookupResult.NoNumbers -> {
+                        return ActionResult.failure(
+                            spoken = "${lookup.contactName} has no phone number saved.",
+                            error = "no_phone_number"
+                        )
+                    }
+                    is ContactLookupResult.NotFound -> {
+                        return ActionResult.failure("Could not find '${action.queryOrNumber}' in contacts.", error = "not_found")
+                    }
+                    else -> action.queryOrNumber
                 }
             }
 
-            if (matches.isNotEmpty()) {
-                val firstName = matches.first()["name"] ?: query
-                ActionResult.success(
-                    "Found contact $firstName.",
-                    mapOf("count" to matches.size, "contacts" to matches)
+            return ActionResult.needsConfirmation(
+                spoken = "Do you want me to call $targetLabel?",
+                actionId = "initiate_call",
+                payload = mapOf(
+                    "query" to action.queryOrNumber,
+                    "direct_call" to action.directCall,
                 )
-            } else {
-                ActionResult.failure("No contacts found matching '$query'.", error = "not_found")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Contact lookup failed: ${e.message}")
-            ActionResult.failure("Failed to read contacts: ${e.message}", error = e.javaClass.simpleName)
+            )
         }
+
+        return when (val outcome = callManager.initiateCall(action.queryOrNumber, action.directCall)) {
+            is OutgoingCallOutcome.DirectCallPlaced -> {
+                ActionResult.success(
+                    spoken = "Calling ${outcome.targetName}.",
+                    data = mapOf("target" to outcome.targetName, "number" to outcome.number, "direct" to true)
+                )
+            }
+            is OutgoingCallOutcome.DialerOpened -> {
+                ActionResult.success(
+                    spoken = "Opened dialer for ${outcome.targetName}.",
+                    data = mapOf("target" to outcome.targetName, "number" to outcome.number, "direct" to false)
+                )
+            }
+            is OutgoingCallOutcome.AmbiguousContact -> {
+                ActionResult.failure(
+                    spoken = "Found multiple contacts: ${outcome.candidateNames.joinToString(", ")}. Which one would you like to call?",
+                    error = "ambiguous_contact",
+                    data = mapOf("candidates" to outcome.candidateNames)
+                )
+            }
+            is OutgoingCallOutcome.MultipleNumbers -> {
+                val list = outcome.numbers.joinToString { "${it.typeLabel}: ${it.number}" }
+                ActionResult.failure(
+                    spoken = "${outcome.contactName} has multiple numbers: $list. Which one should I call?",
+                    error = "multiple_numbers",
+                    data = mapOf("numbers" to outcome.numbers.map { it.number })
+                )
+            }
+            is OutgoingCallOutcome.NoNumber -> {
+                ActionResult.failure("${outcome.contactName} does not have a phone number saved.", error = "no_phone_number")
+            }
+            is OutgoingCallOutcome.NotFound -> {
+                ActionResult.failure("No contact found matching '${outcome.query}'.", error = "not_found")
+            }
+            is OutgoingCallOutcome.Failed -> {
+                ActionResult.failure("Could not start call: ${outcome.reason}", error = "call_failed")
+            }
+        }
+    }
+
+    private fun executeGetIncomingCallState(): ActionResult {
+        val info = callManager.getIncomingCallInfo()
+        return if (info.isRinging) {
+            val caller = info.callerName ?: info.incomingNumber ?: "a private or unknown caller"
+            ActionResult.success(
+                spoken = "Incoming call from $caller.",
+                data = mapOf(
+                    "is_ringing" to true,
+                    "caller" to caller,
+                    "number" to info.incomingNumber
+                )
+            )
+        } else {
+            ActionResult.success(
+                spoken = "There is no incoming call right now.",
+                data = mapOf("is_ringing" to false)
+            )
+        }
+    }
+
+    private fun executeSetCallerAnnouncement(enabled: Boolean): ActionResult {
+        callManager.setCallerAnnouncementEnabled(enabled)
+        val stateDesc = if (enabled) "enabled" else "disabled"
+        return ActionResult.success(
+            spoken = "Caller announcements $stateDesc.",
+            data = mapOf("caller_announcements_enabled" to enabled)
+        )
     }
 
     private fun executeComposeSms(action: AndroidAction.ComposeSms): ActionResult {
         if (!action.confirmed) {
+            val recipientLabel = if (action.recipient.all { it.isDigit() || it in "+-() " }) {
+                action.recipient
+            } else {
+                when (val lookup = contactManager.lookupContact(action.recipient)) {
+                    is ContactLookupResult.SingleMatch -> lookup.contact.displayName
+                    is ContactLookupResult.MultipleNumbers -> lookup.contact.displayName
+                    is ContactLookupResult.AmbiguousMatches -> {
+                        val names = lookup.candidates.map { it.displayName }.joinToString(", ")
+                        return ActionResult.failure(
+                            spoken = "Found multiple contacts matching '${action.recipient}': $names. Which one would you like to text?",
+                            error = "ambiguous_contact",
+                            data = mapOf("candidates" to lookup.candidates.map { it.displayName })
+                        )
+                    }
+                    is ContactLookupResult.NoNumbers -> {
+                        return ActionResult.failure(
+                            spoken = "${lookup.contactName} has no phone number saved.",
+                            error = "no_phone_number"
+                        )
+                    }
+                    is ContactLookupResult.NotFound -> {
+                        return ActionResult.failure("Could not find '${action.recipient}' in contacts.", error = "not_found")
+                    }
+                    else -> action.recipient
+                }
+            }
+
             return ActionResult.needsConfirmation(
-                spoken = "Do you want me to send this text to ${action.recipient}?",
+                spoken = "Do you want me to send this text to $recipientLabel: \"${action.message}\"?",
                 actionId = "compose_sms",
-                payload = mapOf("recipient" to action.recipient, "message" to action.message)
+                payload = mapOf(
+                    "recipient" to action.recipient,
+                    "message" to action.message,
+                    "direct_send" to action.directSend,
+                )
             )
         }
 
+        // Resolve recipient number
+        var targetNumber = action.recipient
+        var targetName = action.recipient
+
+        if (!action.recipient.all { it.isDigit() || it in "+-() " }) {
+            when (val lookup = contactManager.lookupContact(action.recipient)) {
+                is ContactLookupResult.SingleMatch -> {
+                    targetName = lookup.contact.displayName
+                    targetNumber = lookup.contact.numbers.first().number
+                }
+                is ContactLookupResult.MultipleNumbers -> {
+                    targetName = lookup.contact.displayName
+                    targetNumber = lookup.contact.numbers.first().number
+                }
+                is ContactLookupResult.AmbiguousMatches -> {
+                    val names = lookup.candidates.map { it.displayName }.joinToString(", ")
+                    return ActionResult.failure(
+                        spoken = "Found multiple contacts: $names. Please specify the exact contact to message.",
+                        error = "ambiguous_contact"
+                    )
+                }
+                is ContactLookupResult.NoNumbers -> {
+                    return ActionResult.failure("${lookup.contactName} has no phone number saved.", error = "no_phone_number")
+                }
+                is ContactLookupResult.NotFound -> {
+                    return ActionResult.failure("Could not find '${action.recipient}' in contacts.", error = "not_found")
+                }
+                else -> {}
+            }
+        }
+
+        val cleanNumber = targetNumber.replace(Regex("[^0-9+]"), "")
+        if (cleanNumber.isBlank()) {
+            return ActionResult.failure("Invalid phone number for $targetName.", error = "invalid_number")
+        }
+
+        // Direct SMS dispatch if requested and permitted
+        if (action.directSend && registry.hasPermission(Manifest.permission.SEND_SMS)) {
+            return try {
+                val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getSystemService(SmsManager::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    SmsManager.getDefault()
+                }
+                val parts = smsManager.divideMessage(action.message)
+                if (parts.size > 1) {
+                    smsManager.sendMultipartTextMessage(cleanNumber, null, parts, null, null)
+                } else {
+                    smsManager.sendTextMessage(cleanNumber, null, action.message, null, null)
+                }
+                ActionResult.success(
+                    spoken = "Text message sent to $targetName.",
+                    data = mapOf("recipient" to targetName, "direct" to true)
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Direct SMS delivery failed: ${e.message}")
+                openSmsComposer(cleanNumber, targetName, action.message)
+            }
+        }
+
+        return openSmsComposer(cleanNumber, targetName, action.message)
+    }
+
+    private fun openSmsComposer(number: String, name: String, message: String): ActionResult {
         return try {
-            val smsUri = Uri.parse("smsto:${Uri.encode(action.recipient)}")
+            val smsUri = Uri.parse("smsto:${Uri.encode(number)}")
             val intent = Intent(Intent.ACTION_SENDTO, smsUri).apply {
-                putExtra("sms_body", action.message)
+                putExtra("sms_body", message)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
             ActionResult.success(
-                "SMS prepared for ${action.recipient}.",
-                mapOf("recipient" to action.recipient)
+                spoken = "Opened SMS composer for $name.",
+                data = mapOf("recipient" to name, "direct" to false)
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch SMS intent: ${e.message}")
@@ -262,32 +492,34 @@ class ActionExecutor(
     }
 
     private fun executeAnswerCall(): ActionResult {
-        if (!registry.hasPermission(Manifest.permission.ANSWER_PHONE_CALLS)) {
-            return ActionResult.permissionRequired(
-                Manifest.permission.ANSWER_PHONE_CALLS,
+        return when (val res = callManager.answerCall()) {
+            is CallOperationResult.Success -> ActionResult.success(res.message)
+            is CallOperationResult.PermissionRequired -> ActionResult.permissionRequired(
+                res.permission,
                 "Permission required to answer phone calls hands-free."
             )
-        }
-        val ok = callManager.answerCall()
-        return if (ok) {
-            ActionResult.success("Answering call.")
-        } else {
-            ActionResult.failure("Could not answer call. No active incoming call or unsupported OS version.", error = "telecom_error")
+            is CallOperationResult.NotRinging -> ActionResult.failure(
+                spoken = "There is no incoming call ringing right now.",
+                error = "not_ringing"
+            )
+            is CallOperationResult.Unsupported -> ActionResult.unsupported(res.reason)
+            is CallOperationResult.Failed -> ActionResult.failure(res.reason, error = "telecom_error")
         }
     }
 
     private fun executeRejectCall(): ActionResult {
-        if (!registry.hasPermission(Manifest.permission.ANSWER_PHONE_CALLS)) {
-            return ActionResult.permissionRequired(
-                Manifest.permission.ANSWER_PHONE_CALLS,
+        return when (val res = callManager.rejectCall()) {
+            is CallOperationResult.Success -> ActionResult.success(res.message)
+            is CallOperationResult.PermissionRequired -> ActionResult.permissionRequired(
+                res.permission,
                 "Permission required to decline phone calls."
             )
-        }
-        val ok = callManager.rejectCall()
-        return if (ok) {
-            ActionResult.success("Call declined.")
-        } else {
-            ActionResult.failure("Could not reject call.", error = "telecom_error")
+            is CallOperationResult.NotRinging -> ActionResult.failure(
+                spoken = "There is no incoming call ringing right now.",
+                error = "not_ringing"
+            )
+            is CallOperationResult.Unsupported -> ActionResult.unsupported(res.reason)
+            is CallOperationResult.Failed -> ActionResult.failure(res.reason, error = "telecom_error")
         }
     }
 
