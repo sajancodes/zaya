@@ -541,6 +541,16 @@ def _is_reconnect_signal(exc: BaseException) -> bool:
     return False
 
 
+def _keys_cooling_of(exc: BaseException):
+    """Find quota cooldowns wrapped by a TaskGroup without losing their delay."""
+    if isinstance(exc, KeysCooling):
+        return exc
+    if isinstance(exc, BaseExceptionGroup):
+        delays = [found for sub in exc.exceptions if (found := _keys_cooling_of(sub)) is not None]
+        return max(delays, key=lambda error: error.retry_after) if delays else None
+    return None
+
+
 def _keep_context_of(exc: BaseException) -> bool:
     """Read `keep_context` off a reconnect signal, unwrapping the group the
     TaskGroup put it in. Defaults to True: an unexpected shape must not silently
@@ -557,7 +567,7 @@ def _keep_context_of(exc: BaseException) -> bool:
 class JarvisLive:
     def __init__(self, ui: JarvisUI):
         self.ui             = ui
-        self._asst_name     = "JARVI    S"   # updated each session from config
+        self._asst_name     = "Zaya"
         self.session              = None
         self.audio_in_queue       = None
         self.out_queue            = None
@@ -1060,7 +1070,7 @@ class JarvisLive:
 
         # Load customization from config
         try:
-            _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
+            _cfg = json.loads(Path(API_CONFIG_PATH).read_text(encoding="utf-8"))
             self._asst_name = "Zaya"
             _user_name = (_cfg.get("user_name") or "").strip()
         except Exception:
@@ -1470,7 +1480,21 @@ class JarvisLive:
                 else:
                     result = f"Unknown tool: {name}"
 
+        except asyncio.CancelledError:
+            if name == "screen_process":
+                self._pending_vision = None
+                self._vision_busy = False
+                self._vision_cam_active = False
+                self._vision_close_pending = False
+                self.ui.stop_camera_stream()
+            raise
         except Exception as e:
+            if name == "screen_process":
+                self._pending_vision = None
+                self._vision_busy = False
+                self._vision_cam_active = False
+                self._vision_close_pending = False
+                self.ui.stop_camera_stream()
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
@@ -1901,13 +1925,20 @@ class JarvisLive:
         # label *means* is explained once, in the generated [SELF] block.
         src = ("[IMAGE SOURCE: WEBCAM]" if angle == "camera"
                else "[IMAGE SOURCE: SCREEN CAPTURE]")
-        await self.session.send_client_content(
-            turns={"role": "user", "parts": [
-                {"inline_data": {"mime_type": mime_t, "data": b64}},
-                {"text": f"{src}\n\n{question}"},
-            ]},
-            turn_complete=True,
-        )
+        try:
+            await self.session.send_client_content(
+                turns={"role": "user", "parts": [
+                    {"inline_data": {"mime_type": mime_t, "data": b64}},
+                    {"text": f"{src}\n\n{question}"},
+                ]},
+                turn_complete=True,
+            )
+        except BaseException:
+            self._vision_busy = False
+            self._vision_cam_active = False
+            self._vision_close_pending = False
+            self.ui.stop_camera_stream()
+            raise
 
         if self._vision_cam_active:
             # Camera: stay busy until JARVIS has finished speaking the answer,
@@ -2430,7 +2461,6 @@ class JarvisLive:
         log = self._session_log
         if len(log) < 3:          # need at least one exchange to be worth saving
             return
-        self._session_log = []    # reset immediately so the next session starts clean
 
         memory = load_memory()
         lang_entry = memory.get("identity", {}).get("language", {})
@@ -2443,14 +2473,20 @@ class JarvisLive:
             "Focus on what the user accomplished or discussed. "
             "Output ONLY the summary text, nothing else:\n\n" + convo
         )
+        self._session_log = []    # isolate new turns while this snapshot is saved
         try:
             from core import gemini
             summary = await asyncio.to_thread(
                 gemini.text, prompt, gemini.SMART, None, 30_000,
             )
-            if summary:
-                save_session_summary(summary, lang)
+            if not summary:
+                raise ValueError('Session summary was empty.')
+            save_session_summary(summary, lang)
+        except asyncio.CancelledError:
+            self._session_log = (log + self._session_log)[-80:]
+            raise
         except Exception as e:
+            self._session_log = (log + self._session_log)[-80:]
             print(f"[Memory] ⚠️ Session summary failed: {e}")
 
     # ── System monitor ──────────────────────────────────────────────────────────
@@ -2570,24 +2606,28 @@ class JarvisLive:
     async def _relay_phone_video(self):
         """Opt-in phone camera samples; no recording or laptop webcam access."""
         import queue
+        next_warning = 0.0
         while True:
             await asyncio.sleep(.2)
-            mobile = self._dashboard.mobile()
-            if mobile is None:
-                continue
             try:
+                mobile = self._dashboard.mobile()
+                if mobile is None:
+                    continue
                 frame = mobile.video_frames.get_nowait()
+                call = self._calls.active()
+                if (call is None or call.state != 'answered' or not call.video_enabled
+                        or call.call_id != frame['call_id'] or call.device_id != frame['device_id']):
+                    continue
+                if self.session is not None:
+                    await self.session.send_realtime_input(video=types.Blob(data=frame['data'], mime_type='image/jpeg'))
             except queue.Empty:
                 continue
-            call = self._calls.active()
-            if (call is None or call.state != 'answered' or not call.video_enabled
-                    or call.call_id != frame['call_id'] or call.device_id != frame['device_id']):
-                continue
-            if self.session is not None:
-                try:
-                    await self.session.send_realtime_input(video=types.Blob(data=frame['data'], mime_type='image/jpeg'))
-                except Exception as error:
+            except Exception as error:
+                # A temporarily unavailable optional camera must not tear down
+                # the audio TaskGroup. Retry quietly and bound diagnostic spam.
+                if time.monotonic() >= next_warning:
                     print(f'[Phone video] Frame unavailable ({type(error).__name__}).')
+                    next_warning = time.monotonic() + 60
 
     def _phone_call_active(self):
         bridge = getattr(self, '_bridge', None)
@@ -2898,12 +2938,13 @@ class JarvisLive:
                 # start shutdown — resulting in "executor after shutdown" errors).
                 # Voluntary reconnect (voice change) — not an error. Rebuild the
                 # session immediately with no backoff and no scary logs.
-                if isinstance(e, KeysCooling):
+                cooling = _keys_cooling_of(e)
+                if cooling is not None:
                     self.ui.set_state('SLEEPING')
-                    self.ui.write_log(f'SYS: Gemini keys are rate-limited — waiting {int(e.retry_after) + 1}s before retrying.')
+                    self.ui.write_log(f'SYS: Gemini keys are rate-limited — waiting {int(cooling.retry_after) + 1}s before retrying.')
                     bus.publish('avatar.caption', text='Gemini is rate-limited. Waiting to reconnect…')
                     try:
-                        await asyncio.wait_for(self._reconnect_event.wait(), timeout=e.retry_after)
+                        await asyncio.wait_for(self._reconnect_event.wait(), timeout=cooling.retry_after)
                         self._reconnect_event.clear()
                     except asyncio.TimeoutError:
                         pass
@@ -3001,7 +3042,7 @@ class JarvisLive:
                     self.ui.write_log("ERR: API key invalid — please re-enter your key.")
                     self.ui.set_state("SLEEPING")
                     self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
+                    while not self.ui.is_ready():
                         await asyncio.sleep(1)
                     print("[Zaya] New API key saved — reconnecting...")
                     _conn_backoff = 3

@@ -1087,7 +1087,11 @@ class LogWidget(QTextEdit):
 
     def _step(self):
         if self._pos < len(self._text):
-            ch  = self._text[self._pos]
+            # Bound display latency while retaining animation for short lines.
+            count = max(1, (len(self._text) - self._pos + 99) // 100)
+            if self._queue:
+                count = max(count, 64)
+            ch = self._text[self._pos:self._pos + count]
             cur = self.textCursor()
             fmt = cur.charFormat()
             col = {
@@ -1107,7 +1111,7 @@ class LogWidget(QTextEdit):
             cur.insertText(ch, fmt)
             self.setTextCursor(cur)
             self.ensureCursorVisible()
-            self._pos += 1
+            self._pos += len(ch)
         else:
             self._tmr.stop()
             cur = self.textCursor()
@@ -3287,6 +3291,9 @@ class MainWindow(QMainWindow):
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
+        self._ready_event = threading.Event()
+        if self._ready:
+            self._ready_event.set()
         if not self._ready:
             self._show_setup()
 
@@ -3407,6 +3414,7 @@ class MainWindow(QMainWindow):
         t.start()
 
     def _cam_loop(self) -> None:
+        cap = None
         try:
             import cv2
             # Reuse camera index detected by screen_processor (cached in api_keys.json)
@@ -3423,6 +3431,7 @@ class MainWindow(QMainWindow):
                 backend = 0
             cap = cv2.VideoCapture(cam_idx, backend)
             if not cap.isOpened():
+                cap.release()
                 cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 return
@@ -3432,12 +3441,14 @@ class MainWindow(QMainWindow):
             while not self._cam_stop.wait(0.033) and cap.isOpened():
                 ret, frame = cap.read()
                 if ret and frame is not None:
-                    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                    self._cam_frame_sig.emit(buf.tobytes())
-            cap.release()
+                    encoded, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                    if encoded and buf is not None:
+                        self._cam_frame_sig.emit(buf.tobytes())
         except Exception as e:
             print(f"[Camera] Stream error: {e}")
         finally:
+            if cap is not None:
+                cap.release()
             self._cam_stream_sig.emit(False)
 
     def stop_camera_stream(self) -> None:
@@ -5570,12 +5581,11 @@ class MainWindow(QMainWindow):
                 voice_changed = True
 
         try:
-            data = _read_full_config()
-            data["assistant_name"] = self._assistant_name
-            data["user_name"] = user_name.strip()
+            from memory.config_manager import _update_config
+            fields = {"assistant_name": self._assistant_name, "user_name": user_name.strip()}
             if ui_color:
-                data["ui_color"] = ui_color.strip().lower()
-            API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+                fields["ui_color"] = ui_color.strip().lower()
+            _update_config(lambda data: data.update(fields), path=API_FILE)
             self._log.append_log(f"SYS: Identity updated — {display}")
             if color_changed:
                 self._log.append_log(f"SYS: UI colour applied — {ui_color}")
@@ -5812,13 +5822,11 @@ class MainWindow(QMainWindow):
         if not keys:
             self._log_sig.emit('ERR: Enter at least one Gemini API key.')
             return
-        data = _read_full_config()
-        data.update(gemini_api_key=keys[0], gemini_api_keys=keys, os_system=os_name)
-        API_FILE.write_text(
-            json.dumps(data, indent=4),
-            encoding="utf-8",
-        )
+        from memory.config_manager import _update_config
+        _update_config(lambda data: data.update(
+            gemini_api_key=keys[0], gemini_api_keys=keys, os_system=os_name), path=API_FILE)
         self._ready = True
+        self._ready_event.set()
         if self._overlay:
             self._overlay.hide()
             self._overlay = None
@@ -6060,13 +6068,17 @@ class JarvisUI:
         self._win._history_sig.emit(turns)
 
     def wait_for_api_key(self, stop_event=None):
-        while not self._win._ready:
+        while not self.is_ready():
             if stop_event:
                 if stop_event.wait(.1):
                     return False
             else:
                 time.sleep(.1)
         return not (stop_event and stop_event.is_set())
+
+    def is_ready(self) -> bool:
+        """Read configuration readiness without inspecting Qt widget state."""
+        return self._win._ready_event.is_set()
 
     def show_content(self, title: str, text: str):
         """Thread-safe: display content in the panel below the HUD."""
@@ -6102,6 +6114,7 @@ class JarvisUI:
     def prompt_reconfig(self):
         """Thread-safe: show the API key setup overlay (e.g. after an auth error)."""
         self._win._ready = False
+        self._win._ready_event.clear()
         self._win._reconfig_sig.emit()
 
     def show_camera_frame(self, img_bytes: bytes):

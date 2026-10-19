@@ -17,9 +17,9 @@ CONFIG_FILE = CONFIG_DIR / "api_keys.json"
 _CONFIG_LOCK = threading.RLock()
 
 
-def _read_config() -> dict:
+def _read_config(path=None) -> dict:
     try:
-        raw = CONFIG_FILE.read_text(encoding="utf-8")
+        raw = Path(path or CONFIG_FILE).read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
     data = json.loads(raw)
@@ -28,25 +28,26 @@ def _read_config() -> dict:
     return data
 
 
-def _update_config(update) -> None:
+def _update_config(update, *, path=None) -> None:
     """Serialize the entire read/update/write and replace only complete JSON.
 
     Refuse to overwrite unreadable settings: recovering a damaged file must not
     silently discard credentials or unrelated owner settings.
     """
     with _CONFIG_LOCK:
-        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data = _read_config()
+        target = Path(path or CONFIG_FILE)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = _read_config(target)
         update(data)
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                    dir=CONFIG_FILE.parent, prefix=".zaya-config-", suffix=".tmp", delete=False) as stream:
+                    dir=target.parent, prefix=".zaya-config-", suffix=".tmp", delete=False) as stream:
                 temporary = Path(stream.name)
                 json.dump(data, stream, indent=4)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, CONFIG_FILE)
+            os.replace(temporary, target)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
