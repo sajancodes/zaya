@@ -82,3 +82,9 @@ config/hermes*.json
 plugins/*.exe
 config/hermes_pairing*
 config/hermes_connection.tmp
+
+# Generated docs, research dossiers, widgets and local calendar data
+docs/generated/
+docs/research/
+dashboard/widgets/
+data/
