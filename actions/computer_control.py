@@ -321,41 +321,174 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
         return None
     try:
         from pywinauto import Desktop
+        import ctypes
+        user32 = ctypes.windll.user32
+        fg_hwnd = user32.GetForegroundWindow()
+
         desc_lower = description.lower().strip()
         desktop = Desktop(backend="uia")
-        # Search among visible top-level windows
-        windows = desktop.windows(visible_only=True)
-        best_match = None
-        best_score = 0.0
 
-        for win in windows[:6]:
+        # Prioritize foreground window descendants first
+        windows = desktop.windows(visible_only=True)
+        ordered_windows = []
+        for win in windows:
             try:
-                # Iterate over interactable descendants
+                if win.handle == fg_hwnd:
+                    ordered_windows.insert(0, win)
+                else:
+                    ordered_windows.append(win)
+            except Exception:
+                ordered_windows.append(win)
+
+        candidates: list[tuple[float, tuple[int, int], str]] = []
+
+        for win in ordered_windows[:6]:
+            try:
+                is_fg = (win.handle == fg_hwnd)
+                fg_bonus = 0.15 if is_fg else 0.0
+
                 for ctrl in win.descendants():
                     try:
                         text = (ctrl.window_text() or "").strip()
                         c_type = ctrl.element_info.control_type or ""
                         auto_id = ctrl.element_info.automation_id or ""
-                        combined = f"{text} {c_type} {auto_id}".lower()
+                        name = ctrl.element_info.name or ""
 
-                        if desc_lower in combined or (text and text.lower() in desc_lower):
-                            rect = ctrl.rectangle()
-                            if rect.width() > 0 and rect.height() > 0:
-                                score = 1.0 if desc_lower == text.lower() else 0.5
-                                if score > best_score:
-                                    best_score = score
-                                    best_match = (rect.mid_point().x, rect.mid_point().y)
-                                    if best_score == 1.0:
-                                        return best_match
+                        rect = ctrl.rectangle()
+                        if rect.width() <= 0 or rect.height() <= 0:
+                            continue
+
+                        text_l = text.lower()
+                        auto_id_l = auto_id.lower()
+                        name_l = name.lower()
+
+                        score = 0.0
+                        if desc_lower == text_l or desc_lower == name_l:
+                            score = 1.0
+                        elif desc_lower == auto_id_l:
+                            score = 0.95
+                        elif desc_lower and (desc_lower in text_l or desc_lower in name_l):
+                            score = 0.8
+                        elif desc_lower and (text_l in desc_lower or name_l in desc_lower):
+                            score = 0.7
+                        elif desc_lower and auto_id_l in desc_lower:
+                            score = 0.65
+                        else:
+                            # Token overlap
+                            tokens = [t for t in re.split(r"\W+", desc_lower) if len(t) > 2]
+                            if tokens:
+                                combined = f"{text_l} {c_type.lower()} {auto_id_l} {name_l}"
+                                overlap = sum(1 for t in tokens if t in combined)
+                                if overlap > 0:
+                                    score = 0.4 + 0.3 * (overlap / len(tokens))
+
+                        if score > 0.4:
+                            # Bonuses for enabled/visible and interactive controls
+                            try:
+                                if ctrl.is_enabled():
+                                    score += 0.05
+                            except Exception:
+                                pass
+                            if c_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox", "ListItem"):
+                                score += 0.05
+                            score += fg_bonus
+                            candidates.append((score, (rect.mid_point().x, rect.mid_point().y), text or name or auto_id))
                     except Exception:
                         continue
             except Exception:
                 continue
 
-        return best_match
+        if not candidates:
+            return None
+
+        # Sort descending by score
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        top_score, top_point, _ = candidates[0]
+
+        # Ambiguity check: if top two have nearly identical score (< 0.10 diff) and distinct points (> 30px distance)
+        if len(candidates) > 1:
+            second_score, second_point, _ = candidates[1]
+            dist_sq = (top_point[0] - second_point[0]) ** 2 + (top_point[1] - second_point[1]) ** 2
+            if (top_score - second_score < 0.10) and dist_sq > 900 and top_score < 1.0:
+                # Ambiguous match among distinct controls — reject to avoid mis-clicking
+                return None
+
+        return top_point
     except Exception as e:
         print(f"[ComputerControl] UIA element search failed: {e}")
         return None
+
+
+def _detect_visual_candidates(screenshot_img: Any, w: int, h: int, max_candidates: int = 50) -> list[dict]:
+    """Detect visual interactable UI candidates using OpenCV contours and edge detection."""
+    try:
+        import cv2
+        import numpy as np
+
+        # Convert PIL image to BGR numpy array
+        np_img = np.array(screenshot_img)
+        if np_img.shape[2] == 4:
+            bgr = cv2.cvtColor(np_img, cv2.COLOR_RGBA2BGR)
+        else:
+            bgr = cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
+
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        edges = cv2.Canny(blurred, 30, 120)
+
+        # Morphological close to join adjacent edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        dilated = cv2.dilate(edges, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        raw_boxes = []
+        screen_area = w * h
+
+        for cnt in contours:
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            area = bw * bh
+            # Filter noise and whole screen containers:
+            # Width and height > 12px, area > 150px, area < 50% screen
+            if bw > 12 and bh > 10 and area > 150 and area < (0.50 * screen_area):
+                raw_boxes.append((x, y, x + bw, y + bh))
+
+        if not raw_boxes:
+            return []
+
+        # Deduplicate overlapping boxes with IoU > 0.40
+        raw_boxes.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))  # small to large
+        deduped = []
+        for b in raw_boxes:
+            overlap = False
+            b_area = (b[2] - b[0]) * (b[3] - b[1])
+            for d in deduped:
+                # Intersection
+                ix1 = max(b[0], d[0])
+                iy1 = max(b[1], d[1])
+                ix2 = min(b[2], d[2])
+                iy2 = min(b[3], d[3])
+                if ix1 < ix2 and iy1 < iy2:
+                    inter_area = (ix2 - ix1) * (iy2 - iy1)
+                    iou = inter_area / min(b_area, (d[2] - d[0]) * (d[3] - d[1]))
+                    if iou > 0.40:
+                        overlap = True
+                        break
+            if not overlap:
+                deduped.append(b)
+                if len(deduped) >= max_candidates:
+                    break
+
+        return [
+            {
+                "box": box,
+                "center": ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2),
+            }
+            for box in deduped
+        ]
+    except Exception as e:
+        print(f"[ComputerControl] OpenCV visual candidate detection failed: {e}")
+        return []
 
 
 def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tuple[int, int] | None:
@@ -390,7 +523,11 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
             except Exception:
                 pass
 
-        # If UIA candidate bounding boxes were not found or not on Windows, partition or fallback
+        # If UIA produced 0 candidates or not on Windows, use OpenCV visual contour detection
+        if not candidates:
+            candidates = _detect_visual_candidates(screenshot_img, w, h, max_candidates=50)
+
+        # If still no candidates found, fallback to coordinate search
         if not candidates:
             return None
 
@@ -425,6 +562,19 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
         )
         if resp and resp.text:
             text = resp.text.strip()
+            # Strict JSON parsing first
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "id" in parsed:
+                    val = parsed["id"]
+                    if isinstance(val, int) and val in marks:
+                        return marks[val]
+                    if val is None:
+                        return None
+            except Exception:
+                pass
+
+            # Regex fallback for mark id extraction
             match = re.search(r'\{\s*"id"\s*:\s*(\d+)\s*\}', text)
             if match:
                 mark_id = int(match.group(1))

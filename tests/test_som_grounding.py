@@ -1,11 +1,17 @@
-"""Tests for Set-of-Mark (SoM) and 3-tier UI element grounding and frame_changed."""
+"""Tests for Set-of-Mark (SoM), OpenCV visual detection, and 3-tier UI element grounding."""
 import io
 import unittest
 from unittest.mock import MagicMock, patch
 from PIL import Image
 
 from actions.screen_processor import compute_dhash, hamming_distance, frame_changed
-from actions.computer_control import _screen_find, _find_via_uia, _find_via_som, _find_via_coordinates
+from actions.computer_control import (
+    _screen_find,
+    _find_via_uia,
+    _find_via_som,
+    _find_via_coordinates,
+    _detect_visual_candidates,
+)
 
 
 class TestGroundingAndVision(unittest.TestCase):
@@ -55,6 +61,54 @@ class TestGroundingAndVision(unittest.TestCase):
 
         # Distinct pattern frame returns True
         self.assertTrue(frame_changed(src, bytes2, threshold=4))
+
+    def test_detect_visual_candidates_opencv(self):
+        # Create an image with distinct buttons
+        img = Image.new("RGB", (800, 600), color=(240, 240, 240))
+        # Draw two high contrast rectangles simulating buttons
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([100, 100, 250, 160], fill=(50, 50, 200), outline=(0, 0, 0))
+        draw.rectangle([400, 300, 550, 360], fill=(50, 200, 50), outline=(0, 0, 0))
+
+        cands = _detect_visual_candidates(img, 800, 600, max_candidates=10)
+        self.assertGreaterEqual(len(cands), 2)
+        # Verify centers are inside button regions
+        centers = [c["center"] for c in cands]
+        has_first = any(95 <= pt[0] <= 255 and 95 <= pt[1] <= 165 for pt in centers)
+        has_second = any(395 <= pt[0] <= 555 and 295 <= pt[1] <= 365 for pt in centers)
+        self.assertTrue(has_first)
+        self.assertTrue(has_second)
+
+    def test_som_strict_json_validation(self):
+        img = Image.new("RGB", (400, 300), color=(255, 255, 255))
+        # Fake candidate
+        with patch("actions.computer_control._detect_visual_candidates") as mock_cand:
+            mock_cand.return_value = [
+                {"box": (50, 50, 150, 100), "center": (100, 75)},
+                {"box": (200, 50, 300, 100), "center": (250, 75)},
+            ]
+
+            # 1. Valid JSON matching tag 2
+            mock_resp = MagicMock()
+            mock_resp.text = '{"id": 2}'
+            with patch("core.gemini.call", return_value=mock_resp):
+                pt = _find_via_som("Green button", img, 400, 300)
+                self.assertEqual(pt, (250, 75))
+
+            # 2. Valid JSON with null id -> not found
+            mock_resp_null = MagicMock()
+            mock_resp_null.text = '{"id": null}'
+            with patch("core.gemini.call", return_value=mock_resp_null):
+                pt_null = _find_via_som("Nonexistent", img, 400, 300)
+                self.assertIsNone(pt_null)
+
+            # 3. Invalid tag id outside range
+            mock_resp_out = MagicMock()
+            mock_resp_out.text = '{"id": 99}'
+            with patch("core.gemini.call", return_value=mock_resp_out):
+                pt_out = _find_via_som("Out of range", img, 400, 300)
+                self.assertIsNone(pt_out)
 
     def test_screen_find_tier_a_uia(self):
         with patch("actions.computer_control._find_via_uia") as mock_uia:
