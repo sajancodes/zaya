@@ -47,9 +47,13 @@ _DEFAULTS = {
 
 
 def get_llm_provider() -> str:
-    """Returns 'ollama' or 'openai' (covers LM Studio, LocalAI, Jan, etc.)."""
+    """Returns 'ollama', 'openai', 'openrouter', '9router', etc."""
     raw = _load_config().get("llm_provider", "ollama").strip().lower()
-    return "openai" if raw in ("openai", "lmstudio", "localai", "jan", "llamacpp") else "ollama"
+    if raw in ("openai", "lmstudio", "localai", "jan", "llamacpp"):
+        return "openai"
+    if raw in ("openrouter", "9router", "groq", "deepseek"):
+        return raw
+    return "ollama"
 
 
 def _load_config() -> dict:
@@ -220,9 +224,13 @@ def check_model_available(log: Callable | None = None) -> bool:
 
 def get_llm_settings() -> tuple[str, str]:
     """Returns (base_url, model_name)."""
-    cfg   = _load_config()
-    url   = cfg.get("llm_url",   _DEFAULTS["llm_url"]).rstrip("/")
-    model = cfg.get("llm_model", _DEFAULTS["llm_model"])
+    from core.universal_router import PROVIDER_BASE_URLS, DEFAULT_MODELS
+    cfg = _load_config()
+    provider = cfg.get("llm_provider", "ollama").strip().lower()
+    default_url = PROVIDER_BASE_URLS.get(provider, _DEFAULTS["llm_url"])
+    default_model = DEFAULT_MODELS.get(provider, _DEFAULTS["llm_model"])
+    url = (cfg.get(f"{provider}_url") or cfg.get("llm_url") or default_url).rstrip("/")
+    model = cfg.get(f"{provider}_model") or cfg.get("llm_model") or default_model
     return url, model
 
 
