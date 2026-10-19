@@ -7,7 +7,7 @@ import android.os.Environment
 import com.zaya.companion.audio.MicCapture
 import com.zaya.companion.audio.CallAudioRoute
 import com.zaya.companion.audio.PhoneCamera
-import android.graphics.Bitmap
+import android.view.Surface
 import android.util.Base64
 import com.zaya.companion.audio.SpeakerOutput
 import com.zaya.companion.core.Backoff
@@ -133,17 +133,26 @@ class ZayaRuntime(
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
     val videoEnabled: StateFlow<Boolean> = _videoEnabled.asStateFlow()
-    private val _videoPreview = MutableStateFlow<Bitmap?>(null)
-    val videoPreview: StateFlow<Bitmap?> = _videoPreview.asStateFlow()
+    private val _videoSharing = MutableStateFlow(false)
+    val videoSharing: StateFlow<Boolean> = _videoSharing.asStateFlow()
+    private val _videoGeometry = MutableStateFlow<PhoneCamera.Geometry?>(null)
+    val videoGeometry: StateFlow<PhoneCamera.Geometry?> = _videoGeometry.asStateFlow()
     private var phoneCamera: PhoneCamera? = null
+    private var previewSurface: Surface? = null
     private var videoCallId = ""
+    private var videoGeneration = 0L
 
+    /** UI and camera callbacks share this lock; stale callbacks cannot affect a new call. */
+    @Synchronized
     fun setVideoEnabled(enabled: Boolean) {
         if (!enabled) {
+            videoGeneration++
             _videoEnabled.value = false
             phoneCamera?.stop()
             phoneCamera = null
-            _videoPreview.value = null
+            previewSurface = null
+            _videoSharing.value = false
+            _videoGeometry.value = null
             if (videoCallId.isNotEmpty()) control?.send(JSONObject()
                 .put("type", "call.video.toggle").put("call_id", videoCallId).put("enabled", false).toString())
             videoCallId = ""
@@ -158,23 +167,49 @@ class ZayaRuntime(
         val sent = control?.send(JSONObject().put("type", "call.video.toggle")
             .put("call_id", call.callId).put("enabled", true).toString()) == true
         if (!sent) { model.setVoice(note = "No link to Zaya for video"); return }
+        val generation = ++videoGeneration
         videoCallId = call.callId
-        _videoEnabled.value = true
         model.setVoice(note = "")
         phoneCamera = PhoneCamera(context,
-            onFrame = { jpeg, preview ->
-                if (_videoEnabled.value && videoCallId == call.callId && model.call.value is CallUiState.Active) {
-                    _videoPreview.value = preview
+            onFrame = { jpeg -> synchronized(this) {
+                val activeId = (model.call.value as? CallUiState.Active)?.call?.callId
+                if (_videoEnabled.value && videoGeneration == generation && activeId == call.callId && videoCallId == call.callId) {
                     val delivered = control?.send(JSONObject().put("type", "call.video.frame").put("call_id", call.callId)
                         .put("jpeg", Base64.encodeToString(jpeg, Base64.NO_WRAP)).toString()) == true
+                    _videoSharing.value = delivered
                     if (!delivered) {
                         setVideoEnabled(false)
                         model.setVoice(note = "Video link unavailable")
                     }
                 }
-            },
-            onError = { message -> setVideoEnabled(false); model.setVoice(note = message) },
-        ).also { it.start() }
+            } },
+            onGeometry = { geometry -> synchronized(this) {
+                if (videoGeneration == generation && videoCallId == call.callId) _videoGeometry.value = geometry
+            } },
+            onError = { message -> synchronized(this) {
+                if (videoGeneration == generation) {
+                    setVideoEnabled(false)
+                    model.setVoice(note = message)
+                }
+            } },
+        )
+        // Camera capture starts only once the visible preview Surface is ready.
+        _videoEnabled.value = true
+    }
+
+    @Synchronized
+    fun attachVideoPreview(surface: Surface, configureBuffer: (Int, Int) -> Unit) {
+        val activeId = (model.call.value as? CallUiState.Active)?.call?.callId
+        if (!_videoEnabled.value || activeId != videoCallId || !surface.isValid) return
+        if (previewSurface === surface) return
+        if (previewSurface != null) { setVideoEnabled(false); return }
+        previewSurface = surface
+        phoneCamera?.start(surface, configureBuffer)
+    }
+
+    @Synchronized
+    fun detachVideoPreview(surface: Surface) {
+        if (previewSurface === surface) setVideoEnabled(false)
     }
 
     fun setSpeakerphone(enabled: Boolean) {
@@ -396,7 +431,14 @@ class ZayaRuntime(
                     lastMessageAt = System.currentTimeMillis()
                     val envelope = Envelope.parse(text) ?: return
                     if (envelope.type == Protocol.Type.PONG) return
-                    dispatch(model.apply(envelope))
+                    val effects = model.apply(envelope)
+                    if (envelope.type in setOf(Protocol.Type.HELLO, Protocol.Type.CALL_ANSWERED, Protocol.Type.CALL_MUTE)) {
+                        muted = model.voice.value.muted
+                        if (envelope.type == Protocol.Type.CALL_MUTE) applyMicState()
+                    }
+                    if (envelope.type == Protocol.Type.CALL_VIDEO && !envelope.payload.flag("video_enabled") &&
+                        envelope.payload.str("call_id", 64) == videoCallId && _videoEnabled.value) setVideoEnabled(false)
+                    dispatch(effects)
                 }
 
                 override fun onClosed(socket: ZayaSocket, code: Int, reason: String) {

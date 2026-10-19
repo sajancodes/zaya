@@ -72,6 +72,8 @@ data class CallInfo(
     val state: String,
     val direction: String = "incoming",
     val deviceId: String = "",
+    val muted: Boolean = false,
+    val videoEnabled: Boolean = false,
 ) {
     companion object {
         const val STATE_RINGING = "ringing"
@@ -91,6 +93,8 @@ data class CallInfo(
             state = json.str("state", 20),
             direction = json.str("direction", 20).ifBlank { "incoming" },
             deviceId = json.str("device_id", 128),
+            muted = json.flag("muted"),
+            videoEnabled = json.flag("video_enabled"),
         )
     }
 }

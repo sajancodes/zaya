@@ -1,7 +1,6 @@
 package com.zaya.companion.ui.screens
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
@@ -20,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,7 +46,7 @@ fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
     val voice by runtime.model.voice.collectAsStateWithLifecycle()
     val speaker by runtime.speakerphone.collectAsStateWithLifecycle()
     val video by runtime.videoEnabled.collectAsStateWithLifecycle()
-    val preview by runtime.videoPreview.collectAsStateWithLifecycle()
+    val sharing by runtime.videoSharing.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -106,12 +104,10 @@ fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
             emotion = visual.emotion,
             modifier = Modifier.fillMaxSize(),
         )
-            preview?.let { bitmap ->
-                Image(bitmap.asImageBitmap(), "Your camera preview",
-                    Modifier.align(Alignment.BottomEnd).size(width = 108.dp, height = 150.dp)
-                        .clip(RoundedCornerShape(16.dp)))
-            }
-            if (video) Text(if (preview == null) "Starting camera…" else "Camera on · sharing live", color = Color.White,
+            if (video) PhoneVideoPreview(runtime,
+                Modifier.align(Alignment.BottomEnd).size(width = 108.dp, height = 150.dp)
+                    .clip(RoundedCornerShape(16.dp)))
+            if (video) Text(if (!sharing) "Starting camera…" else "Camera on · sharing live", color = Color.White,
                 modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
                 style = MaterialTheme.typography.labelSmall)
         }

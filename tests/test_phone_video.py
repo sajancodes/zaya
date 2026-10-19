@@ -69,6 +69,47 @@ class PhoneVideoTests(unittest.IsolatedAsyncioTestCase):
         self.api._call_video(self.phone, self.frame)
         self.assertTrue(self.api.video_frames.empty())
 
+    def test_call_payload_and_video_events_reflect_opt_in_and_hangup(self):
+        self.connect()
+        self.assertFalse(self.call.payload()['muted'])
+        self.assertFalse(self.call.payload()['video_enabled'])
+        with patch.object(self.bridge, 'emit') as emit:
+            self.calls.set_muted(self.call.call_id, 'mine', True)
+            self.calls.set_video(self.call.call_id, 'mine', True)
+            self.assertTrue(self.call.payload()['muted'])
+            self.assertTrue(self.call.payload()['video_enabled'])
+            self.assertEqual(emit.call_args.args[0]['type'], 'system.call.video')
+        self.calls.end(self.call.call_id)
+        self.assertFalse(self.call.payload()['video_enabled'])
+        self.assertFalse(self.call.payload()['muted'])
+
+    def test_unknown_frame_kind_and_call_ending_during_decode_are_rejected(self):
+        self.connect()
+        self.api._call_video(self.phone, self.toggle)
+        self.api._call_video(self.phone, dict(self.frame, type='call.video.unknown'))
+        self.assertTrue(self.api.video_frames.empty())
+        original_open = Image.open
+
+        def ending_open(*args, **kwargs):
+            image = original_open(*args, **kwargs)
+            self.calls.end(self.call.call_id)
+            return image
+
+        with patch('PIL.Image.open', side_effect=ending_open):
+            self.api._call_video(self.phone, self.frame)
+        self.assertTrue(self.api.video_frames.empty())
+
+    def test_new_call_is_not_throttled_by_the_previous_calls_last_frame(self):
+        self.connect()
+        self.api._call_video(self.phone, self.toggle)
+        self.api._call_video(self.phone, self.frame)
+        self.calls.end(self.call.call_id)
+        newer = self.calls.request_call(title='New', requested=True)
+        self.calls.answer(newer.call_id, device_id='mine')
+        self.api._call_video(self.phone, dict(self.toggle, call_id=newer.call_id))
+        self.api._call_video(self.phone, dict(self.frame, call_id=newer.call_id))
+        self.assertEqual(self.api.video_frames.get_nowait()['call_id'], newer.call_id)
+
     async def test_relay_sends_live_frame_but_discards_stale_frame_after_hangup(self):
         self.connect()
         self.api._call_video(self.phone, self.toggle)

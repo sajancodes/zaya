@@ -104,6 +104,7 @@ class ZayaService : Service() {
     private suspend fun handle(effect: RuntimeEffect, source: ZayaRuntime) {
         when (effect) {
             is RuntimeEffect.Ring -> {
+                if (ringingCallId == effect.call.callId) return
                 ringingCallId = effect.call.callId
                 Ringer.start(this)
                 Notifications.post(this, Notifications.ID_CALL, Notifications.incomingCall(this, effect.call))

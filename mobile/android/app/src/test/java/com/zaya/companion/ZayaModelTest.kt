@@ -422,4 +422,25 @@ class ZayaModelTest {
         assertTrue(model.voice.value.muted)
         assertTrue(model.voice.value.micActive)
     }
+    @Test
+    fun `duplicate ringing events do not relaunch the call presentation`() {
+        val call = JSONObject().put("call_id", "one").put("priority", 1).put("state", "ringing")
+        assertEquals(1, model.apply(event(Protocol.Type.CALL_INCOMING, call)).size)
+        assertTrue(model.apply(event(Protocol.Type.CALL_INCOMING, call)).isEmpty())
+    }
+
+    @Test
+    fun `snapshot restores mute and ignores another calls mute event`() {
+        val call = JSONObject().put("call_id", "one").put("state", "answered")
+            .put("device_id", "mine").put("muted", true)
+        model.apply(event(Protocol.Type.HELLO, JSONObject().put("device_id", "mine")
+            .put("snapshot", JSONObject().put("active_call", call))))
+        assertTrue(model.voice.value.muted)
+        assertFalse(model.voice.value.micActive)
+        model.apply(event(Protocol.Type.CALL_MUTE, JSONObject().put("call_id", "other").put("muted", false)))
+        assertTrue(model.voice.value.muted)
+        model.apply(event(Protocol.Type.CALL_MUTE, JSONObject().put("call_id", "one").put("muted", false)))
+        assertFalse(model.voice.value.muted)
+        assertTrue(model.voice.value.micActive)
+    }
 }

@@ -97,6 +97,8 @@ object Protocol {
         const val CALL_ANSWERED = "call.answered"
         const val CALL_ENDED = "call.ended"
         const val CALL_MISSED = "call.missed"
+        const val CALL_MUTE = "system.call.mute"
+        const val CALL_VIDEO = "system.call.video"
     }
 
     // ── uplink control messages (phone → laptop) ─────────────────────────────

@@ -198,6 +198,15 @@ class ZayaModel(
                 listOfNotNull(item).map { RuntimeEffect.Notify(it) }
             }
 
+            Protocol.Type.CALL_MUTE -> {
+                val current = _call.value as? CallUiState.Active
+                if (current != null && payload.str("call_id", 64) == current.call.callId) {
+                    val muted = payload.flag("muted")
+                    setVoice(muted = muted, micActive = !muted)
+                }
+                emptyList()
+            }
+
             Protocol.Type.CALL_INCOMING -> applyIncomingCall(payload)
 
             Protocol.Type.CALL_DIALING -> {
@@ -217,7 +226,7 @@ class ZayaModel(
                     return listOf(RuntimeEffect.StopVoice, RuntimeEffect.StopRinging)
                 }
                 _call.value = CallUiState.Active(call, clock())
-                setVoice(micActive = true, speakerActive = true)
+                setVoice(micActive = !call.muted, speakerActive = true, muted = call.muted)
                 listOf(RuntimeEffect.StartVoice, RuntimeEffect.StopRinging)
             }
 
@@ -252,7 +261,7 @@ class ZayaModel(
         _call.value = if (active != null) {
             val call = CallInfo.from(active)
             if (call.callId.isNotEmpty() && call.state == CallInfo.STATE_ANSWERED && belongsHere(call)) {
-                setVoice(micActive = true, speakerActive = true)
+                setVoice(micActive = !call.muted, speakerActive = true, muted = call.muted)
                 CallUiState.Active(call, clock())
             } else if (call.callId.isNotEmpty() && call.state == CallInfo.STATE_RINGING) {
                 setVoice(micActive = false, speakerActive = false)
@@ -560,6 +569,8 @@ class ZayaModel(
             )
             return listOfNotNull(item).map { RuntimeEffect.Notify(it) }
         }
+        val current = _call.value as? CallUiState.Ringing
+        if (current?.call?.callId == call.callId) return emptyList()
         _call.value = CallUiState.Ringing(call)
         setVoice(micActive = false, speakerActive = false)
         return listOf(RuntimeEffect.Ring(call))

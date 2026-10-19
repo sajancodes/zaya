@@ -727,6 +727,8 @@ class MobileApi:
 
     def _call_video(self, session: MobileSession, data: dict) -> None:
         """A single bounded camera frame, only from the answering phone's opt-in."""
+        if data.get('type') not in {'call.video.toggle', 'call.video.frame'}:
+            return
         call = self.calls.active()
         if (call is None or call.state != 'answered' or call.call_id != data.get('call_id')
                 or call.device_id != session.device['device_id']):
@@ -762,12 +764,20 @@ class MobileApi:
                 image.verify()
         except (ValueError, OSError, binascii.Error, Image.DecompressionBombError):
             return
+        # The camera decoder can run while another thread ends the call.
+        active = self.calls.active()
+        if (active is None or active.call_id != call.call_id or active.state != 'answered'
+                or active.device_id != session.device['device_id'] or not active.video_enabled):
+            return
         self._last_video = (call.call_id, now)
         try:
             self.video_frames.get_nowait()
         except queue.Empty:
             pass
-        self.video_frames.put_nowait({'call_id': call.call_id, 'device_id': call.device_id, 'data': jpeg})
+        try:
+            self.video_frames.put_nowait({'call_id': call.call_id, 'device_id': call.device_id, 'data': jpeg})
+        except queue.Full:
+            pass  # Latest-frame delivery is best-effort; never end the control socket.
 
     def _call_control(self, session: MobileSession, kind: str, call_id: str, data: dict) -> None:
         calls = self.calls

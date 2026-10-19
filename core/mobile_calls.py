@@ -164,6 +164,8 @@ class ZayaCall:
             'created_at': float(self.created_at),
             'direction': self.direction,
             'device_id': self.device_id,
+            'muted': bool(self.muted),
+            'video_enabled': bool(self.video_enabled),
         }
 
     def public(self) -> dict:
@@ -624,6 +626,8 @@ class MobileCallManager:
             if call is None or call.state in (DECLINED, MISSED, ENDED):
                 return None
             call.state = state
+            call.video_enabled = False
+            call.muted = False
             call.ended_at = self._clock()
             timer, self._ring_timer = self._ring_timer, None
             answer_timer, self._answer_timer = self._answer_timer, None
@@ -659,8 +663,9 @@ class MobileCallManager:
             call = self._calls.get(call_id)
             if call is None or call.state != ANSWERED or call.device_id != device_id:
                 return False
-            call.muted = bool(muted)
-        self.bridge().emit(protocol.envelope('system.call.mute', {'call_id': call_id, 'muted': call.muted}))
+            call.muted = muted is True
+            payload = {'call_id': call_id, 'muted': call.muted}
+        self.bridge().emit(protocol.envelope('system.call.mute', payload))
         return True
 
     def set_video(self, call_id, device_id, enabled):
@@ -669,6 +674,8 @@ class MobileCallManager:
             if call is None or call.state != ANSWERED or call.device_id != device_id:
                 return False
             call.video_enabled = enabled is True
+            payload = {'call_id': call_id, 'video_enabled': call.video_enabled}
+        self.bridge().emit(protocol.envelope('system.call.video', payload))
         return True
 
     def recent(self, limit: int = 20) -> list[dict]:
