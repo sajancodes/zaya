@@ -60,7 +60,7 @@ class _Pending:
 
 
 _pending: Optional[_Pending] = None
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 # Set once at startup by main.py. Signature: (title, detail) -> None for show,
 # and () -> None for hide. Both are marshalled onto the Qt thread by the UI.
@@ -118,7 +118,8 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
         _show_cb(title, detail)
     except Exception as e:
         with _lock:
-            _pending = None
+            if _pending is current:
+                _pending = None
         return f"Could not ask for confirmation: {e}. Nothing was done."
 
     _log(f"SYS: Awaiting confirmation — {title}")
@@ -136,10 +137,7 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
         pass
 
     def expire():
-        with _lock:
-            matches = _pending is current
-        if matches:
-            resolve(False)
+        resolve(False, expected=current)
     timer = threading.Timer(TIMEOUT_SECONDS + 0.05, expire)
     timer.daemon = True
     timer.start()
@@ -150,7 +148,7 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
     )
 
 
-def resolve(accepted: bool) -> None:
+def resolve(accepted: bool, *, expected=None) -> None:
     """Called by the UI when the user presses CONFIRM or CANCEL.
 
     Runs the stored callable on a worker thread — this is invoked from the Qt
@@ -159,13 +157,15 @@ def resolve(accepted: bool) -> None:
     global _pending
 
     with _lock:
+        if expected is not None and _pending is not expected:
+            return
         p, _pending = _pending, None
-
-    if _hide_cb:
-        try:
-            _hide_cb()
-        except Exception:
-            pass
+        # Do not hide a newer confirmation installed during this resolution.
+        if p is not None and _hide_cb:
+            try:
+                _hide_cb()
+            except Exception:
+                pass
 
     if p is None:
         return

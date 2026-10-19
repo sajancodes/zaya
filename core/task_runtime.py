@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from core import audit
 from core.event_bus import bus
@@ -53,25 +53,52 @@ class TaskRuntime:
         self._save(task, 'task.created')
         return task
 
-    def _save(self, task: Task, event: str = 'task.updated') -> Task:
+    def _save(self, task: Task, event: str | None = 'task.updated') -> Task:
         task.updated_at = time.time()
         payload = audit.redact(asdict(task))
         with self._lock, self.db:
             self.db.execute('INSERT OR REPLACE INTO runtime_tasks VALUES (?,?)', (task.id, json.dumps(payload)))
-        bus.publish(event, task=payload)
+        if event is not None:
+            bus.publish(event, task=payload)
         return task
 
     def get(self, task_id: str) -> Task:
         with self._lock:
-            row = self.db.execute('SELECT payload FROM runtime_tasks WHERE id=?', (task_id,)).fetchone()
+            row = self.db.execute('SELECT id, payload FROM runtime_tasks WHERE id=?', (task_id,)).fetchone()
         if not row:
             raise KeyError(task_id)
-        return Task(**json.loads(row[0]))
+        return self._load_task(*row)
+
+    @staticmethod
+    def _load_task(task_id: str, raw: str) -> Task:
+        """Old rows remain readable without trusting renamed or future fields."""
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        values = {}
+        for item in fields(Task):
+            if item.name in data:
+                values[item.name] = data[item.name]
+            elif item.default is not MISSING:
+                values[item.name] = item.default
+            elif item.default_factory is not MISSING:
+                values[item.name] = item.default_factory()
+        values['id'] = task_id  # The database key, never an embedded stale ID.
+        values.setdefault('goal', 'Recovered task')
+        for name in ('evidence', 'side_effects'):
+            if not isinstance(values[name], list):
+                values[name] = []
+        if not isinstance(values['state'], str) or values['state'] not in STATES:
+            values['state'] = 'paused'
+        return Task(**values)
 
     def list(self, limit: int = 200) -> list[Task]:
         with self._lock:
-            rows = self.db.execute('SELECT payload FROM runtime_tasks ORDER BY rowid DESC LIMIT ?', (min(limit, 1000),)).fetchall()
-        return [Task(**json.loads(row[0])) for row in rows]
+            rows = self.db.execute('SELECT id, payload FROM runtime_tasks ORDER BY rowid DESC LIMIT ?', (min(limit, 1000),)).fetchall()
+        return [self._load_task(*row) for row in rows]
 
     def transition(self, task_id: str, state: str, **updates) -> Task:
         with self._lock:
@@ -95,14 +122,18 @@ class TaskRuntime:
             return self._save(task)
 
     def finish(self, task_id: str, result: ToolResult) -> Task:
-        task = self.get(task_id)
-        task.evidence.extend(result.evidence)
-        if result.side_effect and result.status == 'success':
-            task.side_effects.append({'step': task.active_step, 'summary': result.summary})
-        state = {'success': 'completed', 'failed': 'failed', 'partial': 'waiting_external',
-                 'waiting_confirmation': 'waiting_confirmation'}[result.status]
-        return self.transition(task_id, state, evidence=task.evidence, side_effects=task.side_effects,
-                               error=result.summary if result.status == 'failed' else None)
+        with self._lock:
+            task = self.get(task_id)
+            task.evidence.extend(result.evidence)
+            if result.side_effect and result.status == 'success':
+                task.side_effects.append({'step': task.active_step, 'summary': result.summary})
+            if task.state in TERMINAL:
+                # Keep evidence of a late side effect without undoing cancellation.
+                return self._save(task, event=None)
+            state = {'success': 'completed', 'failed': 'failed', 'partial': 'waiting_external',
+                     'cancelled': 'cancelled', 'waiting_confirmation': 'waiting_confirmation'}.get(result.status, 'failed')
+            return self.transition(task_id, state, evidence=task.evidence, side_effects=task.side_effects,
+                                   error=result.summary if state == 'failed' else None)
 
     def cached(self, request_id: str) -> ToolResult | None:
         with self._lock:

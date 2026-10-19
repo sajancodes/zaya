@@ -113,7 +113,7 @@ class KeyPool:
                 if self.blocked.get((key, resource), 0) <= self.clock():
                     self.active[resource] = key
                     return key
-            raise KeysCooling(min(self.blocked[(key, resource)] for key in keys) - self.clock())
+            raise KeysCooling(min(self.blocked.get((key, resource), self.clock()) for key in keys) - self.clock())
 
     def limited(self, key, error, resource='live'):
         with self.lock:

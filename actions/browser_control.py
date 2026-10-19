@@ -1150,7 +1150,8 @@ def browser_control(
 
 
 def _log(player, text: str):
-    short = str(text)[:80]
+    from core.tool_result import ToolResult
+    short = (text.summary if isinstance(text, ToolResult) else str(text))[:80]
     print(f"[Browser] {short}")
     if player:
         player.write_log(f"[browser] {short[:60]}")

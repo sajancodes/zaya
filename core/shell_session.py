@@ -1,6 +1,8 @@
 """Bounded subprocess execution with cwd sessions and process-tree cancellation."""
 from __future__ import annotations
 import os
+import logging
+import shlex
 import shutil
 import signal
 import subprocess
@@ -10,6 +12,32 @@ import uuid
 from pathlib import Path
 from core.audit import redact
 from core.tool_result import ToolResult
+
+log = logging.getLogger(__name__)
+
+
+def split_command(command: str) -> list[str]:
+    """Parse argv without losing quoted arguments or Windows path separators."""
+    if not command.strip():
+        return []
+    if os.name != 'nt':
+        return shlex.split(command)
+    import ctypes
+    from ctypes import wintypes
+    shell = ctypes.WinDLL('shell32', use_last_error=True)
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    shell.CommandLineToArgvW.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int))
+    shell.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+    kernel.LocalFree.argtypes = (ctypes.c_void_p,)
+    kernel.LocalFree.restype = ctypes.c_void_p
+    count = ctypes.c_int()
+    argv = shell.CommandLineToArgvW(command.strip(), ctypes.byref(count))
+    if not argv:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return [argv[index] for index in range(count.value)]
+    finally:
+        kernel.LocalFree(ctypes.cast(argv, ctypes.c_void_p))
 
 
 class OutputBuffer:
@@ -34,15 +62,21 @@ def terminate_tree(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
     if os.name == 'nt':
-        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True, timeout=10,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True, timeout=10,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            log.warning('Process-tree termination failed for PID %s; trying the child directly.', process.pid)
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        except OSError:
+            log.warning('Process-group termination failed for PID %s.', process.pid)
     if process.poll() is None:
-        process.kill()
+        try:
+            process.kill()
+        except OSError:
+            log.warning('Unable to kill PID %s; termination is unconfirmed.', process.pid)
 
 
 class ShellSessions:
@@ -118,7 +152,10 @@ class ShellSessions:
         except subprocess.TimeoutExpired:
             timed_out = True
             terminate_tree(process)
-            process.wait(timeout=10)
+            try:
+                process.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                log.warning('PID %s did not exit after termination; reporting the timeout.', process.pid)
         finally:
             for thread in threads:
                 thread.join(timeout=10)

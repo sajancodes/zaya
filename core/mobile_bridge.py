@@ -74,7 +74,13 @@ class AudioListener:
             return
         dropped = 0
         with self._lock:
+            if self.closed:
+                return
+            if len(frame) > self._max_bytes:
+                self.dropped += 1
+                return  # Never let even one frame exceed the audio latency budget.
             if len(self._frames) >= self._frames.maxlen:      # this append evicts
+                # Account for the oldest entry BEFORE deque.append evicts it.
                 self._bytes -= len(self._frames[0])
                 dropped += 1
             self._frames.append(frame)
@@ -82,7 +88,6 @@ class AudioListener:
             while self._bytes > self._max_bytes and len(self._frames) > 1:
                 self._bytes -= len(self._frames.popleft())
                 dropped += 1
-        if dropped:
             self.dropped += dropped
         loop, event = self._loop, self._event
         if loop is None or event is None:

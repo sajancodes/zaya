@@ -184,5 +184,5 @@ class ReplyWorker:
         return True
 
     def _incoming_version(self, chat_id):
-        return self.store.rows("SELECT MAX(rowid) AS version FROM wa_messages WHERE chat_id=? AND direction='incoming'",
+        return self.store.rows("SELECT COALESCE(MAX(rowid), 0) AS version FROM wa_messages WHERE chat_id=? AND direction='incoming'",
                                (chat_id,))[0]['version']

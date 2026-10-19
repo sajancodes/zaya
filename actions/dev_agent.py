@@ -23,8 +23,7 @@ MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return gemini.api_key()
 
 
 def _get_model(model_name: str = gemini.SMART):
@@ -314,7 +313,10 @@ def _open_vscode(project_dir: Path) -> bool:
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
     try:
-        parts = run_command.split()
+        from core.shell_session import split_command
+        parts = split_command(run_command)
+        if not parts:
+            return 'Run error: empty command.'
         if parts[0].lower() == "python":
             parts[0] = sys.executable
 
