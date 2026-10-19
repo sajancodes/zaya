@@ -96,7 +96,17 @@ class AudioPlaybackPipeline:
 
         last_audio = time.monotonic()
         try:
-            from core.visemes import _pcm_visemes, _pcm_level
+            import sys
+            main_mod = sys.modules.get("main")
+            _pcm_visemes = getattr(main_mod, "_pcm_visemes", None)
+            _pcm_level = getattr(main_mod, "_pcm_level", None)
+            if _pcm_level is None:
+                def _pcm_level(samples) -> float:
+                    try:
+                        x = np.asarray(samples, dtype=np.float32)
+                        return 0.0 if x.size == 0 else min(1.0, float(np.sqrt(np.mean(x * x))) / 32768.0)
+                    except Exception:
+                        return 0.0
 
             while True:
                 try:
