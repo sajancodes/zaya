@@ -33,7 +33,8 @@ for _stream in ("stdout", "stderr"):
     except Exception:
         pass          # pythonw / redirected pipes / anything exotic — never fatal
 
-# ─────────────────────────────────────────────────────────────────────────────
+import warnings as _warnings
+_warnings.filterwarnings("ignore", category=FutureWarning, message=r".*pynvml.*deprecated.*")
 
 import asyncio
 import re
