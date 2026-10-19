@@ -133,6 +133,16 @@ class ZayaRuntime(
     val cellularCallManager by lazy { com.zaya.companion.service.CellularCallManager(context) }
     val mediaPlaybackController by lazy { com.zaya.companion.service.MediaPlaybackController(context) }
     val appLauncher by lazy { com.zaya.companion.service.AppLauncher(context) }
+    val actionExecutor by lazy {
+        com.zaya.companion.action.ActionExecutor(
+            context = context,
+            hardwareController = hardwareController,
+            mediaController = mediaPlaybackController,
+            appLauncher = appLauncher,
+            callManager = cellularCallManager,
+        )
+    }
+    val actionRegistry by lazy { actionExecutor.registry }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -426,6 +436,7 @@ class ZayaRuntime(
                     lastMessageAt = openedAt
                     _connection.value = ConnectionStatus(ConnectionPhase.ONLINE, "Connected")
                     sendHello(socket)
+                    sendCapabilitiesReport(socket)
                     openVoiceSocket(base, token)
                     scope.launch { updates.check() }
                     flushOutbox(socket)
@@ -462,6 +473,7 @@ class ZayaRuntime(
                         Protocol.Type.MEDIA_CONTROL -> handleMediaControl(envelope.payload)
                         Protocol.Type.OPEN_DEEP_LINK -> handleDeepLink(envelope.payload)
                         Protocol.Type.LAUNCH_APP -> handleLaunchApp(envelope.payload)
+                        Protocol.Type.ACTION_INVOKE -> handleActionInvoke(envelope.payload)
                     }
 
                     dispatch(effects)
@@ -1026,6 +1038,70 @@ class ZayaRuntime(
             .put("payload", JSONObject().put("name", name).put("success", success).put("module", "app_launcher"))
             .put("timestamp", System.currentTimeMillis() / 1000.0)
         control?.send(report.toString())
+    }
+
+    fun sendCapabilitiesReport(socket: ZayaSocket? = control) {
+        val caps = actionRegistry.discoverCapabilities()
+        val arr = org.json.JSONArray()
+        caps.forEach { arr.put(it.toJsonObject()) }
+        val msg = JSONObject()
+            .put("type", Protocol.Control.CAPABILITIES_REPORT)
+            .put("payload", JSONObject().put("capabilities", arr))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        socket?.send(msg.toString())
+    }
+
+    private fun handleActionInvoke(payload: JSONObject) {
+        val actionId = payload.str("action_id", 60)
+        val args = payload.optJSONObject("arguments") ?: JSONObject()
+        val action: com.zaya.companion.action.AndroidAction = when (actionId) {
+            "set_flashlight" -> com.zaya.companion.action.AndroidAction.SetFlashlight(args.optBoolean("enabled", true))
+            "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(args.optString("setting", "settings"))
+            "control_media" -> com.zaya.companion.action.AndroidAction.ControlMedia(args.optString("action", "toggle"))
+            "launch_app" -> com.zaya.companion.action.AndroidAction.LaunchApp(args.optString("name", ""))
+            "lookup_contact" -> com.zaya.companion.action.AndroidAction.LookUpContact(args.optString("query", ""))
+            "compose_sms" -> com.zaya.companion.action.AndroidAction.ComposeSms(
+                recipient = args.optString("recipient", ""),
+                message = args.optString("message", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "answer_call" -> com.zaya.companion.action.AndroidAction.AnswerCall
+            "reject_call" -> com.zaya.companion.action.AndroidAction.RejectCall
+            "read_notifications" -> com.zaya.companion.action.AndroidAction.ReadNotifications(
+                packageFilter = args.optString("package_filter", "").ifBlank { null }
+            )
+            "reply_notification" -> com.zaya.companion.action.AndroidAction.ReplyToNotification(
+                notificationKey = args.optString("notification_key", ""),
+                text = args.optString("text", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "capture_screen" -> com.zaya.companion.action.AndroidAction.CaptureScreen
+            "scroll_screen" -> com.zaya.companion.action.AndroidAction.ScrollScreen(args.optString("direction", "down"))
+            "tap_screen" -> com.zaya.companion.action.AndroidAction.TapScreen(
+                x = args.optDouble("x", 0.0).toFloat(),
+                y = args.optDouble("y", 0.0).toFloat()
+            )
+            "run_task" -> com.zaya.companion.action.AndroidAction.RunTask(args.optString("task_id", ""))
+            "cancel_task" -> com.zaya.companion.action.AndroidAction.CancelTask(args.optString("task_id", ""))
+            else -> {
+                val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
+                val report = JSONObject()
+                    .put("type", Protocol.Control.ACTION_RESULT)
+                    .put("payload", errResult.toJsonObject())
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(report.toString())
+                return
+            }
+        }
+
+        scope.launch {
+            val result = actionExecutor.execute(action)
+            val report = JSONObject()
+                .put("type", Protocol.Control.ACTION_RESULT)
+                .put("payload", result.toJsonObject())
+                .put("timestamp", System.currentTimeMillis() / 1000.0)
+            control?.send(report.toString())
+        }
     }
 
     private companion object {
