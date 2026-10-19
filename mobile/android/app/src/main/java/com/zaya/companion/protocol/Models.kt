@@ -70,6 +70,8 @@ data class CallInfo(
     val reason: String,
     val source: String,
     val state: String,
+    val direction: String = "incoming",
+    val deviceId: String = "",
 ) {
     companion object {
         const val STATE_RINGING = "ringing"
@@ -87,6 +89,8 @@ data class CallInfo(
             reason = json.str("reason", Protocol.MAX_DETAIL),
             source = json.str("source", 40),
             state = json.str("state", 20),
+            direction = json.str("direction", 20).ifBlank { "incoming" },
+            deviceId = json.str("device_id", 128),
         )
     }
 }
@@ -94,6 +98,7 @@ data class CallInfo(
 /** State of the phone's side of a call. */
 sealed interface CallUiState {
     data object Idle : CallUiState
+    data class Dialing(val call: CallInfo) : CallUiState
     data class Ringing(val call: CallInfo) : CallUiState
     data class Active(val call: CallInfo, val answeredAt: Long) : CallUiState
 }

@@ -1,224 +1,167 @@
 package com.zaya.companion.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.zaya.companion.protocol.CallInfo
 import com.zaya.companion.protocol.CallUiState
 import com.zaya.companion.protocol.Protocol
 import com.zaya.companion.runtime.ZayaModel
 import com.zaya.companion.runtime.ZayaRuntime
-import com.zaya.companion.ui.Note
-import com.zaya.companion.ui.OutlinedToggle
 import com.zaya.companion.ui.ZayaFace
-import com.zaya.companion.ui.theme.ZayaAccent
 import kotlinx.coroutines.delay
 
-/**
- * The call screen: the same face, the same voice, plus the controls a phone call
- * needs. The laptop owns the call — answering, declining and ending here are
- * requests to it, mirrored back through `call.answered` / `call.ended`.
- */
+/** One continuous phone screen, from ringing through answer to hang-up. */
 @Composable
 fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
     val call by runtime.model.call.collectAsStateWithLifecycle()
     val visual by runtime.model.visual.collectAsStateWithLifecycle()
     val voice by runtime.model.voice.collectAsStateWithLifecycle()
-    val output by runtime.model.outputTarget.collectAsStateWithLifecycle()
+    val speaker by runtime.speakerphone.collectAsStateWithLifecycle()
     var elapsed by remember { mutableLongStateOf(0L) }
+    val ringing = call as? CallUiState.Ringing
+    val dialing = call as? CallUiState.Dialing
+    val active = call as? CallUiState.Active
+    val info = ringing?.call ?: dialing?.call ?: active?.call
 
-    LaunchedEffect(call) {
-        val active = call as? CallUiState.Active
-        if (active == null) {
-            elapsed = 0L
-            return@LaunchedEffect
-        }
-        while (true) {
-            elapsed = (System.currentTimeMillis() - active.answeredAt) / 1000
-            delay(1_000)
+    LaunchedEffect(active?.call?.callId) {
+        elapsed = 0L
+        while (active != null) {
+            elapsed = ((System.currentTimeMillis() - active.answeredAt) / 1000).coerceAtLeast(0)
+            delay(1000)
         }
     }
-
-    val ringing = call as? CallUiState.Ringing
-    val active = call as? CallUiState.Active
-    val info: CallInfo? = ringing?.call ?: active?.call
-
     Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(
+            Color(0xFF203F4B), Color(0xFF101C29), Color(0xFF080E18),
+        ))).safeDrawingPadding().padding(horizontal = 28.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = info?.title?.ifBlank { "Zaya" } ?: "Zaya",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = when {
-                active != null -> ZayaModel.formatDuration(elapsed)
-                ringing != null -> "Ringing…"
-                else -> "No call in progress"
-            },
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (info != null && info.reason.isNotBlank()) {
-            Text(
-                text = info.reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 6.dp),
-            )
+        TextButton(onClick = onMinimize, modifier = Modifier.align(Alignment.End)) {
+            Text(if (call is CallUiState.Idle) "Back" else "Minimize", color = Color(0xFFB1C8D0))
         }
-
+        Spacer(Modifier.height(12.dp))
+        Text("Zaya", style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Light, color = Color.White)
+        Spacer(Modifier.height(10.dp))
+        Text(when {
+            active != null -> ZayaModel.formatDuration(elapsed)
+            dialing != null -> "Ringing…"
+            ringing != null -> "Incoming call"
+            else -> "Call ended"
+        }, color = Color(0xFFB1C8D0), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(12.dp))
+        if (ringing != null && info != null) {
+            Text(info.detail.ifBlank { info.reason }.take(180),
+                color = Color(0xFFD4E1E5), textAlign = TextAlign.Center,
+                maxLines = 3, style = MaterialTheme.typography.bodyMedium)
+        }
         ZayaFace(
-            state = if (voice.micActive) Protocol.LISTENING else visual.state,
+            state = if (active != null && voice.micActive) Protocol.LISTENING else visual.state,
             emotion = visual.emotion,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f),
         )
-
-        VoiceMeter(runtime)
-
-        if (voice.note.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Note(voice.note, ZayaAccent.amber)
-        }
-        Spacer(Modifier.height(10.dp))
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedToggle(
-                label = if (voice.muted) "Unmute" else "Mute",
-                active = voice.muted,
-                onClick = { runtime.setMuted(!voice.muted) },
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(
-                onClick = {
-                    val next = when (output) {
-                        Protocol.Output.DESKTOP -> Protocol.Output.PHONE
-                        Protocol.Output.PHONE -> Protocol.Output.BOTH
-                        else -> Protocol.Output.DESKTOP
-                    }
-                    runtime.changeOutputInBackground(next)
-                },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(
-                    when (output) {
-                        Protocol.Output.DESKTOP -> "Laptop"
-                        Protocol.Output.PHONE -> "Phone"
-                        Protocol.Output.BOTH -> "Both"
-                        else -> "Voice"
-                    },
-                )
+        if (voice.note.isNotBlank()) Text(voice.note, color = Color(0xFFFFCB91),
+            textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 16.dp))
+        if (active != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                PhoneControl(if (voice.muted) "Unmute" else "Mute", PhoneGlyph.MIC,
+                    selected = voice.muted) { runtime.setMuted(!voice.muted) }
+                PhoneControl("Speaker", PhoneGlyph.SPEAKER,
+                    selected = speaker) { runtime.setSpeakerphone(!speaker) }
             }
+            Spacer(Modifier.height(34.dp))
         }
-
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             when {
                 ringing != null -> {
-                    Button(
-                        onClick = { runtime.answer(ringing.call.callId) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Answer") }
-                    Button(
-                        onClick = { runtime.decline(ringing.call.callId) },
-                        colors = ButtonDefaults.buttonColors(containerColor = ZayaAccent.red),
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Decline") }
-                }
-
-                active != null -> {
-                    Button(
-                        onClick = { runtime.endCall() },
-                        colors = ButtonDefaults.buttonColors(containerColor = ZayaAccent.red),
-                        modifier = Modifier.weight(1f),
-                    ) { Text("End call") }
-                    OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                        Text("Hide")
+                    PhoneControl("Decline", PhoneGlyph.HANGUP, Color(0xFFE34C61)) {
+                        runtime.decline(ringing.call.callId)
+                    }
+                    PhoneControl("Answer", PhoneGlyph.CALL, Color(0xFF36B87B)) {
+                        runtime.answer(ringing.call.callId)
                     }
                 }
+                active != null || dialing != null ->
+                    PhoneControl("End call", PhoneGlyph.HANGUP, Color(0xFFE34C61)) { runtime.endCall() }
+                else -> PhoneControl("Call Zaya", PhoneGlyph.CALL, Color(0xFF36B87B)) { runtime.startCall() }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+    }
+}
 
-                else -> {
-                    Button(onClick = { runtime.startCall() }, modifier = Modifier.weight(1f)) {
-                        Text("Call Zaya")
+private enum class PhoneGlyph { CALL, HANGUP, MIC, SPEAKER }
+
+@Composable
+private fun PhoneControl(
+    label: String, glyph: PhoneGlyph, tint: Color = Color(0xFF30424E),
+    selected: Boolean = false, onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FilledIconButton(onClick = onClick, modifier = Modifier.size(72.dp).semantics { contentDescription = label }, shape = CircleShape,
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = if (selected) Color.White else tint,
+                contentColor = if (selected) Color(0xFF142331) else Color.White,
+            )) {
+            val ink = if (selected) Color(0xFF142331) else Color.White
+            Canvas(Modifier.size(30.dp)) {
+                val s = size.width / 30f
+                val stroke = 2.2f * s
+                fun pt(x: Float, y: Float) = Offset(x*s, y*s)
+                when (glyph) {
+                    PhoneGlyph.MIC -> {
+                        drawRoundRect(ink, pt(11f, 3f), Size(8*s, 15*s),
+                            androidx.compose.ui.geometry.CornerRadius(4*s), style = Stroke(stroke))
+                        drawArc(ink, 0f, 180f, false, pt(7f, 7f), Size(16*s, 16*s), style = Stroke(stroke))
+                        drawLine(ink, pt(15f, 23f), pt(15f, 28f), stroke, StrokeCap.Round)
+                        if (selected) drawLine(ink, pt(3f, 3f), pt(27f, 27f), stroke, StrokeCap.Round)
                     }
-                    OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                        Text("Back")
+                    PhoneGlyph.SPEAKER -> {
+                        val path = Path().apply {
+                            moveTo(3*s,11*s); lineTo(9*s,11*s); lineTo(16*s,5*s)
+                            lineTo(16*s,25*s); lineTo(9*s,19*s); lineTo(3*s,19*s); close()
+                        }
+                        drawPath(path, ink, style = Stroke(stroke))
+                        drawArc(ink, -55f, 110f, false, pt(10f, 3f), Size(18*s,24*s), style = Stroke(stroke))
+                    }
+                    PhoneGlyph.HANGUP, PhoneGlyph.CALL -> {
+                        val path = Path().apply {
+                            if (glyph == PhoneGlyph.HANGUP) {
+                                moveTo(3*s,19*s); cubicTo(7*s,9*s,23*s,9*s,27*s,19*s)
+                                lineTo(21*s,21*s); lineTo(20*s,16*s)
+                                cubicTo(17*s,14*s,13*s,14*s,10*s,16*s)
+                                lineTo(9*s,21*s); close()
+                            } else {
+                                moveTo(7*s,3*s); lineTo(12*s,10*s); lineTo(9*s,13*s)
+                                cubicTo(10*s,17*s,13*s,20*s,17*s,21*s)
+                                lineTo(20*s,18*s); lineTo(27*s,23*s)
+                                cubicTo(23*s,34*s,0*s,15*s,3*s,7*s); close()
+                            }
+                        }
+                        drawPath(path, ink, style = Stroke(stroke, cap = StrokeCap.Round))
                     }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-    }
-}
-
-/**
- * A real level meter, not a decoration: it reads what the speaker is actually
- * playing, which is how the owner can tell "connected" from "heard".
- */
-@Composable
-private fun VoiceMeter(runtime: ZayaRuntime) {
-    val voice by runtime.model.voice.collectAsStateWithLifecycle()
-    var level by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(voice.speakerActive) {
-        while (true) {
-            level = if (voice.speakerActive) runtime.outputLevel() else 0f
-            delay(120)
-        }
-    }
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(50))
-            .background(ZayaAccent.quiet),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth((0.04f + level).coerceIn(0.04f, 1f))
-                .fillMaxSize()
-                .background(
-                    if (voice.speakerActive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        ZayaAccent.muted.copy(alpha = 0.4f)
-                    },
-                ),
-        )
+        Text(label, color = Color.White, style = MaterialTheme.typography.labelLarge)
     }
 }

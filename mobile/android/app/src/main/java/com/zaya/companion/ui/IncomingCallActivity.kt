@@ -1,10 +1,12 @@
 package com.zaya.companion.ui
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zaya.companion.ZayaApp
 import com.zaya.companion.service.ZayaService
@@ -30,11 +32,24 @@ class IncomingCallActivity : ComponentActivity() {
                 val runtime by ZayaApp.runtime.collectAsStateWithLifecycle()
                 val current = runtime
                 if (current == null) {
-                    finish()
+                    androidx.compose.material3.Text("Connecting to Zaya…")
                 } else {
+                    LaunchedEffect(current) {
+                        if (intent.action == ZayaService.ACTION_ANSWER) {
+                            current.answer(intent.getStringExtra(EXTRA_CALL_ID).orEmpty())
+                        }
+                    }
                     IncomingCallScreen(runtime = current, onDismiss = { finish() })
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ZayaService.ACTION_ANSWER) {
+            ZayaApp.runtime.value?.answer(intent.getStringExtra(EXTRA_CALL_ID).orEmpty())
         }
     }
 

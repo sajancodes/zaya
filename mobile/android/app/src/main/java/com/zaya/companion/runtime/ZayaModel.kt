@@ -28,6 +28,7 @@ sealed interface RuntimeEffect {
     /** A call worth ringing for (P0/P1) arrived. */
     data class Ring(val call: CallInfo) : RuntimeEffect
     data object StopRinging : RuntimeEffect
+    data object Ringback : RuntimeEffect
     data object StartVoice : RuntimeEffect
     data object StopVoice : RuntimeEffect
 
@@ -86,6 +87,7 @@ class ZayaModel(
     val voice: StateFlow<VoiceState> = _voice.asStateFlow()
 
     private var lastZayaLine: Pair<String, Long>? = null
+    private var deviceId: String = ""
     private val recentNotifications = LinkedHashMap<String, Long>()
 
     val unread: Int get() = _notifications.value.count { !it.read }
@@ -99,7 +101,12 @@ class ZayaModel(
         return when (envelope.type) {
             Protocol.Type.HELLO -> {
                 patchHello(payload)
-                emptyList()
+                when (val current = _call.value) {
+                    is CallUiState.Active -> listOf(RuntimeEffect.StartVoice)
+                    is CallUiState.Dialing -> listOf(RuntimeEffect.Ringback)
+                    is CallUiState.Ringing -> listOf(RuntimeEffect.Ring(current.call))
+                    CallUiState.Idle -> emptyList()
+                }
             }
 
             Protocol.Type.STATE -> {
@@ -193,9 +200,22 @@ class ZayaModel(
 
             Protocol.Type.CALL_INCOMING -> applyIncomingCall(payload)
 
+            Protocol.Type.CALL_DIALING -> {
+                val call = CallInfo.from(payload)
+                if (call.callId.isEmpty() || !belongsHere(call)) return emptyList()
+                _call.value = CallUiState.Dialing(call)
+                setVoice(micActive = false, speakerActive = false, muted = false)
+                listOf(RuntimeEffect.Ringback)
+            }
+
             Protocol.Type.CALL_ANSWERED -> {
                 val call = CallInfo.from(payload)
                 if (call.callId.isEmpty()) return emptyList()
+                if (!belongsHere(call)) {
+                    _call.value = CallUiState.Idle
+                    setVoice(micActive = false, speakerActive = false)
+                    return listOf(RuntimeEffect.StopVoice, RuntimeEffect.StopRinging)
+                }
                 _call.value = CallUiState.Active(call, clock())
                 setVoice(micActive = true, speakerActive = true)
                 listOf(RuntimeEffect.StartVoice, RuntimeEffect.StopRinging)
@@ -231,9 +251,14 @@ class ZayaModel(
         val active = snapshot.child("active_call")
         _call.value = if (active != null) {
             val call = CallInfo.from(active)
-            if (call.callId.isNotEmpty() && call.state == CallInfo.STATE_ANSWERED) {
+            if (call.callId.isNotEmpty() && call.state == CallInfo.STATE_ANSWERED && belongsHere(call)) {
                 setVoice(micActive = true, speakerActive = true)
                 CallUiState.Active(call, clock())
+            } else if (call.callId.isNotEmpty() && call.state == CallInfo.STATE_RINGING) {
+                setVoice(micActive = false, speakerActive = false)
+                if (call.direction == "outgoing") {
+                    if (belongsHere(call)) CallUiState.Dialing(call) else CallUiState.Idle
+                } else CallUiState.Ringing(call)
             } else {
                 CallUiState.Idle
             }
@@ -376,9 +401,13 @@ class ZayaModel(
     // ── internals ────────────────────────────────────────────────────────────
 
     private fun patchHello(payload: JSONObject) {
+        deviceId = payload.str("device_id", 128)
         _serverName.value = payload.str("server", 80).ifBlank { _serverName.value }
         applySnapshot(payload.child("snapshot"))
     }
+
+    private fun belongsHere(call: CallInfo): Boolean =
+        call.deviceId.isEmpty() || (deviceId.isNotEmpty() && call.deviceId == deviceId)
 
     private fun applyChat(payload: JSONObject) {
         val text = payload.str("text", Protocol.MAX_TEXT)
@@ -539,6 +568,15 @@ class ZayaModel(
     private fun applyCallEnd(type: String, payload: JSONObject): List<RuntimeEffect> {
         val call = CallInfo.from(payload)
         val current = _call.value
+        val currentId = when (current) {
+            is CallUiState.Active -> current.call.callId
+            is CallUiState.Ringing -> current.call.callId
+            is CallUiState.Dialing -> current.call.callId
+            CallUiState.Idle -> ""
+        }
+        if (currentId.isNotEmpty() && call.callId.isNotEmpty() && currentId != call.callId) {
+            return emptyList()
+        }
         val answeredAt = when (current) {
             is CallUiState.Active -> current.answeredAt
             else -> 0L

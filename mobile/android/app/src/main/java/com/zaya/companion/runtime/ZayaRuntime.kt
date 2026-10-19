@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
 import com.zaya.companion.audio.MicCapture
+import com.zaya.companion.audio.CallAudioRoute
 import com.zaya.companion.audio.SpeakerOutput
 import com.zaya.companion.core.Backoff
 import com.zaya.companion.core.ZayaBuild
@@ -122,6 +123,16 @@ class ZayaRuntime(
     private var downlinkRate: Int = Protocol.DOWNLINK_RATE
 
     private var supervisor: Job? = null
+    private val callAudio = CallAudioRoute(context)
+    private val _speakerphone = MutableStateFlow(false)
+    val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
+
+    fun setSpeakerphone(enabled: Boolean) {
+        if (model.call.value !is CallUiState.Active) return
+        runCatching { callAudio.setSpeaker(enabled) }
+            .onSuccess { _speakerphone.value = it }
+            .onFailure { model.setVoice(note = "Could not change the phone speaker") }
+    }
 
     // ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -137,6 +148,7 @@ class ZayaRuntime(
         supervisor?.cancel()
         supervisor = null
         teardownSession()
+        model.connectionLost("Disconnected")
         _connection.value = ConnectionStatus(ConnectionPhase.UNPAIRED, "Disconnected")
     }
 
@@ -181,6 +193,7 @@ class ZayaRuntime(
         }
         store.clear()
         teardownSession()
+        model.connectionLost("Device unpaired")
         return revoked
     }
 
@@ -389,6 +402,7 @@ class ZayaRuntime(
                 override fun onBytes(socket: ZayaSocket, data: ByteArray) {
                     if (data.isEmpty()) return
                     if (data.size > Protocol.MAX_FRAME_BYTES) return
+                    if (model.call.value is CallUiState.Dialing || model.call.value is CallUiState.Ringing) return
                     speakerFor().enqueue(data)
                 }
 
@@ -473,6 +487,7 @@ class ZayaRuntime(
         val callId = when (active) {
             is CallUiState.Active -> active.call.callId
             is CallUiState.Ringing -> active.call.callId
+            is CallUiState.Dialing -> active.call.callId
             CallUiState.Idle -> ""
         }
         sendCallControl(Protocol.Control.CALL_END, callId)
@@ -487,6 +502,7 @@ class ZayaRuntime(
     }
 
     fun setMuted(value: Boolean) {
+        if (model.call.value !is CallUiState.Active) return
         muted = value
         model.setVoice(muted = value)
         val message = JSONObject()
@@ -516,6 +532,7 @@ class ZayaRuntime(
     private fun speakerFor(): SpeakerOutput {
         speaker?.let { return it }
         val created = SpeakerOutput(
+            communication = model.call.value is CallUiState.Active,
             sampleRate = downlinkRate,
             onError = { message -> model.setVoice(speakerActive = false, note = message) },
         )
@@ -535,7 +552,7 @@ class ZayaRuntime(
     }
 
     private fun applyMicState() {
-        val wanted = model.voice.value.micActive || model.call.value is CallUiState.Active
+        val wanted = model.call.value is CallUiState.Active && !muted
         if (!wanted) {
             micCapture?.stop()
             micCapture = null
@@ -579,6 +596,9 @@ class ZayaRuntime(
         micCapture = null
         speaker?.stop()
         speaker = null
+        callAudio.end()
+        _speakerphone.value = false
+        muted = false
         model.setVoice(micActive = false, speakerActive = false, muted = muted)
     }
 
@@ -592,8 +612,19 @@ class ZayaRuntime(
     private fun dispatch(effects: List<RuntimeEffect>) {
         for (effect in effects) {
             when (effect) {
-                is RuntimeEffect.StartVoice -> applyMicState()
+                is RuntimeEffect.StartVoice -> {
+                    speaker?.stop()
+                    speaker = null
+                    runCatching { callAudio.stopRinging(); callAudio.begin() }
+                        .onFailure { model.setVoice(note = "Phone audio route unavailable") }
+                    applyMicState()
+                }
                 is RuntimeEffect.StopVoice -> stopVoice()
+                is RuntimeEffect.Ringback -> {
+                    stopVoice()
+                    runCatching { callAudio.ringback() }
+                        .onFailure { model.setVoice(note = "Ringing tone unavailable") }
+                }
                 is RuntimeEffect.Ring -> {
                     model.setVoice(micActive = false, speakerActive = false)
                     effectChannel.trySend(effect)
@@ -758,6 +789,7 @@ class ZayaRuntime(
         voice?.close(1000, "closed")
         voice = null
         stopVoice()
+        effectChannel.trySend(RuntimeEffect.StopRinging)
     }
 
     private fun status(phase: ConnectionPhase, detail: String, attempts: Int = 0) {

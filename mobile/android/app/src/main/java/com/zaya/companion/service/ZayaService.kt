@@ -123,7 +123,7 @@ class ZayaService : Service() {
             }
 
             // Voice itself is handled inside the runtime, which owns the devices.
-            RuntimeEffect.StartVoice, RuntimeEffect.StopVoice -> Unit
+            RuntimeEffect.StartVoice, RuntimeEffect.StopVoice, RuntimeEffect.Ringback -> Unit
         }
     }
 

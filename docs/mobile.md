@@ -136,16 +136,29 @@ shows a card with a shortcut straight to that switch.
 | Zaya decides she needs you (`call_owner` tool) | her choice |
 | Completed work while you are at the machine, important messages | a notification |
 
-"While you are away" is decided on the laptop: this machine reports how long it has
-gone untouched (10 minutes by default), and the mobile API knows whether a paired
-phone actually holds a session. Sitting at the desktop therefore never rings the
-phone, and a phone that is offline is not rung at either — it gets the written
-line instead, the same way a suppressed call does.
+"While you are away" normally uses desktop idle time (10 minutes by default).
+Saying “I'm going out” uses the owner-only `owner_presence` tool to mark you away
+immediately, for 12 hours by default. “I'm back” marks you present; `auto` restores
+idle detection. Only actual completed work rings, not status queries or acceptance
+of a background job. The phone must be connected.
 
-The policy keeps it sane regardless: one call at a time, a cooldown of 10 minutes
-per issue, a 150-second floor between calls, and at most 6 calls an hour. Anything
-suppressed is delivered as a notification, so the signal is never lost — only the
-ring is. A missed call is summarised once and never redialled.
+Automatic calls keep one call at a time, a 10-minute cooldown per issue, a
+150-second floor and a maximum of 6 calls an hour. An explicit “call me” or test
+request uses `call_owner(requested=true)` and bypasses automatic cooldowns, even
+at the desktop. It still requires a connected phone and no existing call.
+Suppressed alerts remain notifications. Missed calls never redial themselves.
+
+When you call Zaya from the phone, it shows **Ringing…** and plays ringback.
+The laptop randomly waits **5–10 seconds** before answering, provided its voice
+session is available. Hanging up during this interval cancels the answer.
+Incoming calls show Answer and Decline; answering keeps the same screen open
+with the timer, Mute, Speaker and End call. Speaker switches the phone's actual
+earpiece/loudspeaker; it does not route the call through the laptop.
+
+The phone microphone opens only after answer and stops recording when muted.
+During the entire answered call, including silence and mute, laptop microphone
+input is ignored. Only the answering device can send call audio or hang up.
+Disconnecting that phone ends the call and restores the previous output route.
 
 ### Tuning it
 
@@ -203,7 +216,7 @@ the phone, which is what lets the laptop add events without shipping a new APK.
 | task runtime | `task.created` / `task.updated` / `task.completed` / `task.failed` / `task.cancelled` |
 | WhatsApp observer | `whatsapp.message.received`, `whatsapp.alert.created`, `whatsapp.mode` |
 | policy warnings | `system.warning`, `system.notify`, `notification` |
-| `core/mobile_calls.py` | `call.incoming`, `call.answered`, `call.ended`, `call.missed` |
+| `core/mobile_calls.py` | `call.dialing`, `call.incoming`, `call.answered`, `call.ended`, `call.missed` |
 | Zaya's audio | raw PCM frames on `/ws/phone-output` |
 
 Two behaviours are deliberate and worth knowing when reading the logs:
@@ -268,7 +281,7 @@ checkable without a device or an emulator.
 | Pairing fails with 401 | The key expires after ten minutes and works exactly once — press **Remote Control** again. |
 | The dashboard opens in a browser but the phone says it cannot reach the laptop | Check the scheme: a self-signed HTTPS dashboard cannot be paired with. Set `"dashboard_https": false` in `config/api_keys.json`, restart Zaya, and use `http://<machine>.ts.net:8000`. |
 | The address does not resolve on the phone | Tailscale must be installed, signed in to the same account and toggled on there; `*.ts.net` names resolve only inside the tailnet (MagicDNS). |
-| Connected but silent on a call | Check the phone's media volume and that the call is *answered* (the microphone only opens then). Output routing is on the Settings screen. |
+| Connected but silent on a call | Check the phone's call volume and that the call is *answered* (the microphone only opens then). Output routing is on the Settings screen. |
 | Zaya's voice comes from the laptop, not the phone | Output route is `desktop`; switch to `Phone` or `Both`, or answer a call (a call routes to the phone automatically). |
 | A call only arrives as a notification | Android 14+: allow *Full screen notifications* for Zaya — Settings shows a card with the shortcut. |
 | A finished task did not ring | Working as designed if you were at the desktop, the phone was offline, or it fell inside `quiet_hours`. It is still in the phone's activity list; `away_minutes` and `call_when_task_finishes` in `config/api_keys.json` tune the behaviour. |

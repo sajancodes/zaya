@@ -17,6 +17,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -81,18 +83,22 @@ private fun StartingScreen() {
 private fun ZayaScaffold(runtime: ZayaRuntime) {
     var screenName by rememberSaveable { mutableStateOf(ZayaScreen.HOME.name) }
     val call by runtime.model.call.collectAsStateWithLifecycle()
-    val ringing = call as? CallUiState.Ringing
-
-    // A ringing call owns the screen while the app is open; the activity handles
-    // the case where the app is not.
-    if (ringing != null) {
-        IncomingCallScreen(runtime = runtime, onDismiss = {})
+    LaunchedEffect(call) {
+        if (call !is CallUiState.Idle) screenName = ZayaScreen.CALL.name
+    }
+    if (screenName == ZayaScreen.CALL.name) {
+        CallScreen(runtime) { screenName = ZayaScreen.HOME.name }
         return
     }
 
     val screen = runCatching { ZayaScreen.valueOf(screenName) }.getOrDefault(ZayaScreen.HOME)
 
     Scaffold(
+        topBar = {
+            if (call !is CallUiState.Idle) TextButton(onClick = { screenName = ZayaScreen.CALL.name }) {
+                Text("Return to call with Zaya")
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {

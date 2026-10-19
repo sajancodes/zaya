@@ -30,6 +30,55 @@ class ZayaModelTest {
         Envelope(type, payload, 0.0, Protocol.VERSION)
 
     @Test
+    fun `outgoing call rings without opening the microphone until laptop answers`() {
+        val payload = JSONObject().put("call_id", "out-1").put("state", "ringing")
+            .put("direction", "outgoing").put("priority", 1)
+        val effects = model.apply(event(Protocol.Type.CALL_DIALING, payload))
+        assertTrue(model.call.value is CallUiState.Dialing)
+        assertFalse(model.voice.value.micActive)
+        assertEquals(listOf(RuntimeEffect.Ringback), effects)
+        model.apply(event(Protocol.Type.CALL_ANSWERED, payload.put("state", "answered")))
+        assertTrue(model.call.value is CallUiState.Active)
+        assertTrue(model.voice.value.micActive)
+        model.apply(event(Protocol.Type.CALL_ENDED, payload.put("state", "ended")))
+        assertEquals(CallUiState.Idle, model.call.value)
+        assertFalse(model.voice.value.micActive)
+    }
+
+    @Test
+    fun `another phone answering cannot open this microphone`() {
+        model.apply(event(Protocol.Type.HELLO, JSONObject().put("device_id", "mine")))
+        model.apply(event(Protocol.Type.CALL_INCOMING,
+            JSONObject().put("call_id", "in-1").put("priority", 1)))
+        model.apply(event(Protocol.Type.CALL_ANSWERED,
+            JSONObject().put("call_id", "in-1").put("device_id", "other")))
+        assertEquals(CallUiState.Idle, model.call.value)
+        assertFalse(model.voice.value.micActive)
+    }
+
+    @Test
+    fun `hello snapshot restores ringing without inventing an answer`() {
+        val call = JSONObject().put("call_id", "out-1").put("state", "ringing")
+            .put("direction", "outgoing").put("device_id", "mine").put("priority", 1)
+        val effects = model.apply(event(Protocol.Type.HELLO,
+            JSONObject().put("device_id", "mine").put("snapshot",
+                JSONObject().put("active_call", call))))
+        assertTrue(model.call.value is CallUiState.Dialing)
+        assertFalse(model.voice.value.micActive)
+        assertEquals(listOf(RuntimeEffect.Ringback), effects)
+    }
+
+    @Test
+    fun `late end event for an old call leaves current call alone`() {
+        model.apply(event(Protocol.Type.CALL_DIALING,
+            JSONObject().put("call_id", "new").put("direction", "outgoing")))
+        val effects = model.apply(event(Protocol.Type.CALL_ENDED,
+            JSONObject().put("call_id", "old")))
+        assertTrue(model.call.value is CallUiState.Dialing)
+        assertTrue(effects.isEmpty())
+    }
+
+    @Test
     fun `the laptop's state is the state on screen`() {
         model.apply(
             event(

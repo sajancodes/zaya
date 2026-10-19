@@ -93,6 +93,7 @@ object Protocol {
         const val NOTIFICATION = "notification"
 
         const val CALL_INCOMING = "call.incoming"
+        const val CALL_DIALING = "call.dialing"
         const val CALL_ANSWERED = "call.answered"
         const val CALL_ENDED = "call.ended"
         const val CALL_MISSED = "call.missed"

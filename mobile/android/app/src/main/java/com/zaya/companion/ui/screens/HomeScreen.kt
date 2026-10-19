@@ -137,7 +137,7 @@ fun HomeScreen(
                         Text("Answer Zaya")
                     }
 
-                    is CallUiState.Active -> OutlinedButton(
+                    is CallUiState.Active, is CallUiState.Dialing -> OutlinedButton(
                         onClick = { runtime.endCall() },
                         modifier = Modifier.weight(1f),
                     ) { Text("End the call") }

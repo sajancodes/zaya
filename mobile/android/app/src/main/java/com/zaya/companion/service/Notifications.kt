@@ -152,7 +152,11 @@ object Notifications {
             .addAction(
                 0,
                 context.getString(R.string.action_answer),
-                serviceAction(context, ZayaService.ACTION_ANSWER, 32, call.callId),
+                PendingIntent.getActivity(context, 32,
+                    Intent(context, IncomingCallActivity::class.java)
+                        .setAction(ZayaService.ACTION_ANSWER)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(IncomingCallActivity.EXTRA_CALL_ID, call.callId), pendingFlags()),
             )
             .addAction(
                 0,
