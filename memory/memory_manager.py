@@ -172,6 +172,11 @@ def update_memory(memory_update: dict) -> dict:
     if _recursive_update(memory, memory_update):
         save_memory(memory)
         print(f"[Memory] Saved: {list(memory_update.keys())}")
+        try:
+            from memory.knowledge_store import get_knowledge_store
+            get_knowledge_store().sync_from_json(memory_update)
+        except Exception:
+            pass
     return memory
 
 def _entry_value(entry) -> str:
@@ -359,8 +364,21 @@ def _score(query_words: list[str], cat: str, key: str, value: str) -> int:
 def search_memory(query: str, limit: int = 8) -> str:
     """Find stored facts matching `query`. Backs the recall_memory tool.
 
-    An empty query is treated as "show me everything you know", capped - the
-    model asks that when the user says "what do you remember about me?"."""
+    Uses SQLite FTS5 BM25 hybrid ranking when available, falling back gracefully
+    to memory JSON scanning.
+    """
+    # Attempt hybrid search through KnowledgeStore first
+    try:
+        from memory.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        ks_results = ks.search_hybrid(query, limit=limit)
+        if ks_results:
+            lines = [f"{r['category']}/{_pretty(r['key'])}: {r['value']}" for r in ks_results]
+            head = (f"Stored facts matching '{query}':" if query else "Everything currently stored:")
+            return head + "\n" + "\n".join(lines)
+    except Exception:
+        pass
+
     memory = load_memory()
     words  = [w for w in re.split(r"[^\w]+", (query or "").lower()) if len(w) > 1]
 
