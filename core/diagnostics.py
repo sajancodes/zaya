@@ -52,5 +52,82 @@ def inspect(operation: str = 'full') -> ToolResult:
             checks['whatsapp'] = get_service().query('status').data
         except ImportError:
             checks['whatsapp'] = {'available': False, 'reason': 'WhatsApp service not installed.'}
+    if operation in {'full', 'bottleneck'}:
+        checks['bottleneck'] = diagnose_bottleneck().data
     return ToolResult('success', 'Local diagnostics collected; capability availability is reported per check.', checks,
                       [{'checks': list(checks)}])
+
+
+def diagnose_bottleneck(top_n: int = 5) -> ToolResult:
+    """Identify top CPU and RAM consuming processes without blocking execution.
+
+    Labels system/svchost service instances and excludes Zaya's own process.
+    """
+    try:
+        import psutil
+        import time
+
+        my_pid = os.getpid()
+        procs: list[psutil.Process] = []
+
+        # First pass: collect processes and initialize cpu_percent
+        for p in psutil.process_iter(['pid', 'name']):
+            try:
+                pid = p.info.get('pid', 0)
+                if pid in (0, 4, my_pid):
+                    continue
+                p.cpu_percent(interval=None)
+                procs.append(p)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        # Brief non-blocking sleep for delta calculation
+        time.sleep(0.1)
+
+        records: list[dict] = []
+        for p in procs:
+            try:
+                cpu = p.cpu_percent(interval=None)
+                mem = p.memory_percent()
+                name = p.name()
+                pid = p.pid
+
+                label = name
+                # Contextual labeling for svchost or system processes
+                if name.lower() == 'svchost.exe':
+                    label = f"svchost.exe (System Service {pid})"
+                elif name.lower() in ('system', 'registry', 'smss.exe'):
+                    label = f"{name} (Windows Core)"
+
+                records.append({
+                    'pid': pid,
+                    'name': name,
+                    'label': label,
+                    'cpu_percent': round(cpu, 1),
+                    'memory_percent': round(mem, 1),
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        by_cpu = sorted(records, key=lambda x: x['cpu_percent'], reverse=True)[:top_n]
+        by_mem = sorted(records, key=lambda x: x['memory_percent'], reverse=True)[:top_n]
+
+        overall_cpu = psutil.cpu_percent(interval=None)
+        overall_mem = psutil.virtual_memory().percent
+
+        summary = (
+            f"Overall CPU: {overall_cpu}%, RAM: {overall_mem}%. "
+            f"Top CPU consumer: {by_cpu[0]['label']} ({by_cpu[0]['cpu_percent']}%) "
+            f"Top RAM consumer: {by_mem[0]['label']} ({by_mem[0]['memory_percent']}%)."
+        ) if by_cpu and by_mem else "System resource consumers sampled."
+
+        data = {
+            'overall_cpu_percent': overall_cpu,
+            'overall_ram_percent': overall_mem,
+            'top_cpu_processes': by_cpu,
+            'top_memory_processes': by_mem,
+        }
+        return ToolResult('success', summary, data)
+
+    except Exception as e:
+        return ToolResult('failed', f"Failed to diagnose system bottleneck: {e}")
