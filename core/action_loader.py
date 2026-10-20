@@ -123,9 +123,12 @@ def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
     return fn(parameters=parameters, **kwargs)
 
 
-def _validate(module, filename: str) -> ActionRecord:
+def _validate(module_or_tool, filename: str) -> ActionRecord:
     """Returns an ActionRecord; .valid=False + .error set on any problem. Never raises."""
-    tool = getattr(module, "TOOL", None)
+    if isinstance(module_or_tool, dict):
+        tool = module_or_tool
+    else:
+        tool = getattr(module_or_tool, "TOOL", None)
     if not isinstance(tool, dict):
         return ActionRecord(name=Path(filename).stem, file=filename,
                             error="No module-level TOOL dict (not a discoverable action).")
@@ -160,8 +163,8 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                      logger: Callable[[str], None] = print) -> ActionRegistry:
     """
     Scans actions_dir for *.py files (skips files starting with '_'). A file is
-    only treated as an action if it exposes a module-level TOOL dict; files
-    without one (shared helpers, capture-only modules) are silently ignored.
+    only treated as an action if it exposes a module-level TOOL dict or TOOLS list;
+    files without one (shared helpers, capture-only modules) are silently ignored.
     Import/validation errors and name collisions are logged and the file is
     skipped — they NEVER raise out of this function.
     """
@@ -191,30 +194,37 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                     sys.modules.pop(module_name, None)
                     raise
 
-            if getattr(module, "TOOL", None) is None:
+            module_tools = []
+            if getattr(module, "TOOLS", None) is not None and isinstance(module.TOOLS, list):
+                module_tools = module.TOOLS
+            elif getattr(module, "TOOL", None) is not None:
+                module_tools = [module.TOOL]
+            else:
                 continue   # not an action file — a helper/capture-only module
 
-            rec = _validate(module, path.name)
+            for t_dict in module_tools:
+                rec = _validate(t_dict, path.name)
 
-            if rec.valid and rec.name in reserved:
-                rec = ActionRecord(name=rec.name, file=path.name,
-                                   error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
-            elif rec.valid and rec.name in valid:
-                other = valid[rec.name].file
-                rec = ActionRecord(name=rec.name, file=path.name,
-                                   error=f"Name '{rec.name}' already used by action '{other}' — rejected.")
+                if rec.valid and rec.name in reserved:
+                    rec = ActionRecord(name=rec.name, file=path.name,
+                                       error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
+                elif rec.valid and rec.name in valid:
+                    other = valid[rec.name].file
+                    rec = ActionRecord(name=rec.name, file=path.name,
+                                       error=f"Name '{rec.name}' already used by action '{other}' — rejected.")
+
+                all_records.append(rec)
+                if rec.valid:
+                    valid[rec.name] = rec
+                    logger(f"Action loaded: {rec.name} ({path.name})")
+                else:
+                    logger(f"Action rejected: {path.name} — {rec.error}")
 
         except Exception as e:
             rec = ActionRecord(name=path.stem, file=path.name,
                                error=f"Failed to load: {e}")
             traceback.print_exc()
-
-        all_records.append(rec)
-        if rec.valid:
-            valid[rec.name] = rec
-            logger(f"Action loaded: {rec.name} ({path.name})")
-        else:
-            # Only log a rejection if the file actually tried to be an action.
+            all_records.append(rec)
             logger(f"Action rejected: {path.name} — {rec.error}")
 
     canonical_actions = Path(__file__).resolve().parent.parent / "actions"

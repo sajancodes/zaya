@@ -9,7 +9,10 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings("ignore", category=FutureWarning, message=r".*pynvml.*deprecated.*")
 
 import psutil
 

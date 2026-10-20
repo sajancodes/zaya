@@ -47,6 +47,7 @@ mss>=9,<11
 psutil>=5.9,<8
 send2trash                   # file_controller — recoverable deletes
 python-pptx                  # file_processor — presentation reading
+reportlab                    # doc_generator — PDF document generation
 
 # ── Remote dashboard (control from your phone) ────────────────────────────────
 fastapi>=0.110,<1
