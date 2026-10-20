@@ -226,7 +226,7 @@ class ScreenCaptureManager(private val context: Context) {
                         put("jpeg", base64Jpeg)
                         put("timestamp", frameResult.timestamp / 1000.0)
                     }
-                    runtime.control?.send(msg.toString())
+                    runtime.sendControl(msg.toString())
                 }
 
                 val resolutionStr = "${frameResult.width}x${frameResult.height}"

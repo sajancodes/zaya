@@ -27,7 +27,7 @@ class ActionEngineTest {
         assertEquals(ActionRisk.CRITICAL, sms.risk)
         assertTrue(sms.requiresConfirmation)
 
-        val reply = AndroidAction.ReplyToNotification("key_123", "Reply text")
+        val reply = AndroidAction.ReplyToNotification(notificationKey = "key_123", text = "Reply text")
         assertEquals(ActionRisk.HIGH, reply.risk)
         assertTrue(reply.requiresConfirmation)
     }

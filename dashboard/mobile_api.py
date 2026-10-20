@@ -680,6 +680,31 @@ class MobileApi:
             self._call_control(session, kind, str(data.get('call_id') or ''), data)
             return
 
+        if kind == 'action.response':
+            req_id = str(data.get('request_id') or '')
+            self.bridge.register_response(req_id, data)
+            return
+
+        if kind == 'screen.frame':
+            req_id = str(data.get('request_id') or '')
+            self.bridge.register_response(req_id, data)
+            return
+
+        if kind == 'notification.received':
+            from core.event_bus import bus
+            bus.publish('phone_notification', data)
+            return
+
+        if kind == 'hardware.status':
+            from core.event_bus import bus
+            bus.publish('phone_hardware', data)
+            return
+
+        if kind.startswith('call.') and kind not in {'call.video.toggle', 'call.video.frame', 'call.answer', 'call.decline', 'call.end', 'call.start', 'call.mute'}:
+            from core.event_bus import bus
+            bus.publish('phone_call', data)
+            return
+
         if kind == 'whatsapp.mode':
             chat_id, mode = str(data.get('chat_id') or ''), str(data.get('mode') or '')
             try:

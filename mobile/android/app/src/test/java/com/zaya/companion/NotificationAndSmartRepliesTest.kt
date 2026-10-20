@@ -116,7 +116,7 @@ class NotificationAndSmartRepliesTest {
             data = mapOf("needs_settings" to "notification_listener")
         )
         val json = result.toJsonObject()
-        assertEquals("FAILED", json.getString("status"))
+        assertEquals("FAILURE", json.getString("status"))
         assertEquals("notification_access_disabled", json.getString("error"))
         assertEquals("notification_listener", json.getJSONObject("data").getString("needs_settings"))
     }

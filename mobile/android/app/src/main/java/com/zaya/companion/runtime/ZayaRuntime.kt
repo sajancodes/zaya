@@ -96,7 +96,9 @@ class ZayaRuntime(
         .build()
 
     @Volatile
-    private var control: ZayaSocket? = null
+    internal var control: ZayaSocket? = null
+
+    fun sendControl(message: String): Boolean = control?.send(message) == true
 
     @Volatile
     private var voice: ZayaSocket? = null
@@ -993,7 +995,7 @@ class ZayaRuntime(
                 control?.send(report.toString())
             }
             "volume" -> {
-                val vol = payload.num("percent", 50)
+                val vol = payload.num("percent", 50.0).toInt()
                 hardwareController.setMediaVolume(vol)
             }
         }
