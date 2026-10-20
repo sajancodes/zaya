@@ -6,7 +6,6 @@ Generates standalone, reactive HTML/CSS/JS widgets with modern dark-mode aesthet
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import webbrowser
@@ -160,9 +159,17 @@ def widget_forge(parameters: dict, **_kwargs) -> str:
     path = forge_live_widget(w_type, custom_html=custom_html)
     if auto_open:
         try:
-            webbrowser.open(f"file://{os.path.abspath(path)}")
-        except Exception:
-            pass
+            # as_uri() produces a proper file:///C:/... URI. The old
+            # "file://" + os.path.abspath() form left Windows backslashes in
+            # the URL ("file://C:\Users\..."), which browsers refuse to open.
+            webbrowser.open(Path(path).resolve().as_uri())
+        except Exception as e:
+            return json.dumps({
+                "status": "partial",
+                "widget_type": w_type,
+                "widget_path": path,
+                "message": f"Widget was created at {path}, but it could not be opened automatically: {e}"
+            }, indent=2)
 
     return json.dumps({
         "status": "success",

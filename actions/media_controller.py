@@ -65,6 +65,15 @@ def control_media_playback(parameters: dict, **_kwargs) -> str:
     elif action in ("back", "previous_song"):
         action = "previous"
 
+    if action not in VK_MEDIA:
+        # An unknown action was never dispatched. Saying otherwise told the
+        # owner the command had been sent when nothing happened at all.
+        return json.dumps({
+            "status": "error",
+            "action": action,
+            "message": f"Unknown media action '{action}'. Supported: {', '.join(sorted(set(VK_MEDIA)))}."
+        }, indent=2)
+
     ok = dispatch_media_key(action)
     if ok:
         return json.dumps({
@@ -74,9 +83,13 @@ def control_media_playback(parameters: dict, **_kwargs) -> str:
         }, indent=2)
 
     return json.dumps({
-        "status": "partial",
+        "status": "error",
         "action": action,
-        "message": f"Media key '{action}' dispatched via system handler."
+        "message": (
+            f"Media key '{action}' could not be dispatched. Global media keys are a "
+            "Windows feature — on other systems use the app's own volume and "
+            "playback controls instead."
+        )
     }, indent=2)
 
 

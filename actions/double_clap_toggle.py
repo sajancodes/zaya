@@ -28,7 +28,15 @@ def double_clap_toggle(parameters: dict, **_kwargs) -> str:
     else:  # toggle
         new_state = not current
 
-    set_double_clap_enabled(new_state)
+    if not set_double_clap_enabled(new_state):
+        # The preference did not reach disk. Say so instead of reporting a
+        # state the app will not actually honour on the next launch.
+        return json.dumps({
+            "status": "error",
+            "double_clap_enabled": current,
+            "message": "Could not persist the double-clap setting; the preference is unchanged."
+        })
+
     state_str = "enabled" if new_state else "disabled"
     return json.dumps({
         "status": "success",

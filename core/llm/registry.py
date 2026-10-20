@@ -4,9 +4,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def _default_config_path() -> Path:
+    """
+    The old default was Path("config/api_keys.json") - relative to the
+    CURRENT WORKING DIRECTORY. Launched from anywhere but the project root
+    the registry silently found no config, registered every provider with
+    no credentials, and the router raised "No available or healthy
+    providers". memory.config_manager already resolves the same file
+    against the project root; this does the same.
+    """
+    project_root = Path(__file__).resolve().parent.parent.parent
+    return project_root / "config" / "api_keys.json"
 
 
 DEFAULT_BASE_URLS = {
@@ -65,7 +79,7 @@ class ProviderRegistry:
     """Stores and discovers configured LLM providers."""
 
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or Path("config/api_keys.json")
+        self.config_path = Path(config_path) if config_path else _default_config_path()
         self.providers: Dict[str, ProviderConfig] = {}
         self.primary_provider: str = "gemini"
         self.fallback_chain: List[str] = []
@@ -81,15 +95,30 @@ class ProviderRegistry:
         data: Dict[str, Any] = {}
         if self.config_path.exists():
             try:
-                data = json.loads(self.config_path.read_text(encoding="utf-8"))
+                loaded = json.loads(self.config_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    data = loaded
             except Exception:
                 data = {}
 
-        self.primary_provider = data.get("llm_provider", "gemini").strip().lower()
+        # Every field below is optional in the owner's config file, and a
+        # hand-edited file can hold null or the wrong type. Reading them
+        # blind ("data.get(k, default).strip()") raised AttributeError on a
+        # null value and TypeError when a list field held a string.
+        primary = data.get("llm_provider")
+        self.primary_provider = (
+            str(primary).strip().lower()
+            if isinstance(primary, str) and primary.strip()
+            else "gemini"
+        )
+
+        raw_fallbacks = data.get("fallback_providers")
+        if isinstance(raw_fallbacks, str):
+            raw_fallbacks = re.split(r"[,\s]+", raw_fallbacks)
+        elif not isinstance(raw_fallbacks, (list, tuple)):
+            raw_fallbacks = ["gemini", "openai", "openrouter", "groq", "deepseek", "ollama"]
         self.fallback_chain = [
-            p.strip().lower()
-            for p in data.get("fallback_providers", ["gemini", "openai", "openrouter", "groq", "deepseek", "ollama"])
-            if p.strip()
+            str(p).strip().lower() for p in raw_fallbacks if str(p).strip()
         ]
 
         # 1. Gemini
@@ -103,35 +132,35 @@ class ProviderRegistry:
         self.register(ProviderConfig(
             name="gemini",
             provider_type="gemini",
-            base_url=data.get("gemini_base_url") or DEFAULT_BASE_URLS["gemini"],
+            base_url=_text(data.get("gemini_base_url"), DEFAULT_BASE_URLS["gemini"]),
             api_keys=gemini_keys,
-            model=data.get("gemini_model") or data.get("model_name") or DEFAULT_MODELS["gemini"],
+            model=_text(data.get("gemini_model") or data.get("model_name"), DEFAULT_MODELS["gemini"]),
             priority=10,
             task_affinity=["vision", "fast", "multimodal"]
         ))
 
         # 2. OpenAI
         openai_key = data.get("openai_api_key") or data.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
-        openai_keys = [openai_key] if openai_key else []
+        openai_keys = [openai_key] if isinstance(openai_key, str) and openai_key.strip() else []
         self.register(ProviderConfig(
             name="openai",
             provider_type="openai",
-            base_url=data.get("openai_base_url") or DEFAULT_BASE_URLS["openai"],
+            base_url=_text(data.get("openai_base_url"), DEFAULT_BASE_URLS["openai"]),
             api_keys=openai_keys,
-            model=data.get("openai_model") or DEFAULT_MODELS["openai"],
+            model=_text(data.get("openai_model"), DEFAULT_MODELS["openai"]),
             priority=20,
             task_affinity=["reasoning", "general"]
         ))
 
         # 3. OpenRouter
         or_key = data.get("openrouter_api_key") or data.get("openrouter_key") or os.environ.get("OPENROUTER_API_KEY", "")
-        or_keys = [or_key] if or_key else []
+        or_keys = [or_key] if isinstance(or_key, str) and or_key.strip() else []
         self.register(ProviderConfig(
             name="openrouter",
             provider_type="openrouter",
-            base_url=data.get("openrouter_base_url") or DEFAULT_BASE_URLS["openrouter"],
+            base_url=_text(data.get("openrouter_base_url"), DEFAULT_BASE_URLS["openrouter"]),
             api_keys=or_keys,
-            model=data.get("openrouter_model") or DEFAULT_MODELS["openrouter"],
+            model=_text(data.get("openrouter_model"), DEFAULT_MODELS["openrouter"]),
             priority=30,
             headers={"HTTP-Referer": "https://github.com/sajancodes/zaya", "X-Title": "Zaya"},
             task_affinity=["general"]
@@ -139,26 +168,26 @@ class ProviderRegistry:
 
         # 4. Groq
         groq_key = data.get("groq_api_key") or os.environ.get("GROQ_API_KEY", "")
-        groq_keys = [groq_key] if groq_key else []
+        groq_keys = [groq_key] if isinstance(groq_key, str) and groq_key.strip() else []
         self.register(ProviderConfig(
             name="groq",
             provider_type="groq",
-            base_url=data.get("groq_base_url") or DEFAULT_BASE_URLS["groq"],
+            base_url=_text(data.get("groq_base_url"), DEFAULT_BASE_URLS["groq"]),
             api_keys=groq_keys,
-            model=data.get("groq_model") or DEFAULT_MODELS["groq"],
+            model=_text(data.get("groq_model"), DEFAULT_MODELS["groq"]),
             priority=40,
             task_affinity=["fast"]
         ))
 
         # 5. DeepSeek
         deepseek_key = data.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
-        deepseek_keys = [deepseek_key] if deepseek_key else []
+        deepseek_keys = [deepseek_key] if isinstance(deepseek_key, str) and deepseek_key.strip() else []
         self.register(ProviderConfig(
             name="deepseek",
             provider_type="deepseek",
-            base_url=data.get("deepseek_base_url") or DEFAULT_BASE_URLS["deepseek"],
+            base_url=_text(data.get("deepseek_base_url"), DEFAULT_BASE_URLS["deepseek"]),
             api_keys=deepseek_keys,
-            model=data.get("deepseek_model") or DEFAULT_MODELS["deepseek"],
+            model=_text(data.get("deepseek_model"), DEFAULT_MODELS["deepseek"]),
             priority=50,
             task_affinity=["code", "reasoning"]
         ))

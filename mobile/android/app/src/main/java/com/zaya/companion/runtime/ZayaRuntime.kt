@@ -129,6 +129,22 @@ class ZayaRuntime(
     val updates = com.zaya.companion.updates.AppUpdates(context)
     private var updateChecks: Job? = null
     private val callAudio = CallAudioRoute(context)
+    val hardwareController by lazy { com.zaya.companion.service.HardwareController(context) }
+    val cellularCallManager by lazy { com.zaya.companion.service.CellularCallManager(context) }
+    val mediaPlaybackController by lazy { com.zaya.companion.service.MediaPlaybackController(context) }
+    val appLauncher by lazy { com.zaya.companion.service.AppLauncher(context) }
+    val screenCaptureManager by lazy { com.zaya.companion.service.ScreenCaptureManager(context) }
+    val actionExecutor by lazy {
+        com.zaya.companion.action.ActionExecutor(
+            context = context,
+            hardwareController = hardwareController,
+            mediaController = mediaPlaybackController,
+            appLauncher = appLauncher,
+            callManager = cellularCallManager,
+            screenCaptureManager = screenCaptureManager,
+        )
+    }
+    val actionRegistry by lazy { actionExecutor.registry }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -422,6 +438,7 @@ class ZayaRuntime(
                     lastMessageAt = openedAt
                     _connection.value = ConnectionStatus(ConnectionPhase.ONLINE, "Connected")
                     sendHello(socket)
+                    sendCapabilitiesReport(socket)
                     openVoiceSocket(base, token)
                     scope.launch { updates.check() }
                     flushOutbox(socket)
@@ -438,6 +455,29 @@ class ZayaRuntime(
                     }
                     if (envelope.type == Protocol.Type.CALL_VIDEO && !envelope.payload.flag("video_enabled") &&
                         envelope.payload.str("call_id", 64) == videoCallId && _videoEnabled.value) setVideoEnabled(false)
+
+                    when (envelope.type) {
+                        Protocol.Type.HARDWARE_ACTION -> handleHardwareAction(envelope.payload)
+                        Protocol.Type.CALL_CONTROL -> handleCallControl(envelope.payload)
+                        Protocol.Type.CALL_ANNOUNCE -> {
+                            val caller = envelope.payload.str("caller", 100)
+                            cellularCallManager.announceCaller(caller)
+                        }
+                        Protocol.Type.AUTO_REPLY -> {
+                            val key = envelope.payload.str("key", 200)
+                            val text = envelope.payload.str("text", 1000)
+                            com.zaya.companion.service.ZayaNotificationListener.sendAutoReply(key, text)
+                        }
+                        Protocol.Type.DOUBLE_CLAP_CONFIG -> {
+                            val enabled = envelope.payload.flag("enabled", true)
+                            micCapture?.clapDetector?.enabled = enabled
+                        }
+                        Protocol.Type.MEDIA_CONTROL -> handleMediaControl(envelope.payload)
+                        Protocol.Type.OPEN_DEEP_LINK -> handleDeepLink(envelope.payload)
+                        Protocol.Type.LAUNCH_APP -> handleLaunchApp(envelope.payload)
+                        Protocol.Type.ACTION_INVOKE -> handleActionInvoke(envelope.payload)
+                    }
+
                     dispatch(effects)
                 }
 
@@ -673,6 +713,13 @@ class ZayaRuntime(
             sampleRate = uplinkRate,
             onFrame = { frame -> sendMicFrame(frame) },
             onError = { message -> model.setVoice(micActive = false, note = message) },
+            onDoubleClap = {
+                val msg = JSONObject()
+                    .put("type", Protocol.Control.DOUBLE_CLAP_DETECTED)
+                    .put("payload", JSONObject())
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(msg.toString())
+            },
         )
         micCapture = created
         if (created.start()) {
@@ -917,6 +964,184 @@ class ZayaRuntime(
             Closed -> "The link to the laptop closed"
             Unauthorized -> "The laptop asked the phone to sign in again"
             is Failed -> message
+        }
+    }
+
+    fun sendNotificationEvent(payload: JSONObject) {
+        val msg = JSONObject()
+            .put("type", Protocol.Control.NOTIFICATION_EVENT)
+            .put("payload", payload)
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(msg.toString())
+    }
+
+    private fun handleHardwareAction(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        when (action) {
+            "torch_on" -> hardwareController.setFlashlight(true)
+            "torch_off" -> hardwareController.setFlashlight(false)
+            "wifi" -> hardwareController.openWifiSettings()
+            "bluetooth" -> hardwareController.openBluetoothSettings()
+            "hotspot" -> hardwareController.openHotspotSettings()
+            "location" -> hardwareController.openLocationSettings()
+            "battery", "status" -> {
+                val status = hardwareController.getBatteryStatus()
+                val report = JSONObject()
+                    .put("type", Protocol.Control.HARDWARE_STATUS)
+                    .put("payload", JSONObject(status))
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(report.toString())
+            }
+            "volume" -> {
+                val vol = payload.num("percent", 50)
+                hardwareController.setMediaVolume(vol)
+            }
+        }
+    }
+
+    private fun handleCallControl(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        when (action) {
+            "answer" -> cellularCallManager.answerCall()
+            "reject" -> cellularCallManager.rejectCall()
+            "announce" -> {
+                val caller = payload.str("caller", 100)
+                cellularCallManager.announceCaller(caller)
+            }
+        }
+    }
+
+    private fun handleMediaControl(payload: JSONObject) {
+        val action = payload.str("action", 40)
+        val success = mediaPlaybackController.executeAction(action)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("action", action).put("success", success).put("module", "media"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
+    }
+
+    private fun handleDeepLink(payload: JSONObject) {
+        val app = payload.str("target_app", 60)
+        val query = payload.str("query", 200)
+        val success = appLauncher.openDeepLink(app, query)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("target_app", app).put("success", success).put("module", "deep_link"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
+    }
+
+    private fun handleLaunchApp(payload: JSONObject) {
+        val name = payload.str("name", 80)
+        val success = appLauncher.launchAppByName(name)
+        val report = JSONObject()
+            .put("type", Protocol.Control.ACTION_RESULT)
+            .put("payload", JSONObject().put("name", name).put("success", success).put("module", "app_launcher"))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        control?.send(report.toString())
+    }
+
+    fun sendCapabilitiesReport(socket: ZayaSocket? = control) {
+        val caps = actionRegistry.discoverCapabilities()
+        val arr = org.json.JSONArray()
+        caps.forEach { arr.put(it.toJsonObject()) }
+        val msg = JSONObject()
+            .put("type", Protocol.Control.CAPABILITIES_REPORT)
+            .put("payload", JSONObject().put("capabilities", arr))
+            .put("timestamp", System.currentTimeMillis() / 1000.0)
+        socket?.send(msg.toString())
+    }
+
+    private fun handleActionInvoke(payload: JSONObject) {
+        val actionId = payload.str("action_id", 60)
+        val args = payload.optJSONObject("arguments") ?: JSONObject()
+        val action: com.zaya.companion.action.AndroidAction = when (actionId) {
+            "set_flashlight" -> com.zaya.companion.action.AndroidAction.SetFlashlight(args.optBoolean("enabled", true))
+            "get_flashlight_state" -> com.zaya.companion.action.AndroidAction.GetFlashlightState
+            "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(
+                setting = args.optString("setting", "settings"),
+                packageName = args.optString("package_name", "").ifBlank { null }
+            )
+            "control_media" -> com.zaya.companion.action.AndroidAction.ControlMedia(args.optString("action", "toggle"))
+            "get_media_status" -> com.zaya.companion.action.AndroidAction.GetMediaStatus
+            "launch_app" -> com.zaya.companion.action.AndroidAction.LaunchApp(args.optString("name", ""))
+            "lookup_contact" -> com.zaya.companion.action.AndroidAction.LookUpContact(args.optString("query", ""))
+            "initiate_call" -> com.zaya.companion.action.AndroidAction.InitiateCall(
+                queryOrNumber = args.optString("query", args.optString("phone_number", "")),
+                directCall = args.optBoolean("direct_call", false),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "get_incoming_call_state" -> com.zaya.companion.action.AndroidAction.GetIncomingCallState
+            "set_caller_announcement" -> com.zaya.companion.action.AndroidAction.SetCallerAnnouncement(
+                enabled = args.optBoolean("enabled", true)
+            )
+            "compose_sms" -> com.zaya.companion.action.AndroidAction.ComposeSms(
+                recipient = args.optString("recipient", ""),
+                message = args.optString("message", ""),
+                confirmed = args.optBoolean("confirmed", false),
+                directSend = args.optBoolean("direct_send", false)
+            )
+            "answer_call" -> com.zaya.companion.action.AndroidAction.AnswerCall
+            "reject_call" -> com.zaya.companion.action.AndroidAction.RejectCall
+            "read_notifications" -> com.zaya.companion.action.AndroidAction.ReadNotifications(
+                packageFilter = args.optString("package_filter", "").ifBlank { null },
+                limit = args.optInt("limit", 5)
+            )
+            "read_latest_notification" -> com.zaya.companion.action.AndroidAction.ReadLatestNotification(
+                packageFilter = args.optString("package_filter", "").ifBlank { null }
+            )
+            "summarize_notifications" -> com.zaya.companion.action.AndroidAction.SummarizeNotifications(
+                packageFilter = args.optString("package_filter", "").ifBlank { null }
+            )
+            "draft_notification_reply" -> com.zaya.companion.action.AndroidAction.DraftNotificationReply(
+                targetKey = args.optString("notification_key", "").ifBlank { null },
+                targetSender = args.optString("sender", "").ifBlank { null },
+                targetPackage = args.optString("package", "").ifBlank { null },
+                contextInstruction = args.optString("instruction", "").ifBlank { null }
+            )
+            "reply_notification" -> com.zaya.companion.action.AndroidAction.ReplyToNotification(
+                notificationKey = args.optString("notification_key", "").ifBlank { null },
+                targetSender = args.optString("sender", "").ifBlank { null },
+                targetPackage = args.optString("package", "").ifBlank { null },
+                text = args.optString("text", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "capture_screen" -> com.zaya.companion.action.AndroidAction.CaptureScreen
+            "describe_screen" -> com.zaya.companion.action.AndroidAction.DescribeScreen(
+                prompt = args.optString("prompt", "").ifBlank { null }
+            )
+            "extract_visible_text" -> com.zaya.companion.action.AndroidAction.ExtractVisibleText(
+                filter = args.optString("filter", "").ifBlank { null }
+            )
+            "summarize_screen" -> com.zaya.companion.action.AndroidAction.SummarizeScreen(
+                focus = args.optString("focus", "").ifBlank { null }
+            )
+            "scroll_screen" -> com.zaya.companion.action.AndroidAction.ScrollScreen(args.optString("direction", "down"))
+            "tap_screen" -> com.zaya.companion.action.AndroidAction.TapScreen(
+                x = args.optDouble("x", 0.0).toFloat(),
+                y = args.optDouble("y", 0.0).toFloat()
+            )
+            "run_task" -> com.zaya.companion.action.AndroidAction.RunTask(args.optString("task_id", ""))
+            "cancel_task" -> com.zaya.companion.action.AndroidAction.CancelTask(args.optString("task_id", ""))
+            else -> {
+                val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
+                val report = JSONObject()
+                    .put("type", Protocol.Control.ACTION_RESULT)
+                    .put("payload", errResult.toJsonObject())
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                control?.send(report.toString())
+                return
+            }
+        }
+
+        scope.launch {
+            val result = actionExecutor.execute(action)
+            val report = JSONObject()
+                .put("type", Protocol.Control.ACTION_RESULT)
+                .put("payload", result.toJsonObject())
+                .put("timestamp", System.currentTimeMillis() / 1000.0)
+            control?.send(report.toString())
         }
     }
 

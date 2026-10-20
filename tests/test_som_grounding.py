@@ -82,8 +82,12 @@ class TestGroundingAndVision(unittest.TestCase):
 
     def test_som_strict_json_validation(self):
         img = Image.new("RGB", (400, 300), color=(255, 255, 255))
-        # Fake candidate
-        with patch("actions.computer_control._detect_visual_candidates") as mock_cand:
+        # Fake candidate. The accessibility-tree harvest is patched out too:
+        # it reads the LIVE desktop, so without this the test's result
+        # depended on whatever windows happened to be open on the machine
+        # running it (and it failed outright on Windows).
+        with patch("actions.computer_control._detect_uia_candidates", return_value=[]), \
+             patch("actions.computer_control._detect_visual_candidates") as mock_cand:
             mock_cand.return_value = [
                 {"box": (50, 50, 150, 100), "center": (100, 75)},
                 {"box": (200, 50, 300, 100), "center": (250, 75)},

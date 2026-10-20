@@ -89,14 +89,58 @@ class TestDoubleClapDetector(unittest.TestCase):
         detector.process_chunk(speech)
         self.assertEqual(self.detected_calls, 0, "Sustained tone/speech should not trigger")
 
-    @patch("memory.config_manager.load_api_keys")
-    @patch("memory.config_manager.save_api_keys")
-    def test_toggle_persistence(self, mock_save, mock_load):
-        mock_load.return_value = {"double_clap_enabled": False}
-        self.assertFalse(is_double_clap_enabled())
+    def test_toggle_persistence(self):
+        """The preference must actually reach the config file.
 
-        set_double_clap_enabled(True)
-        mock_save.assert_called_with({"double_clap_enabled": True})
+        This used to mock save_api_keys(), which took an API-key STRING and
+        validated it with parse_keys(). A config DICT made it raise
+        "Enter at least one Gemini API key.", so the real code never wrote
+        anything and the mock hid it. The round-trip is now exercised for real.
+        """
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import memory.config_manager as config_manager
+
+        with tempfile.TemporaryDirectory() as folder:
+            config_file = Path(folder) / "api_keys.json"
+            config_file.write_text(
+                json.dumps({"gemini_api_key": "REAL-KEY-0123456789"}), encoding="utf-8"
+            )
+            with patch.object(config_manager, "CONFIG_FILE", config_file), \
+                 patch.object(config_manager, "CONFIG_DIR", Path(folder)):
+                self.assertFalse(is_double_clap_enabled())
+
+                self.assertTrue(set_double_clap_enabled(True))
+                self.assertTrue(is_double_clap_enabled())
+
+                stored = json.loads(config_file.read_text(encoding="utf-8"))
+                self.assertTrue(stored["double_clap_enabled"])
+                # The unrelated owner setting must survive the write.
+                self.assertEqual(stored["gemini_api_key"], "REAL-KEY-0123456789")
+
+                self.assertTrue(set_double_clap_enabled(False))
+                self.assertFalse(is_double_clap_enabled())
+
+
+class TestDoubleClapToggleAction(unittest.TestCase):
+    def test_toggle_action_reports_persist_failure(self):
+        """A failed write must not be reported as success."""
+        import json
+
+        import actions.double_clap_toggle as toggle_action
+
+        original = toggle_action.set_double_clap_enabled
+        toggle_action.set_double_clap_enabled = lambda _value: False
+        try:
+            result = json.loads(toggle_action.double_clap_toggle({"action": "on"}))
+        finally:
+            toggle_action.set_double_clap_enabled = original
+
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["double_clap_enabled"])
 
 
 if __name__ == "__main__":

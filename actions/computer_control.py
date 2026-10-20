@@ -369,9 +369,14 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
                             score = 0.95
                         elif desc_lower and (desc_lower in text_l or desc_lower in name_l):
                             score = 0.8
-                        elif desc_lower and (text_l in desc_lower or name_l in desc_lower):
+                        elif desc_lower and ((text_l and text_l in desc_lower)
+                                             or (name_l and name_l in desc_lower)):
+                            # The empty-string guard matters: "" in description
+                            # is always True, so every nameless control in the
+                            # tree used to score 0.7 and flood the candidate
+                            # list until the ambiguity check rejected the match.
                             score = 0.7
-                        elif desc_lower and auto_id_l in desc_lower:
+                        elif desc_lower and auto_id_l and auto_id_l in desc_lower:
                             score = 0.65
                         else:
                             # Token overlap
@@ -443,7 +448,11 @@ def _detect_visual_candidates(screenshot_img: Any, w: int, h: int, max_candidate
         contours, _ = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         raw_boxes = []
-        screen_area = w * h
+        # Use the IMAGE's own dimensions for the area filter. pyautogui.size()
+        # reports the primary monitor while the screenshot covers the whole
+        # virtual desktop, so the two disagree on a multi-monitor setup.
+        img_h, img_w = (np_img.shape[0], np_img.shape[1]) if np_img.ndim >= 2 else (h, w)
+        screen_area = max(1, img_w * img_h)
 
         for cnt in contours:
             x, y, bw, bh = cv2.boundingRect(cnt)
@@ -491,6 +500,41 @@ def _detect_visual_candidates(screenshot_img: Any, w: int, h: int, max_candidate
         return []
 
 
+def _detect_uia_candidates(w: int, h: int, max_candidates: int = 40) -> list[dict]:
+    """Harvest interactive controls from the live accessibility tree (Windows only).
+
+    Kept as its own function so the SoM path can be exercised without
+    reaching into whatever happens to be on the owner's desktop: while this
+    was inlined in _find_via_som(), the SoM test silently used the real
+    screen and only passed on machines with no visible windows.
+    """
+    candidates: list[dict] = []
+    if platform.system() != "Windows":
+        return candidates
+    try:
+        from pywinauto import Desktop
+        desktop = Desktop(backend="uia")
+        for win in desktop.windows(visible_only=True)[:4]:
+            for ctrl in win.descendants():
+                try:
+                    if ctrl.element_info.control_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox"):
+                        r = ctrl.rectangle()
+                        if 5 < r.width() < w and 5 < r.height() < h:
+                            candidates.append({
+                                "box": (r.left, r.top, r.right, r.bottom),
+                                "center": (r.mid_point().x, r.mid_point().y),
+                            })
+                            if len(candidates) >= max_candidates:
+                                break
+                except Exception:
+                    continue
+            if len(candidates) >= max_candidates:
+                break
+    except Exception:
+        pass
+    return candidates
+
+
 def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tuple[int, int] | None:
     """Tier B: Set-of-Mark (SoM) visual candidate detection + structured LLM identification."""
     try:
@@ -498,32 +542,9 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
         from google.genai import types as gtypes
         from core import gemini
 
-        candidates: list[dict] = []
-        # Attempt to harvest interactive candidates via UIA if on Windows
-        if platform.system() == "Windows":
-            try:
-                from pywinauto import Desktop
-                desktop = Desktop(backend="uia")
-                for win in desktop.windows(visible_only=True)[:4]:
-                    for ctrl in win.descendants():
-                        try:
-                            if ctrl.element_info.control_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox"):
-                                r = ctrl.rectangle()
-                                if 5 < r.width() < w and 5 < r.height() < h:
-                                    candidates.append({
-                                        "box": (r.left, r.top, r.right, r.bottom),
-                                        "center": (r.mid_point().x, r.mid_point().y),
-                                    })
-                                    if len(candidates) >= 40:
-                                        break
-                        except Exception:
-                            continue
-                    if len(candidates) >= 40:
-                        break
-            except Exception:
-                pass
-
-        # If UIA produced 0 candidates or not on Windows, use OpenCV visual contour detection
+        # Harvest interactive candidates via the accessibility tree first, and
+        # fall back to OpenCV contour detection when it yields nothing.
+        candidates: list[dict] = _detect_uia_candidates(w, h)
         if not candidates:
             candidates = _detect_visual_candidates(screenshot_img, w, h, max_candidates=50)
 
@@ -637,8 +658,12 @@ def _screen_find(description: str) -> tuple[int, int] | None:
     # Capture screen for visual tiers
     try:
         _require_pyautogui()
-        w, h = pyautogui.size()
         img = pyautogui.screenshot()
+        # pyautogui.screenshot() captures the whole virtual desktop, which on
+        # a multi-monitor setup is larger than pyautogui.size() (the primary
+        # monitor). Every coordinate the accessibility tree reports is in
+        # virtual-desktop space, so the visual tiers must use the same space.
+        shot_w, shot_h = img.size
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         screenshot_bytes = buf.getvalue()
@@ -647,12 +672,12 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         return None
 
     # Tier B: Set-of-Mark visual tagging
-    coords = _find_via_som(description, img, w, h)
+    coords = _find_via_som(description, img, shot_w, shot_h)
     if coords is not None:
         return coords
 
     # Tier C: Raw screenshot coordinate prediction
-    return _find_via_coordinates(description, screenshot_bytes, w, h)
+    return _find_via_coordinates(description, screenshot_bytes, shot_w, shot_h)
 
 
 def computer_control(

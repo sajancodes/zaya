@@ -99,6 +99,19 @@ object Protocol {
         const val CALL_MISSED = "call.missed"
         const val CALL_MUTE = "system.call.mute"
         const val CALL_VIDEO = "system.call.video"
+
+        // IRIS-MX Mobile Extensions
+        const val CALL_CONTROL = "mobile.call_control"
+        const val NOTIFICATION_LISTENER = "mobile.notification_listener"
+        const val HARDWARE_ACTION = "mobile.hardware_action"
+        const val CALL_ANNOUNCE = "mobile.call_announce"
+        const val AUTO_REPLY = "mobile.auto_reply"
+        const val DEVICE_STATUS = "mobile.device_status"
+        const val DOUBLE_CLAP_CONFIG = "mobile.double_clap_config"
+        const val MEDIA_CONTROL = "mobile.media_control"
+        const val OPEN_DEEP_LINK = "mobile.deep_link"
+        const val LAUNCH_APP = "mobile.launch_app"
+        const val ACTION_INVOKE = "action.invoke"
     }
 
     // ── uplink control messages (phone → laptop) ─────────────────────────────
@@ -113,6 +126,13 @@ object Protocol {
         const val CALL_START = "call.start"
         const val CALL_MUTE = "call.mute"
         const val WHATSAPP_MODE = "whatsapp.mode"
+
+        // IRIS-MX Mobile Uplinks
+        const val NOTIFICATION_EVENT = "notification.event"
+        const val HARDWARE_STATUS = "hardware.status"
+        const val DOUBLE_CLAP_DETECTED = "double_clap.detected"
+        const val ACTION_RESULT = "action.result"
+        const val CAPABILITIES_REPORT = "capabilities.report"
     }
 
     // ── command lifecycle (mirrors core/remote_commands.py) ──────────────────

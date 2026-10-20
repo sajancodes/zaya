@@ -139,6 +139,16 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
+def get_double_clap_enabled() -> bool:
+    """Whether acoustic double-clap wake activation is on."""
+    return load_api_keys().get("double_clap_enabled", False) is True
+
+
+def save_double_clap_enabled(enabled: bool) -> None:
+    """Persist the double-clap preference without touching any other setting."""
+    _save_flag("double_clap_enabled", bool(enabled))
+
+
 def get_auto_execute_enabled() -> bool:
     """Only a saved boolean opt-in enables automatic owner operations."""
     return load_api_keys().get('auto_execute_owner', False) is True

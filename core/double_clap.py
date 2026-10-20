@@ -19,20 +19,23 @@ logger = logging.getLogger("core.double_clap")
 def is_double_clap_enabled() -> bool:
     """Returns True if double-clap detection is enabled in config."""
     try:
-        from memory.config_manager import load_api_keys
-        cfg = load_api_keys()
-        return bool(cfg.get("double_clap_enabled", False))
+        from memory.config_manager import get_double_clap_enabled
+        return get_double_clap_enabled()
     except Exception:
         return False
 
 
 def set_double_clap_enabled(enabled: bool) -> bool:
-    """Persist double-clap activation preference."""
+    """Persist double-clap activation preference.
+
+    Uses the dedicated config helper rather than save_api_keys(): that one
+    takes an API-key STRING and validates it with parse_keys(), so handing it
+    a config dict raised "Enter at least one Gemini API key." and the
+    preference was silently never written.
+    """
     try:
-        from memory.config_manager import load_api_keys, save_api_keys
-        cfg = load_api_keys()
-        cfg["double_clap_enabled"] = bool(enabled)
-        save_api_keys(cfg)
+        from memory.config_manager import save_double_clap_enabled
+        save_double_clap_enabled(bool(enabled))
         return True
     except Exception as e:
         logger.error(f"Failed to persist double_clap setting: {e}")
