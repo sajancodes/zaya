@@ -73,6 +73,8 @@ sealed class AndroidAction(
 
     data class SetFlashlight(val enabled: Boolean) : AndroidAction("set_flashlight", ActionRisk.LOW)
 
+    data class SetVolume(val percent: Int) : AndroidAction("set_volume", ActionRisk.LOW)
+
     data object GetFlashlightState : AndroidAction("get_flashlight_state", ActionRisk.LOW)
 
     data class OpenSystemSettings(

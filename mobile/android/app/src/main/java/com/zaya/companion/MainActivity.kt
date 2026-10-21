@@ -34,6 +34,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        ZayaApp.runtime.value?.let { runtime ->
+            runtime.refreshPhonePermissions()
+            if (runtime.phoneApproval.value != null) startActivity(Intent(this,
+                com.zaya.companion.ui.PhoneActionConsentActivity::class.java))
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         ZayaService.ensureRunning(this)

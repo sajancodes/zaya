@@ -160,6 +160,8 @@ class MobileApi:
         self._last_video = ('', 0.0)
         self.gate = get_gate()
         self._detach_sink = self.bridge.add_sink(self.push, name='mobile')
+        self.bridge.bind_phone_transport(
+            lambda: [row.device['device_id'] for row in list(self.sessions) if row.alive], self._send_phone)
         self._started_at = time.time()
         self._registry_ready = True
         try:
@@ -175,6 +177,11 @@ class MobileApi:
         """Bridge sink. Runs on whatever thread published the event."""
         for session in list(self.sessions):
             session.enqueue(envelope)
+
+    def _send_phone(self, envelope: dict, device_id: str) -> None:
+        candidates = [row for row in list(self.sessions) if row.alive and row.device['device_id'] == device_id]
+        if candidates:
+            max(candidates, key=lambda row: row.connected_at).enqueue(envelope)
 
     def broadcast(self, type_: str, payload: dict | None = None) -> int:
         return self.bridge.emit(protocol.envelope(type_, payload))
@@ -577,6 +584,7 @@ class MobileApi:
             self.loop = asyncio.get_running_loop()
         await websocket.accept()
         session = MobileSession(self, websocket, device, token)
+        session.connected_at = time.monotonic()
         self.sessions.add(session)
 
         # No per-session bridge sink here: MobileApi already registered one in
@@ -588,6 +596,7 @@ class MobileApi:
             session.enqueue(protocol.envelope('hello', {
                 'protocol_version': protocol.PROTOCOL_VERSION,
                 'server': self.SERVER_NAME,
+                'server_instance': self.gate.instance_id,
                 'device_id': device['device_id'],
                 'device_name': device.get('device_name', ''),
                 'audio': {'uplink_rate': PHONE_UP_RATE, 'downlink_rate': PHONE_DOWN_RATE},
@@ -652,6 +661,22 @@ class MobileApi:
             self._call_video(session, data)
             return
 
+        if kind == 'command.status.request':
+            for request_id in (data.get('request_ids') or [])[:200]:
+                command = self.gate.get(str(request_id))
+                if command and command.device_id == session.device['device_id']:
+                    session.enqueue(command.envelope())
+                else:
+                    session.enqueue(protocol.envelope('command.status', {
+                        'request_id': str(request_id)[:120], 'status': 'failed',
+                        'error': 'Previous request is no longer active. Send a new request if needed.'}))
+            return
+        if kind == 'command' and data.get('server_instance') != self.gate.instance_id:
+            session.enqueue(protocol.envelope('command.status', {
+                'request_id': str(data.get('request_id') or '')[:120], 'status': 'failed',
+                'error': 'Old phone request was not executed. Update the app and send a new request.'}))
+            return
+
         if kind == 'ping':
             session.enqueue(protocol.envelope('pong', {'time': time.time()}))
             return
@@ -680,29 +705,42 @@ class MobileApi:
             self._call_control(session, kind, str(data.get('call_id') or ''), data)
             return
 
-        if kind == 'action.response':
+        if kind == 'action.result':
             req_id = str(data.get('request_id') or '')
-            self.bridge.register_response(req_id, data)
+            payload = data.get('payload')
+            if isinstance(payload, dict):
+                result = dict(payload.get('data') or {})
+                result.update({key: value for key, value in payload.items() if key != 'data'})
+                self.bridge.register_response(req_id, result, device_id=session.device['device_id'])
             return
 
         if kind == 'screen.frame':
             req_id = str(data.get('request_id') or '')
-            self.bridge.register_response(req_id, data)
+            self.bridge.register_response(req_id, data, device_id=session.device['device_id'])
             return
 
-        if kind == 'notification.received':
+        if kind == 'capabilities.report':
+            payload = data.get('payload')
+            if isinstance(payload, dict):
+                session.capabilities['actions'] = payload.get('capabilities', [])
+            return
+
+        if kind == 'notification.event':
             from core.event_bus import bus
-            bus.publish('phone_notification', data)
+            payload = data.get('payload')
+            if isinstance(payload, dict):
+                bus.publish('phone_notification', **{**payload, 'app': payload.get('app_name'),
+                    'sender': payload.get('title'), 'device_id': session.device['device_id']})
             return
 
         if kind == 'hardware.status':
             from core.event_bus import bus
-            bus.publish('phone_hardware', data)
+            bus.publish('phone_hardware', **data)
             return
 
         if kind.startswith('call.') and kind not in {'call.video.toggle', 'call.video.frame', 'call.answer', 'call.decline', 'call.end', 'call.start', 'call.mute'}:
             from core.event_bus import bus
-            bus.publish('phone_call', data)
+            bus.publish('phone_call', **data)
             return
 
         if kind == 'whatsapp.mode':
@@ -722,7 +760,7 @@ class MobileApi:
         if not text:
             session.enqueue(protocol.envelope('error', {'error': 'Empty command'}))
             return
-        command, outcome = self.gate.submit(text, request_id=request_id, source='phone')
+        command, outcome = self.gate.submit(text, request_id=request_id, source='phone', device_id=session.device['device_id'])
         if outcome == 'rejected' or command is None:
             session.enqueue(protocol.envelope('error', {'error': 'Command rejected'}))
             return
@@ -737,7 +775,8 @@ class MobileApi:
                 'source': 'phone', 'scope': command.scope,
             })
         except asyncio.QueueFull:
-            session.enqueue(protocol.envelope('error', {'error': 'Zaya is busy; try again shortly'}))
+            self.gate.complete(command.request_id, ok=False, error='Zaya is busy; send a new request.')
+            session.enqueue(command.envelope())
             return
         if self.server._wake_callback:
             try:

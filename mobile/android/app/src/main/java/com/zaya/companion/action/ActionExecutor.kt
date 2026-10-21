@@ -54,6 +54,11 @@ class ActionExecutor(
 
         return@withContext when (action) {
             is AndroidAction.SetFlashlight -> executeFlashlight(action.enabled)
+            is AndroidAction.SetVolume -> {
+                if (hardwareController.setMediaVolume(action.percent.coerceIn(0,100)))
+                    ActionResult.success("Phone media volume adjusted.")
+                else ActionResult.failure("Could not change phone volume.")
+            }
             is AndroidAction.GetFlashlightState -> executeGetFlashlightState()
             is AndroidAction.OpenSystemSettings -> executeOpenSettings(action.setting, action.packageName)
             is AndroidAction.ControlMedia -> executeControlMedia(action.action)
@@ -72,9 +77,9 @@ class ActionExecutor(
             is AndroidAction.DraftNotificationReply -> executeDraftNotificationReply(action)
             is AndroidAction.ReplyToNotification -> executeReplyNotification(action)
             is AndroidAction.CaptureScreen -> executeCaptureScreen()
-            is AndroidAction.DescribeScreen -> executeDescribeScreen(action)
-            is AndroidAction.ExtractVisibleText -> executeExtractVisibleText(action)
-            is AndroidAction.SummarizeScreen -> executeSummarizeScreen(action)
+            is AndroidAction.DescribeScreen -> executeCaptureScreen()
+            is AndroidAction.ExtractVisibleText -> executeCaptureScreen()
+            is AndroidAction.SummarizeScreen -> executeCaptureScreen()
             is AndroidAction.ScrollScreen -> {
                 ActionResult.unsupported("Screen scrolling requires Accessibility Service authorization.")
             }
@@ -351,6 +356,8 @@ class ActionExecutor(
     }
 
     private fun executeGetIncomingCallState(): ActionResult {
+        if (!registry.hasPermission(Manifest.permission.READ_PHONE_STATE))
+            return ActionResult.permissionRequired(Manifest.permission.READ_PHONE_STATE, "Allow phone state access to read incoming calls.")
         val info = callManager.getIncomingCallInfo()
         return if (info.isRinging) {
             val caller = info.callerName ?: info.incomingNumber ?: "a private or unknown caller"
@@ -784,23 +791,17 @@ class ActionExecutor(
     }
 
     private suspend fun executeCaptureScreen(): ActionResult {
-        if (!ScreenCaptureManager.hasConsent()) {
-            screenCaptureManager.requestConsent()
-            return ActionResult.permissionRequired(
-                permission = "android.permission.MEDIA_PROJECTION",
-                spoken = "Screen capture authorization is required. Please grant the screen recording dialog to proceed."
-            )
-        }
-
         return when (val frame = screenCaptureManager.captureScreenFrame()) {
             is ScreenFrameResult.Success -> {
+                if (frame.jpeg.size > 180000) return ActionResult.failure("Screen frame exceeds the safe transfer limit.")
                 ActionResult.success(
                     spoken = "Screen captured at ${frame.width}x${frame.height}.",
                     data = mapOf(
                         "width" to frame.width,
                         "height" to frame.height,
                         "timestamp" to frame.timestamp,
-                        "captured" to true
+                        "captured" to true,
+                        "jpeg" to android.util.Base64.encodeToString(frame.jpeg, android.util.Base64.NO_WRAP)
                     )
                 )
             }

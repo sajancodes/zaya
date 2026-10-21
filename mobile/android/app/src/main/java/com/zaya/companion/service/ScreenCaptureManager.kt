@@ -15,7 +15,10 @@ import android.os.HandlerThread
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
-import android.view.WindowManager
+import android.view.Display
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.zaya.companion.ZayaApp
 import com.zaya.companion.ui.ScreenCaptureConsentActivity
 import kotlinx.coroutines.Dispatchers
@@ -55,13 +58,14 @@ class ScreenCaptureManager(private val context: Context) {
     companion object {
         private const val TAG = "ScreenCaptureManager"
         private const val VIRTUAL_DISPLAY_NAME = "ZayaScreenCapture"
-        private const val MAX_DIMENSION = 1280
+        private const val MAX_DIMENSION = 960
 
         @Volatile
         private var consentResultCode: Int? = null
 
         @Volatile
         private var consentData: Intent? = null
+        @Volatile private var denied = false
 
         fun setProjectionConsent(resultCode: Int, data: Intent) {
             consentResultCode = resultCode
@@ -70,6 +74,7 @@ class ScreenCaptureManager(private val context: Context) {
         }
 
         fun onConsentDenied() {
+            denied = true
             consentResultCode = null
             consentData = null
             Log.w(TAG, "MediaProjection consent cleared/denied.")
@@ -87,9 +92,7 @@ class ScreenCaptureManager(private val context: Context) {
         context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
     }
 
-    private val windowManager by lazy {
-        context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-    }
+    private val captureMutex = Mutex()
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -106,20 +109,30 @@ class ScreenCaptureManager(private val context: Context) {
     }
 
     fun requestConsent() {
+        denied = false
         ScreenCaptureConsentActivity.requestConsent(context)
     }
 
     /**
      * Captures a single screen frame as a compressed JPEG.
      */
-    suspend fun captureScreenFrame(timeoutMs: Long = 3000L): ScreenFrameResult = withContext(Dispatchers.Default) {
-        val code = consentResultCode
-        val data = consentData
-
-        if (code == null || data == null) {
-            requestConsent()
-            return@withContext ScreenFrameResult.ConsentRequired
+    suspend fun captureScreenFrame(timeoutMs: Long = 3000L): ScreenFrameResult = captureMutex.withLock {
+      withContext(Dispatchers.Default) {
+        if (!hasConsent()) {
+            withContext(Dispatchers.Main) { requestConsent() }
+            val consent = withTimeoutOrNull(90000) {
+                while (!hasConsent() && !denied) delay(100)
+                hasConsent()
+            }
+            if (consent != true) return@withContext ScreenFrameResult.ConsentRequired
         }
+        val foreground = withTimeoutOrNull(5000) {
+            while (!ZayaService.projectionReady) delay(50)
+            true
+        }
+        if (foreground != true) return@withContext ScreenFrameResult.Failed("Screen capture service could not start.")
+        val code = consentResultCode ?: return@withContext ScreenFrameResult.ConsentRequired
+        val data = consentData ?: return@withContext ScreenFrameResult.ConsentRequired
 
         val metrics = getDisplayMetrics()
         val (scaledWidth, scaledHeight) = computeScaledDimensions(metrics.widthPixels, metrics.heightPixels)
@@ -203,6 +216,7 @@ class ScreenCaptureManager(private val context: Context) {
         }
 
         return@withContext result ?: ScreenFrameResult.Timeout
+      }
     }
 
     /**
@@ -279,6 +293,8 @@ class ScreenCaptureManager(private val context: Context) {
 
     fun stopCapture() {
         try {
+            clearConsent()
+            runCatching { ZayaService.request(context, ZayaService.ACTION_PROJECTION_END) }
             virtualDisplay?.release()
             virtualDisplay = null
             imageReader?.close()
@@ -316,17 +332,17 @@ class ScreenCaptureManager(private val context: Context) {
         }
 
         val out = ByteArrayOutputStream()
-        cropped.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        cropped.compress(Bitmap.CompressFormat.JPEG, 55, out)
         cropped.recycle()
         return out.toByteArray()
     }
 
     private fun getDisplayMetrics(): DisplayMetrics {
         val metrics = DisplayMetrics()
-        val wm = windowManager
-        if (wm != null) {
+        val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+        if (display != null) {
             @Suppress("DEPRECATION")
-            wm.defaultDisplay.getRealMetrics(metrics)
+            display.getRealMetrics(metrics)
         } else {
             metrics.widthPixels = 1080
             metrics.heightPixels = 2400

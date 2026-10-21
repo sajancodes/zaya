@@ -78,6 +78,8 @@ class ZayaRuntime(
 
     private val reconnectSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val outbox = ArrayDeque<Pair<String, String>>()
+    @Volatile private var serverInstance = ""
+    @Volatile private var deviceId = ""
 
     private val restClient = okhttp3.OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -146,6 +148,7 @@ class ZayaRuntime(
             screenCaptureManager = screenCaptureManager,
         )
     }
+    private var phoneActionsInitialized = false
     val actionRegistry by lazy { actionExecutor.registry }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
@@ -259,6 +262,7 @@ class ZayaRuntime(
         updateChecks?.cancel()
         updateChecks = null
         teardownSession()
+        if (phoneActionsInitialized) cellularCallManager.shutdown()
         model.connectionLost("Disconnected")
         _connection.value = ConnectionStatus(ConnectionPhase.UNPAIRED, "Disconnected")
     }
@@ -443,13 +447,19 @@ class ZayaRuntime(
                     sendCapabilitiesReport(socket)
                     openVoiceSocket(base, token)
                     scope.launch { updates.check() }
-                    flushOutbox(socket)
+                    // Wait for authenticated HELLO; old text is never replayed.
                 }
 
                 override fun onText(socket: ZayaSocket, text: String) {
                     lastMessageAt = System.currentTimeMillis()
                     val envelope = Envelope.parse(text) ?: return
                     if (envelope.type == Protocol.Type.PONG) return
+                    if (envelope.type == Protocol.Type.HELLO) {
+                        serverInstance = envelope.payload.str("server_instance", 80)
+                        deviceId = envelope.payload.str("device_id", 128)
+                        flushOutbox(socket)
+                        refreshPhonePermissions()
+                    }
                     val effects = model.apply(envelope)
                     if (envelope.type in setOf(Protocol.Type.HELLO, Protocol.Type.CALL_ANSWERED, Protocol.Type.CALL_MUTE)) {
                         muted = model.voice.value.muted
@@ -571,53 +581,32 @@ class ZayaRuntime(
 
     // ── commands ─────────────────────────────────────────────────────────────
 
-    /** True when the command reached the laptop (or was parked for the reconnect). */
+    /** Offline sends fail visibly; reconnect never executes queued text. */
     suspend fun send(text: String): Boolean {
         val started = model.beginCommand(text)
         if (started == null) return false
         val (requestId, _) = started
         val socket = control
-        if (socket == null || !socket.isOpen) {
-            park(requestId, text)
+        if (socket == null || !socket.isOpen || serverInstance.isEmpty()) {
+            model.markCommandFailedLocally(requestId, "Not connected. Send again once Zaya is online.")
             return false
         }
         val message = JSONObject()
             .put("type", Protocol.Control.COMMAND)
             .put("text", text)
             .put("request_id", requestId)
+            .put("server_instance", serverInstance)
         val sent = socket.send(message.toString())
-        if (!sent) park(requestId, text)
+        if (!sent) model.markCommandFailedLocally(requestId, "Message was not delivered. Send again when connected.")
         return sent
     }
 
-    private fun park(requestId: String, text: String) {
-        model.markCommandQueued(requestId)
-        synchronized(outbox) {
-            if (outbox.none { it.first == requestId }) {
-                if (outbox.size >= MAX_OUTBOX) outbox.removeFirst()
-                outbox.addLast(requestId to text)
-            }
-        }
-    }
-
     private fun flushOutbox(socket: ZayaSocket) {
-        val pending = synchronized(outbox) {
-            val copy = outbox.toList()
-            outbox.clear()
-            copy
-        }
-        val retries = model.tracker.inFlight().filter { entry ->
-            pending.none { it.first == entry.first }
-        }
-        for ((requestId, text) in pending + retries.take(MAX_RESEND)) {
-            val message = JSONObject()
-                .put("type", Protocol.Control.COMMAND)
-                .put("text", text)
-                .put("request_id", requestId)
-            if (!socket.send(message.toString())) {
-                park(requestId, text)
-            }
-        }
+        synchronized(outbox) { outbox.clear() }
+        val ids = model.tracker.inFlight().map { it.first }
+        if (ids.isNotEmpty()) socket.send(JSONObject().put("type", "command.status.request")
+            .put("request_ids", org.json.JSONArray(ids)).toString())
+        // A query may update an existing request; it never executes its text.
     }
 
     // ── calls ────────────────────────────────────────────────────────────────
@@ -696,6 +685,7 @@ class ZayaRuntime(
     }
 
     private fun applyMicState() {
+        if (android.os.Build.VERSION.SDK_INT >= 34 && !com.zaya.companion.service.ZayaService.voiceReady) return
         val wanted = model.call.value is CallUiState.Active && !muted
         if (!wanted) {
             micCapture?.stop()
@@ -743,6 +733,8 @@ class ZayaRuntime(
     }
 
     private fun stopVoice() {
+        if (com.zaya.companion.service.ZayaService.voiceReady)
+            com.zaya.companion.service.ZayaService.request(context, com.zaya.companion.service.ZayaService.ACTION_VOICE_END)
         setVideoEnabled(false)
         micCapture?.stop()
         micCapture = null
@@ -769,7 +761,15 @@ class ZayaRuntime(
                     speaker = null
                     runCatching { callAudio.stopRinging(); callAudio.begin() }
                         .onFailure { model.setVoice(note = "Phone audio route unavailable") }
-                    applyMicState()
+                    com.zaya.companion.service.ZayaService.request(context,
+                        com.zaya.companion.service.ZayaService.ACTION_VOICE_BEGIN)
+                    scope.launch {
+                        repeat(40) {
+                            if (com.zaya.companion.service.ZayaService.voiceReady) { applyMicState(); return@launch }
+                            delay(50)
+                        }
+                        model.setVoice(micActive = false, note = "Phone microphone service could not start. Open the call screen.")
+                    }
                 }
                 is RuntimeEffect.StopVoice -> stopVoice()
                 is RuntimeEffect.Ringback -> {
@@ -938,6 +938,11 @@ class ZayaRuntime(
     private fun teardownSession() {
         control?.close(1000, "closed")
         control = null
+        serverInstance = ""
+        synchronized(actionJobs) { actionJobs.values.forEach { it.cancel() }; actionJobs.clear() }
+        approvalWaiter?.cancel()
+        approvalWaiter = null
+        _phoneApproval.value = null
         voice?.close(1000, "closed")
         voice = null
         stopVoice()
@@ -1045,6 +1050,7 @@ class ZayaRuntime(
     }
 
     fun sendCapabilitiesReport(socket: ZayaSocket? = control) {
+        phoneActionsInitialized = true
         val caps = actionRegistry.discoverCapabilities()
         val arr = org.json.JSONArray()
         caps.forEach { arr.put(it.toJsonObject()) }
@@ -1055,11 +1061,58 @@ class ZayaRuntime(
         socket?.send(msg.toString())
     }
 
+    data class PhoneApproval(val requestId: String, val message: String, val permission: String?)
+    private val _phoneApproval = MutableStateFlow<PhoneApproval?>(null)
+    val phoneApproval = _phoneApproval.asStateFlow()
+    private var approvalWaiter: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+    private val actionJobs = LinkedHashMap<String, Job>()
+    private val finishedActions = LinkedHashMap<String, String>()
+
+    fun refreshPhonePermissions() { cellularCallManager.refreshPermissions() }
+
+    fun decidePhoneAction(requestId: String, approved: Boolean) {
+        synchronized(this) {
+            if (_phoneApproval.value?.requestId == requestId) {
+                _phoneApproval.value = null
+                approvalWaiter?.complete(approved)
+            }
+        }
+    }
+
+    private suspend fun awaitPhoneApproval(id: String, message: String, permission: String?, expires: Double): Boolean {
+        val waiter = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        synchronized(this) {
+            if (approvalWaiter != null) return false
+            approvalWaiter = waiter
+            _phoneApproval.value = PhoneApproval(id, message, permission)
+        }
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                runCatching { context.startActivity(android.content.Intent(context,
+                    com.zaya.companion.ui.PhoneActionConsentActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+            val remaining = (expires * 1000 - System.currentTimeMillis()).toLong().coerceIn(1, 90000)
+            return kotlinx.coroutines.withTimeoutOrNull(remaining) { waiter.await() } == true
+        } finally { synchronized(this) {
+            if (approvalWaiter === waiter) { approvalWaiter = null; _phoneApproval.value = null }
+        } }
+    }
+
     private fun handleActionInvoke(payload: JSONObject) {
+        val requestId = payload.str("request_id", 100)
+        val expires = payload.num("expires_at", 0.0)
+        if (requestId.isBlank() || payload.str("device_id", 128) != deviceId ||
+            expires * 1000 <= System.currentTimeMillis()) return
+        synchronized(actionJobs) {
+            finishedActions[requestId]?.let { control?.send(it); return }
+            if (actionJobs.containsKey(requestId)) return
+        }
         val actionId = payload.str("action_id", 60)
         val args = payload.optJSONObject("arguments") ?: JSONObject()
         val action: com.zaya.companion.action.AndroidAction = when (actionId) {
             "set_flashlight" -> com.zaya.companion.action.AndroidAction.SetFlashlight(args.optBoolean("enabled", true))
+            "set_volume" -> com.zaya.companion.action.AndroidAction.SetVolume(args.optInt("percent", 50))
             "get_flashlight_state" -> com.zaya.companion.action.AndroidAction.GetFlashlightState
             "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(
                 setting = args.optString("setting", "settings"),
@@ -1072,7 +1125,7 @@ class ZayaRuntime(
             "initiate_call" -> com.zaya.companion.action.AndroidAction.InitiateCall(
                 queryOrNumber = args.optString("query", args.optString("phone_number", "")),
                 directCall = args.optBoolean("direct_call", false),
-                confirmed = args.optBoolean("confirmed", false)
+                confirmed = false
             )
             "get_incoming_call_state" -> com.zaya.companion.action.AndroidAction.GetIncomingCallState
             "set_caller_announcement" -> com.zaya.companion.action.AndroidAction.SetCallerAnnouncement(
@@ -1081,7 +1134,7 @@ class ZayaRuntime(
             "compose_sms" -> com.zaya.companion.action.AndroidAction.ComposeSms(
                 recipient = args.optString("recipient", ""),
                 message = args.optString("message", ""),
-                confirmed = args.optBoolean("confirmed", false),
+                confirmed = false,
                 directSend = args.optBoolean("direct_send", false)
             )
             "answer_call" -> com.zaya.companion.action.AndroidAction.AnswerCall
@@ -1107,7 +1160,7 @@ class ZayaRuntime(
                 targetSender = args.optString("sender", "").ifBlank { null },
                 targetPackage = args.optString("package", "").ifBlank { null },
                 text = args.optString("text", ""),
-                confirmed = args.optBoolean("confirmed", false)
+                confirmed = false
             )
             "capture_screen" -> com.zaya.companion.action.AndroidAction.CaptureScreen
             "describe_screen" -> com.zaya.companion.action.AndroidAction.DescribeScreen(
@@ -1132,19 +1185,55 @@ class ZayaRuntime(
                     .put("type", Protocol.Control.ACTION_RESULT)
                     .put("payload", errResult.toJsonObject())
                     .put("timestamp", System.currentTimeMillis() / 1000.0)
-                control?.send(report.toString())
+                control?.send(report.put("request_id", requestId).toString())
                 return
             }
         }
-
-        scope.launch {
-            val result = actionExecutor.execute(action)
-            val report = JSONObject()
-                .put("type", Protocol.Control.ACTION_RESULT)
-                .put("payload", result.toJsonObject())
-                .put("timestamp", System.currentTimeMillis() / 1000.0)
-            control?.send(report.toString())
+        val socket = control ?: return
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                var currentAction = action
+                var result = actionExecutor.execute(currentAction)
+                var approvals = 0
+                while (result.status in setOf(com.zaya.companion.action.ActionResultStatus.NEEDS_CONFIRMATION,
+                        com.zaya.companion.action.ActionResultStatus.PERMISSION_REQUIRED) && approvals++ < 3) {
+                    val permission = if (result.status == com.zaya.companion.action.ActionResultStatus.PERMISSION_REQUIRED)
+                        result.data["permission"]?.toString() else null
+                    if (permission == "android.permission.MEDIA_PROJECTION") {
+                        result = com.zaya.companion.action.ActionResult.cancelled("Screen capture consent was not granted.")
+                        break
+                    }
+                    val approved = awaitPhoneApproval(requestId, result.spokenMessage, permission, expires)
+                    result = if (approved) {
+                        val confirmed = when (val pending = currentAction) {
+                            is com.zaya.companion.action.AndroidAction.InitiateCall -> pending.copy(confirmed = true)
+                            is com.zaya.companion.action.AndroidAction.ComposeSms -> pending.copy(confirmed = true)
+                            is com.zaya.companion.action.AndroidAction.ReplyToNotification -> pending.copy(confirmed = true,
+                                notificationKey = result.data["notification_key"]?.toString() ?: pending.notificationKey)
+                            else -> pending
+                        }
+                        currentAction = confirmed
+                        actionExecutor.execute(confirmed)
+                    } else com.zaya.companion.action.ActionResult.cancelled("Phone action was declined or expired.")
+                }
+                if (System.currentTimeMillis() < expires * 1000 && control === socket) {
+                    val report = JSONObject().put("type", Protocol.Control.ACTION_RESULT)
+                        .put("request_id", requestId).put("payload", result.toJsonObject()).toString()
+                    synchronized(actionJobs) {
+                        finishedActions[requestId] = report
+                        while (finishedActions.size > 100) finishedActions.remove(finishedActions.keys.first())
+                    }
+                    socket.send(report)
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) {
+                if (control === socket) socket.send(JSONObject().put("type", Protocol.Control.ACTION_RESULT)
+                    .put("request_id", requestId).put("payload", com.zaya.companion.action.ActionResult
+                        .failure("Phone action failed; no success is confirmed.").toJsonObject()).toString())
+            } finally { synchronized(actionJobs) { actionJobs.remove(requestId) } }
         }
+        synchronized(actionJobs) { actionJobs[requestId] = job }
+        job.start()
     }
 
     private companion object {

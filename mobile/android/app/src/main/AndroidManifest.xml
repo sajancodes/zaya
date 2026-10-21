@@ -84,6 +84,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".ui.PhoneActionConsentActivity" android:exported="false" />
+
         <!-- An incoming Zaya call takes over the screen, like a real call. -->
         <activity
             android:name=".ui.IncomingCallActivity"

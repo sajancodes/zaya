@@ -57,6 +57,8 @@ class ActionRegistry(private val context: Context) {
     fun discoverCapabilities(): List<ActionCapability> {
         val list = mutableListOf<ActionCapability>()
 
+        list.add(ActionCapability("set_volume", "Set phone media volume percent", listOf("percent"),
+            ActionRisk.LOW, false, true, true, true))
         // 1. Launch App
         list.add(
             ActionCapability(

@@ -86,6 +86,14 @@ except Exception as _sub_err:
     logger.debug("Failed to bind event bus subscriptions: %s", _sub_err)
 
 
+def _dispatch(bridge, parameters: dict, action: str, arguments: dict) -> dict:
+    result = bridge.dispatch_phone_action(action, arguments,
+        device_id=str(parameters.get('device_id') or '').strip())
+    if result.get('status') != 'success' and not result.get('error'):
+        result['error'] = result.get('spoken_message') or 'No phone action success was confirmed.'
+    return result
+
+
 # ── Action Handlers ──────────────────────────────────────────────────────────
 
 def control_device_hardware(parameters: dict, **_kwargs) -> ToolResult:
@@ -96,29 +104,12 @@ def control_device_hardware(parameters: dict, **_kwargs) -> ToolResult:
     percent = parameters.get("percent")
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
-        # Fallback to local hardware simulation if companion not connected
-        with _EVENTS_LOCK:
-            if target == "flashlight":
-                if action == "on":
-                    _LATEST_HARDWARE["flashlight"] = True
-                elif action == "off":
-                    _LATEST_HARDWARE["flashlight"] = False
-                else:
-                    _LATEST_HARDWARE["flashlight"] = not _LATEST_HARDWARE.get("flashlight", False)
-                state = "on" if _LATEST_HARDWARE["flashlight"] else "off"
-                return ToolResult("success", f"Mobile flashlight turned {state} (simulated; no phone connected).",
-                                  data={"target": target, "state": state, "simulated": True})
-            elif target == "volume" and percent is not None:
-                _LATEST_HARDWARE["volume"] = int(percent)
-                return ToolResult("success", f"Media volume set to {percent}% (simulated).",
-                                  data={"target": target, "percent": percent, "simulated": True})
-
-        return ToolResult("failed", "No companion phone connected. Open Zaya Companion on your device.")
+    if not bridge.phone_connected():
+        return ToolResult("failed", "No companion phone connected. No phone hardware was changed.")
 
     if target == "flashlight":
         enabled = action == "on" or (action == "toggle" and not _LATEST_HARDWARE.get("flashlight", False))
-        res = bridge.dispatch_phone_action("set_flashlight", {"enabled": enabled})
+        res = _dispatch(bridge, parameters,"set_flashlight", {"enabled": enabled})
         if res.get("status") == "success":
             with _EVENTS_LOCK:
                 _LATEST_HARDWARE["flashlight"] = enabled
@@ -127,13 +118,13 @@ def control_device_hardware(parameters: dict, **_kwargs) -> ToolResult:
 
     elif target == "volume":
         val = int(percent) if percent is not None else 50
-        res = bridge.dispatch_phone_action("control_hardware", {"target": "volume", "percent": val})
+        res = _dispatch(bridge, parameters,"set_volume", {"percent": max(0, min(100, val))})
         if res.get("status") == "success":
             return ToolResult("success", f"Phone media volume adjusted to {val}%.", data=res)
         return ToolResult("failed", res.get("error") or "Failed to adjust phone volume.", data=res)
 
     elif target in {"wifi", "bluetooth", "hotspot", "location", "settings"}:
-        res = bridge.dispatch_phone_action("open_settings", {"setting": target})
+        res = _dispatch(bridge, parameters,"open_settings", {"setting": target})
         if res.get("status") == "success":
             return ToolResult("success", f"Opened {target.upper()} settings panel on phone.", data=res)
         return ToolResult("failed", res.get("error") or f"Failed to open {target} settings.", data=res)
@@ -151,10 +142,10 @@ def open_phone_app(parameters: dict, **_kwargs) -> ToolResult:
         return ToolResult("failed", "Must specify target_app to launch (e.g. 'youtube', 'spotify', 'maps', 'settings').")
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected. Open Zaya Companion to launch apps.")
 
-    res = bridge.dispatch_phone_action("launch_app", {"name": target_app, "query": query})
+    res = _dispatch(bridge, parameters,"launch_app", {"name": target_app, "query": query})
     if res.get("status") == "success":
         msg = f"Launched '{target_app}' on phone" + (f" with query '{query}'." if query else ".")
         return ToolResult("success", msg, data=res)
@@ -167,13 +158,13 @@ def control_phone_media(parameters: dict, **_kwargs) -> ToolResult:
     action = str(parameters.get("action") or "toggle").lower().strip()
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected.")
 
     if action == "status":
-        res = bridge.dispatch_phone_action("get_media_status", {})
+        res = _dispatch(bridge, parameters,"get_media_status", {})
     else:
-        res = bridge.dispatch_phone_action("control_media", {"action": action})
+        res = _dispatch(bridge, parameters,"control_media", {"action": action})
 
     if res.get("status") == "success":
         return ToolResult("success", f"Phone media command '{action}' executed.", data=res)
@@ -188,10 +179,10 @@ def search_phone_contacts(parameters: dict, **_kwargs) -> ToolResult:
         return ToolResult("failed", "Search query cannot be empty.")
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected.")
 
-    res = bridge.dispatch_phone_action("lookup_contact", {"query": query})
+    res = _dispatch(bridge, parameters,"lookup_contact", {"query": query})
     if res.get("status") == "success":
         contacts = res.get("contacts") or res.get("result") or []
         count = len(contacts) if isinstance(contacts, list) else 1
@@ -207,12 +198,12 @@ def make_phone_call(parameters: dict, **_kwargs) -> ToolResult:
         return ToolResult("failed", "Must specify contact name or phone number.")
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected.")
 
-    res = bridge.dispatch_phone_action("initiate_call", {"query": contact})
+    res = _dispatch(bridge, parameters,"initiate_call", {"query": contact})
     if res.get("status") == "success":
-        return ToolResult("success", f"Placing cellular phone call to {contact}.", data=res)
+        return ToolResult("success", res.get("spoken_message") or f"Opened the dialer for {contact}.", data=res)
     return ToolResult("failed", res.get("error") or f"Failed to place call to {contact}.", data=res)
 
 
@@ -223,20 +214,15 @@ def control_incoming_call(parameters: dict, **_kwargs) -> ToolResult:
     caller = str(parameters.get("caller_name") or parameters.get("caller") or "Incoming Caller").strip()
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
-        # Fallback simulation
-        if action == "answer":
-            return ToolResult("success", f"Accepted call from {caller} (simulated).")
-        elif action in {"reject", "decline"}:
-            return ToolResult("success", f"Rejected call from {caller} (simulated).")
-        return ToolResult("success", f"Announced incoming call from {caller} (simulated).")
+    if not bridge.phone_connected():
+        return ToolResult("failed", "No companion phone connected; no cellular call was changed.")
 
     if action == "answer":
-        res = bridge.dispatch_phone_action("answer_call", {})
+        res = _dispatch(bridge, parameters,"answer_call", {})
     elif action in {"reject", "decline"}:
-        res = bridge.dispatch_phone_action("reject_call", {})
+        res = _dispatch(bridge, parameters,"reject_call", {})
     else:  # announce
-        res = bridge.dispatch_phone_action("set_caller_announcement", {"enabled": True, "caller": caller})
+        res = _dispatch(bridge, parameters,"set_caller_announcement", {"enabled": True, "caller": caller})
 
     if res.get("status") == "success":
         return ToolResult("success", f"Call action '{action}' completed for {caller}.", data=res)
@@ -253,12 +239,12 @@ def send_sms_message(parameters: dict, **_kwargs) -> ToolResult:
         return ToolResult("failed", "Both contact/recipient and message body are required.")
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected to send SMS.")
 
-    res = bridge.dispatch_phone_action("compose_sms", {"recipient": contact, "message": message})
+    res = _dispatch(bridge, parameters,"compose_sms", {"recipient": contact, "message": message})
     if res.get("status") == "success":
-        return ToolResult("success", f"SMS sent to {contact}: \"{message[:60]}\"", data=res)
+        return ToolResult("success", res.get("spoken_message") or "SMS composer opened; sending is not confirmed.", data=res)
     return ToolResult("failed", res.get("error") or f"Failed to send SMS to {contact}.", data=res)
 
 
@@ -271,27 +257,27 @@ def manage_phone_notifications(parameters: dict, **_kwargs) -> ToolResult:
     key = str(parameters.get("key") or "").strip()
 
     bridge = get_bridge()
-    if bridge.sink_count() > 0:
+    if bridge.phone_connected():
         if action == "reply" and reply_text:
-            res = bridge.dispatch_phone_action("reply_notification", {"key": key, "text": reply_text})
+            res = _dispatch(bridge, parameters,"reply_notification", {"notification_key": key, "text": reply_text})
             if res.get("status") == "success":
                 return ToolResult("success", f"Sent inline reply: \"{reply_text}\"", data=res)
             return ToolResult("failed", res.get("error") or "Failed to send inline notification reply.", data=res)
 
         elif action == "summarize":
-            res = bridge.dispatch_phone_action("summarize_notifications", {"packageFilter": app_filter})
+            res = _dispatch(bridge, parameters,"summarize_notifications", {"package_filter": app_filter})
             if res.get("status") == "success":
                 return ToolResult("success", res.get("summary") or "Notification summary retrieved.", data=res)
 
         elif action == "read_latest":
-            res = bridge.dispatch_phone_action("read_latest_notification", {"packageFilter": app_filter})
+            res = _dispatch(bridge, parameters,"read_latest_notification", {"package_filter": app_filter})
             if res.get("status") == "success":
                 item = res.get("notification") or res.get("result") or {}
                 desc = f"Latest from {item.get('sender', 'Unknown')} ({item.get('app', 'app')}): \"{item.get('text', '')}\""
                 return ToolResult("success", desc, data=res)
 
         else:  # read_all / read_notifications
-            res = bridge.dispatch_phone_action("read_notifications", {"packageFilter": app_filter, "limit": 20})
+            res = _dispatch(bridge, parameters,"read_notifications", {"package_filter": app_filter, "limit": 20})
             if res.get("status") == "success":
                 items = res.get("notifications") or res.get("result") or []
                 return ToolResult("success", f"Retrieved {len(items)} notification(s).", data=res)
@@ -334,7 +320,7 @@ def get_phone_awareness_summary(parameters: dict, **_kwargs) -> ToolResult:
 
     # Connected status
     bridge = get_bridge()
-    connected = bridge.sink_count() > 0
+    connected = bridge.phone_connected()
 
     lines = [
         f"**Companion Phone Status**: {'Connected' if connected else 'Standby / Paired'}",
@@ -368,10 +354,10 @@ def capture_phone_screen(parameters: dict, **_kwargs) -> ToolResult:
     prompt = str(parameters.get("prompt") or "").strip()
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected. MediaProjection requires active connection.")
 
-    res = bridge.dispatch_screen_capture(prompt=prompt, timeout_sec=15.0)
+    res = bridge.dispatch_screen_capture(prompt=prompt, timeout_sec=120.0, device_id=str(parameters.get('device_id') or ''))
     if res.get("status") == "success" or "jpeg" in res:
         width = res.get("width", 1080)
         height = res.get("height", 2400)
@@ -392,11 +378,11 @@ def understand_phone_screen(parameters: dict, **_kwargs) -> ToolResult:
     prompt = str(parameters.get("prompt") or "Describe what is visible on this mobile screen in detail").strip()
 
     bridge = get_bridge()
-    if bridge.sink_count() == 0:
+    if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected. Cannot capture or understand phone screen.")
 
     # Step 1: Dispatch screen capture request to phone
-    res = bridge.dispatch_screen_capture(prompt=prompt, timeout_sec=15.0)
+    res = bridge.dispatch_screen_capture(prompt=prompt, timeout_sec=120.0, device_id=str(parameters.get('device_id') or ''))
     if res.get("status") == "failed" and "jpeg" not in res:
         return ToolResult("failed", res.get("error") or "Screen capture timed out or consent was not granted on device.")
 
@@ -645,3 +631,8 @@ TOOLS: list[dict] = [
         "handler": understand_phone_screen
     }
 ]
+
+# Device choice is explicit when several paired phones are online.
+for _mobile_tool in TOOLS:
+    _mobile_tool['parameters'].setdefault('properties', {})['device_id'] = {
+        'type': 'STRING', 'description': 'Exact paired device ID if several phones are connected.'}
