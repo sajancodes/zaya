@@ -90,3 +90,6 @@ docs/generated/
 docs/research/
 dashboard/widgets/
 memory/calendar_events.json
+memory/spatial_cache/
+spatial_renderer/node_modules/
+spatial_renderer/dist/

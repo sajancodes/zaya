@@ -47,6 +47,9 @@ def install_ghost_overlay(command_callback, parent=None):
             from core.perception.screen_perception import perception
             hands.stop()
             perception.stop()
+            # Optional renderer owns no voice/runtime state.
+            from services.spatial_server import stop
+            stop()
 
         def queue_passive(self, packet):
             with self.pending_lock:
