@@ -5,6 +5,9 @@ import mimetypes
 import struct
 import threading
 import uuid
+import sqlite3
+import re
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlparse,unquote
 from .schema import SpatialScene,SpatialPart
@@ -12,11 +15,25 @@ from .schema import SpatialScene,SpatialPart
 MAX_IMPORT=32_000_000
 _lock=threading.Lock()
 _bundles={}
+ASSET_DB=Path(__file__).resolve().parents[2]/'memory'/'spatial_assets.db'
+
+
+def database():
+    ASSET_DB.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(ASSET_DB,timeout=10)
+    db.execute('CREATE TABLE IF NOT EXISTS assets(bundle_id TEXT,name TEXT,data BLOB,mime TEXT,PRIMARY KEY(bundle_id,name))')
+    return db
 
 
 def resource(bundle_id,name):
     with _lock:
-        return _bundles.get(bundle_id,{}).get(name)
+        value=_bundles.get(bundle_id,{}).get(name)
+        if value is not None:return value
+        if not re.fullmatch(r'[a-f0-9]{32}',bundle_id) or not re.fullmatch(r'(model\.(gltf|glb)|[a-f0-9]{32}\.(bin|png|jpg|jpeg|webp))',name) or not ASSET_DB.is_file():
+            return None
+        with closing(database()) as db:
+            row=db.execute('SELECT data,mime FROM assets WHERE bundle_id=? AND name=?',(bundle_id,name)).fetchone()
+            return (bytes(row[0]),row[1]) if row else None
 
 
 def transform(node):
@@ -127,8 +144,21 @@ def import_asset(filename):
         encoded=struct.pack('<4sII',b'glTF',2,12+len(chunks))+chunks
     root_name='model'+path.suffix.lower();resources[root_name]=(encoded,'model/gltf-binary' if root_name.endswith('.glb') else 'model/gltf+json')
     with _lock:
-        used=sum(len(value[0]) for bundle in _bundles.values() for value in bundle.values())
-        if len(_bundles)>=4 or used+sum(len(v[0]) for v in resources.values())>128_000_000:
-            raise ValueError('Imported asset cache is full; restart the spatial session before importing more.')
+        with closing(database()) as db,db:
+            used,count=db.execute('SELECT COALESCE(SUM(length(data)),0),COUNT(DISTINCT bundle_id) FROM assets').fetchone()
+            if count>=4 or used+sum(len(v[0]) for v in resources.values())>128_000_000:
+                raise ValueError('Imported cache is full. Clear old spatial history and unused cache before importing more.')
+            db.executemany('INSERT INTO assets(bundle_id,name,data,mime) VALUES(?,?,?,?)',
+                           [(bundle_id,name,value[0],value[1]) for name,value in resources.items()])
         _bundles[bundle_id]=resources
     return scene,root_name
+
+
+def prune(keep):
+    if not ASSET_DB.is_file():return 0
+    with _lock,closing(database()) as db,db:
+        ids={row[0] for row in db.execute('SELECT DISTINCT bundle_id FROM assets')}
+        removed=ids-set(keep)
+        for bundle in removed:
+            db.execute('DELETE FROM assets WHERE bundle_id=?',(bundle,));_bundles.pop(bundle,None)
+        return len(removed)

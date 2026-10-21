@@ -154,7 +154,22 @@ def _capture_camera() -> tuple[bytes, str]:
     if not _CV2:
         raise RuntimeError("OpenCV (cv2) is not installed. Run: pip install opencv-python")
 
-    index   = _get_camera_index()
+    # Reuse the optional worker's sensor only on an explicit vision request.
+    # Hand tracking never pushes image frames into the Live session on its own.
+    try:
+        from core.gesture.controller import hands
+        tracker=hands.tracker
+    except ImportError:
+        tracker=None
+    if tracker is not None and tracker.state=='ACTIVE':
+        index=int(_load_config().get('camera_index',tracker.device))
+        if index==tracker.device:
+            frame=tracker.capture_frame()
+            if frame:
+                return frame,'image/jpeg'
+            raise RuntimeError('The hand camera could not return the requested vision frame.')
+    else:
+        index=_get_camera_index()
     backend = _cv2_backend()
     cap     = cv2.VideoCapture(index, backend)
 

@@ -95,3 +95,6 @@ spatial_renderer/node_modules/
 spatial_renderer/dist/
 models/hand_landmarker.task
 .venv-hands/
+memory/spatial_session.json
+memory/spatial_session.tmp
+memory/spatial_assets.db*

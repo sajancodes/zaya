@@ -5,7 +5,8 @@ from core.spatial import asset_import
 
 
 @pytest.fixture(autouse=True)
-def registry():
+def registry(tmp_path,monkeypatch):
+    monkeypatch.setattr(asset_import,'ASSET_DB',tmp_path/'assets.db')
     asset_import._bundles.clear()
     yield
     asset_import._bundles.clear()

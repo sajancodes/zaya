@@ -57,6 +57,7 @@ class HandController:
             self.modifiers.clear()
             self.keyboard.reset()
             self.engine.states.clear();self.engine.pokes.clear();self.engine.previous.clear()
+            self.engine.rotations.clear();self.engine.two=None
         self.tracker.stop()
         from core.ghost_overlay import update_passive_overlay
         update_passive_overlay({'visible':False,'mode':'virtual_keyboard'})

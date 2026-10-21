@@ -3,6 +3,8 @@ import time
 import os
 import json
 import subprocess
+import base64
+import uuid
 from pathlib import Path
 from .hand_model import normalize
 from .smoothing import LandmarkSmoother
@@ -18,13 +20,22 @@ class HandTracker:
         self.stop_event = threading.Event()
         self.worker = None
         self.child = None
+        self.device=0
+        self.latest_frame=None
+        self.frame_lock=threading.Lock()
+        self.frame_event=threading.Event()
+        self.pending_frame=''
+        self.frame_result=None
 
     def start(self, model_path, device=0, fps=24, mirror=True):
         if self.worker and self.worker.is_alive():
             raise RuntimeError('Stop the current camera before starting another.')
         if not Path(model_path).is_file():
             raise ValueError('Install the MediaPipe Hand Landmarker .task model and supply its local path.')
+        if Path(model_path).stat().st_size>20_000_000 or not 0<=int(device)<=31:
+            raise ValueError('Hand model or camera device exceeds limits.')
         self.stop_event.clear()
+        self.device=int(device)
         self.state, self.error = 'STARTING', ''
         self.worker = threading.Thread(target=self._run, args=(model_path,int(device),max(10,min(30,int(fps))),bool(mirror)),daemon=True,name='ZayaHands')
         self.worker.start()
@@ -68,6 +79,7 @@ class HandTracker:
                     ok, frame = camera.read()
                     if not ok:
                         raise RuntimeError('Camera stopped returning frames.')
+                    self.latest_frame=frame
                     if mirror:
                         frame = cv2.flip(frame,1)
                     rgb = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
@@ -94,6 +106,7 @@ class HandTracker:
         finally:
             if camera is not None:
                 camera.release()
+            self.latest_frame=None
             self.callback(())
             if self.state != 'ERROR':
                 self.state = 'OFF'
@@ -106,14 +119,22 @@ class HandTracker:
                 str(device),str(fps),'1' if mirror else '0'],cwd=str(Path(__file__).resolve().parents[2]),
                 stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=flags)
             while not self.stop_event.is_set():
-                line=self.child.stdout.readline(65537)
+                line=self.child.stdout.readline(1_500_001)
                 if not line:
                     if not self.stop_event.is_set():
                         raise RuntimeError('Hand worker exited before tracking completed.')
                     break
-                if len(line)>65536:
+                if len(line)>1_500_000:
                     raise RuntimeError('Hand worker message exceeds limits.')
                 data=json.loads(line)
+                if data.get('kind')=='frame':
+                    if data.get('id')==self.pending_frame:
+                        encoded=data.get('jpeg','')
+                        self.frame_result=base64.b64decode(encoded,validate=True) if encoded else None
+                        self.frame_event.set()
+                    continue
+                if len(line)>65536:
+                    raise RuntimeError('Hand landmark message exceeds limits.')
                 if data.get('state')=='ERROR':
                     raise RuntimeError(data.get('error','Hand worker failed.'))
                 self.state=data.get('state','STARTING')
@@ -138,3 +159,32 @@ class HandTracker:
             self.callback(())
             if self.state!='ERROR':
                 self.state='OFF'
+
+    def jpeg_snapshot(self):
+        """Explicit one-shot only; no image leaves the worker by default."""
+        frame=self.latest_frame
+        if frame is None:
+            return None
+        import cv2
+        height,width=frame.shape[:2]
+        scale=min(1.,1280/width,720/height)
+        if scale<1:
+            frame=cv2.resize(frame,(int(width*scale),int(height*scale)))
+        ok,encoded=cv2.imencode('.jpg',frame,[cv2.IMWRITE_JPEG_QUALITY,82])
+        return encoded.tobytes() if ok and len(encoded)<1_000_000 else None
+
+    def capture_frame(self,timeout=2):
+        if self.state!='ACTIVE':
+            return None
+        if not self.child:
+            return self.jpeg_snapshot()
+        with self.frame_lock:
+            self.pending_frame=uuid.uuid4().hex;self.frame_result=None;self.frame_event.clear()
+            try:
+                self.child.stdin.write('capture '+self.pending_frame+'\n');self.child.stdin.flush()
+                self.frame_event.wait(timeout)
+                return self.frame_result
+            except (OSError,ValueError):
+                return None
+            finally:
+                self.pending_frame='';self.frame_result=None

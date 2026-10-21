@@ -98,4 +98,6 @@ class SpatialScene(StrictModel):
         for relation in self.relationships:
             if relation.source not in ids or relation.target not in ids:
                 raise ValueError('Relationship references an unknown part.')
+        if len(self.model_dump_json().encode())>450_000:
+            raise ValueError('Scene exceeds the renderer message budget.')
         return self

@@ -110,6 +110,9 @@ def start():
 
 
 def stop():
+    if _server is not None:
+        from core.spatial.spatial_session import session
+        session.save()
     if _server:
         _server.should_exit=True
     if _thread:
