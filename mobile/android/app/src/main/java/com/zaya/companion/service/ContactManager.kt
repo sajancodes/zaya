@@ -72,8 +72,8 @@ class ContactManager(private val context: Context) {
                 ContactsContract.CommonDataKinds.Phone.IS_SUPER_PRIMARY,
             )
 
-            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-            val selectionArgs = arrayOf("%$cleanQuery%")
+            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ? OR ${ContactsContract.CommonDataKinds.Phone.NUMBER} = ?"
+            val selectionArgs = arrayOf("%$cleanQuery%", cleanQuery)
             val sortOrder = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
 
             val contactMap = LinkedHashMap<String, MutableList<PhoneNumberInfo>>()

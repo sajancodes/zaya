@@ -1,6 +1,9 @@
 package com.zaya.companion.ui.screens
 
 import android.app.NotificationManager
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -98,6 +101,24 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit,
             TextButton(onClick = onOpenFiles, modifier = Modifier.fillMaxWidth()) { Text("Files & downloads") }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             TextButton(onClick = onOpenWhatsapp, modifier = Modifier.fillMaxWidth()) { Text("WhatsApp & alerts") }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        SettingsGroup(title = "Phone access", subtitle = "Contacts, photos, videos and audio") {
+            val permissionPrompt = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                message = "Phone access updated. Android settings shows the permissions you allowed."
+            }
+            Text("Grant access here or when Zaya asks. Only requested contacts and media are looked up; your library is not uploaded automatically.")
+            OutlinedButton(onClick = { permissionPrompt.launch(arrayOf(Manifest.permission.READ_CONTACTS)) }) {
+                Text("Allow contacts")
+            }
+            OutlinedButton(onClick = {
+                permissionPrompt.launch(if (Build.VERSION.SDK_INT >= 33) arrayOf(
+                    Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_AUDIO) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE))
+            }) { Text("Allow photos, videos & audio") }
+            TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null))) }) { Text("Manage all phone permissions") }
         }
         Spacer(Modifier.height(12.dp))
 

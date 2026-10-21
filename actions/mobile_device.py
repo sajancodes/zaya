@@ -195,10 +195,26 @@ def make_phone_call(parameters: dict, **_kwargs) -> ToolResult:
     if not bridge.phone_connected():
         return ToolResult("failed", "No companion phone connected.")
 
-    res = _dispatch(bridge, parameters,"initiate_call", {"query": contact})
+    app = str(parameters.get('app') or 'phone').strip().lower()
+    if app not in {'phone', 'whatsapp'}:
+        return ToolResult('failed', 'Choose phone or whatsapp for the call.')
+    res = _dispatch(bridge, parameters,"initiate_call", {"query": contact, "app": app})
     if res.get("status") == "success":
         return ToolResult("success", res.get("spoken_message") or f"Opened the dialer for {contact}.", data=res)
     return ToolResult("failed", res.get("error") or f"Failed to place call to {contact}.", data=res)
+
+
+def browse_phone_media(parameters: dict, **_kwargs) -> ToolResult:
+    """Search or open shared phone media, subject to Android permissions."""
+    require_owner()
+    kind = str(parameters.get('kind') or 'photos').strip().lower()
+    if kind not in {'photos', 'videos', 'audio'}:
+        return ToolResult('failed', 'Choose photos, videos or audio.')
+    res = _dispatch(get_bridge(), parameters, 'browse_media', {
+        'kind': kind, 'query': str(parameters.get('query') or '')[:120],
+        'uri': str(parameters.get('uri') or '')[:500], 'limit': 10})
+    return ToolResult('success' if res.get('status') == 'success' else 'failed',
+                      res.get('spoken_message') or res.get('error') or 'Phone media lookup failed.', data=res)
 
 
 def control_incoming_call(parameters: dict, **_kwargs) -> ToolResult:
@@ -508,10 +524,11 @@ TOOLS: list[dict] = [
     },
     {
         "name": "make_phone_call",
-        "description": "Place a hands-free cellular phone call through the connected Android phone.",
+        "description": "Start a cellular or WhatsApp call on the paired Android phone. Resolve saved contact names, including didi, with search_phone_contacts first. Android asks for confirmation. Report the actual result; an opened calling screen does not prove a connected call.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
+                "app": {"type": "STRING", "enum": ["phone", "whatsapp"], "description": "Calling app. Default phone; use whatsapp when requested."},
                 "contact": {
                     "type": "STRING",
                     "description": "Name or phone number to call."
@@ -520,6 +537,14 @@ TOOLS: list[dict] = [
             "required": ["contact"]
         },
         "handler": make_phone_call
+    },
+    {
+        "name": "browse_phone_media",
+        "description": "Find photos, videos or audio in the paired phone's shared media library by filename. Returns bounded metadata and phone content URIs. Supply a returned URI to open it on the phone. Does not upload or describe media contents. Android permission is required.",
+        "parameters": {"type": "OBJECT", "properties": {
+            "kind": {"type": "STRING", "enum": ["photos", "videos", "audio"]},
+            "query": {"type": "STRING"}, "uri": {"type": "STRING"}}, "required": ["kind"]},
+        "handler": browse_phone_media
     },
     {
         "name": "control_incoming_call",

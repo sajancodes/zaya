@@ -1177,9 +1177,13 @@ class ZayaRuntime(
             "get_media_status" -> com.zaya.companion.action.AndroidAction.GetMediaStatus
             "launch_app" -> com.zaya.companion.action.AndroidAction.LaunchApp(args.optString("name", ""))
             "lookup_contact" -> com.zaya.companion.action.AndroidAction.LookUpContact(args.optString("query", ""))
+            "browse_media" -> com.zaya.companion.action.AndroidAction.BrowseMedia(
+                args.optString("kind", "photos"), args.optString("query", ""),
+                args.optInt("limit", 10), args.optString("uri", ""))
             "initiate_call" -> com.zaya.companion.action.AndroidAction.InitiateCall(
                 queryOrNumber = args.optString("query", args.optString("phone_number", "")),
                 directCall = args.optBoolean("direct_call", false),
+                app = args.optString("app", "phone"),
                 confirmed = false
             )
             "get_incoming_call_state" -> com.zaya.companion.action.AndroidAction.GetIncomingCallState
@@ -1260,7 +1264,7 @@ class ZayaRuntime(
                     }
                     val approved = awaitPhoneApproval(requestId, result.spokenMessage, permission, expires)
                     result = if (approved) {
-                        val confirmed = when (val pending = currentAction) {
+                        val confirmed = if (permission != null) currentAction else when (val pending = currentAction) {
                             is com.zaya.companion.action.AndroidAction.InitiateCall -> pending.copy(confirmed = true)
                             is com.zaya.companion.action.AndroidAction.ComposeSms -> pending.copy(confirmed = true)
                             is com.zaya.companion.action.AndroidAction.ReplyToNotification -> pending.copy(confirmed = true,
