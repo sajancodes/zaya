@@ -1,0 +1,3 @@
+# Optional only. Install in a separate environment if the existing provider
+# runtime has incompatible numpy/protobuf constraints. Never required at startup.
+mediapipe>=0.10,<0.11

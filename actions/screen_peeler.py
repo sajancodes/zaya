@@ -129,6 +129,14 @@ def screen_peeler(parameters: dict, **_kwargs) -> ToolResult:
     """ScreenPeeler Action: Captures screen region, extracts code/text, and copies directly to clipboard."""
     require_owner()
     region = parameters.get("region")
+    source = str(parameters.get('source') or ('coordinates' if region is not None else 'full_monitor'))
+    if region is None and source != 'full_monitor':
+        from core.perception.roi_tracker import resolve_region
+        from core.perception.screen_perception import perception
+        try:
+            region = resolve_region(source,perception.snapshot())
+        except ValueError as error:
+            return ToolResult('failed',str(error))
 
     extracted = extract_text_from_region(region)
     if not extracted:
@@ -151,7 +159,7 @@ def screen_peeler(parameters: dict, **_kwargs) -> ToolResult:
         "success" if copied else "partial",
         (f"ScreenPeeler copied {len(extracted)} characters to the clipboard: {preview}" if copied else
          f"ScreenPeeler extracted {len(extracted)} characters, but could not update the clipboard: {preview}"),
-        data={"extracted_text": extracted, "length": len(extracted), "copied_to_clipboard": copied},
+        data={"extracted_text": extracted, "length": len(extracted), "copied_to_clipboard": copied, 'region':region,'source':source},
         side_effect=copied
     )
 
@@ -162,6 +170,7 @@ TOOL = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
+            "source": {"type":"STRING","enum":["coordinates","cursor","active_window","tracked_roi","full_monitor"]},
             "region": {
                 "type": "ARRAY",
                 "items": {"type": "INTEGER"},

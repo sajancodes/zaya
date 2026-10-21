@@ -37,6 +37,23 @@ def install_ghost_overlay(command_callback, parent=None):
             send.clicked.connect(self.submit)
             self.entry.returnPressed.connect(self.submit)
             self.requested.connect(self.apply)
+            self.passive = None
+            self.pending = None
+            self.pending_lock = threading.Lock()
+            app.aboutToQuit.connect(self.shutdown_optional)
+
+        def shutdown_optional(self):
+            from core.gesture.controller import hands
+            from core.perception.screen_perception import perception
+            hands.stop()
+            perception.stop()
+
+        def queue_passive(self, packet):
+            with self.pending_lock:
+                notify = self.pending is None
+                self.pending = dict(packet)
+            if notify:
+                self.requested.emit({'passive_flush': True, 'done': threading.Event()})
 
         @Slot()
         def submit(self):
@@ -49,6 +66,15 @@ def install_ghost_overlay(command_callback, parent=None):
         def apply(self, packet):
             try:
                 if packet.get('cancelled'):
+                    return
+                if packet.get('passive_flush'):
+                    with self.pending_lock:
+                        latest, self.pending = self.pending, None
+                    if latest is not None:
+                        if self.passive is None:
+                            from core.gesture.keyboard_overlay import PassiveOverlay
+                            self.passive = PassiveOverlay()
+                        self.passive.apply(latest)
                     return
                 desired = packet['force_state']
                 visible = not self.window.isVisible() if desired is None else desired
@@ -90,3 +116,12 @@ def toggle_ghost_overlay_window(force_state=None):
             packet['cancelled'] = True
             return {'status': 'error', 'visible': False, 'message': 'The quick-command window did not acknowledge the request.'}
     return packet.get('result', {'status': 'error', 'visible': False})
+
+
+def passive_overlay_available():
+    return _bridge is not None
+
+
+def update_passive_overlay(packet):
+    if _bridge is not None:
+        _bridge.queue_passive(packet)
