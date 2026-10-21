@@ -735,7 +735,9 @@ class MobileApi:
 
         if kind == 'hardware.status':
             from core.event_bus import bus
-            bus.publish('phone_hardware', **data)
+            payload = data.get('payload')
+            if isinstance(payload, dict):
+                bus.publish('phone_hardware', **{**payload, 'device_id': session.device['device_id']})
             return
 
         if kind.startswith('call.') and kind not in {'call.video.toggle', 'call.video.frame', 'call.answer', 'call.decline', 'call.end', 'call.start', 'call.mute'}:

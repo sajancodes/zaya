@@ -34,6 +34,12 @@ possible application or device bug has been eliminated.
   tool result nor an unrelated spoken turn declares a whole remote goal complete.
   Without reliable whole-goal correlation the phone retains acknowledgement;
   it must not display invented completion.
+- A final transport check also found hardware status wrapped in an unread
+  payload. Its fields now reach the real event cache. Phone awareness starts
+  with unknown hardware rather than a fabricated full battery, labels cached
+  readings as last reported, and counts WhatsApp records rather than metadata
+  keys. Unavailable WhatsApp state is not described as synced. An isolated
+  transport/cache check passed without touching a device or owner data.
 
 ## Verification boundaries
 

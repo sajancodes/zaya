@@ -34,13 +34,7 @@ logger = logging.getLogger("actions.mobile_device")
 _EVENTS_LOCK = threading.Lock()
 _RECENT_NOTIFICATIONS: List[Dict[str, Any]] = []
 _RECENT_CALLS: List[Dict[str, Any]] = []
-_LATEST_HARDWARE: Dict[str, Any] = {
-    "battery": 100,
-    "flashlight": False,
-    "wifi": True,
-    "bluetooth": True,
-    "hotspot": False,
-}
+_LATEST_HARDWARE: Dict[str, Any] = {}
 
 
 def _on_phone_notification(data: dict) -> None:
@@ -309,23 +303,25 @@ def get_phone_awareness_summary(parameters: dict, **_kwargs) -> ToolResult:
         hardware = dict(_LATEST_HARDWARE)
 
     # Check WhatsApp unread/recent if available
-    whatsapp_summary = "WhatsApp integration active"
+    whatsapp_summary = "status unavailable"
     try:
         from services.whatsapp.service import get_service
         wa = get_service().query("unread", limit=5)
-        if wa and wa.data:
-            whatsapp_summary = f"{len(wa.data)} unread WhatsApp chat(s)"
+        if wa and wa.status == 'success' and isinstance(wa.data, dict):
+            records = wa.data.get('records')
+            if isinstance(records, list):
+                whatsapp_summary = f"{len(records)} unread WhatsApp chat(s) in the current local view (up to 5 shown)"
     except Exception:
-        whatsapp_summary = "WhatsApp status: synced"
+        pass
 
     # Connected status
     bridge = get_bridge()
     connected = bridge.phone_connected()
 
     lines = [
-        f"**Companion Phone Status**: {'Connected' if connected else 'Standby / Paired'}",
-        f"- Battery: {hardware.get('battery', 100)}%",
-        f"- Flashlight: {'On' if hardware.get('flashlight') else 'Off'}",
+        f"**Companion Phone Status**: {'Connected' if connected else 'Offline'}",
+        f"- Last reported battery: {str(hardware['battery']) + '%' if 'battery' in hardware else 'Unknown'}",
+        f"- Last reported flashlight: {('On' if hardware['flashlight'] else 'Off') if 'flashlight' in hardware else 'Unknown'}",
         f"- Recent Calls: {len(recent_calls)} logged",
         f"- Recent Notifications: {len(recent_notifs)} recorded",
         f"- WhatsApp: {whatsapp_summary}",
