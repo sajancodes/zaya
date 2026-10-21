@@ -1,6 +1,7 @@
 import threading
 import uuid
 import math
+import time
 from .schema import SpatialScene
 from .scene_patcher import apply_patch
 from .scene_graph import part_context
@@ -18,6 +19,8 @@ class SpatialSession:
         self.renderer_connected=False
         self.listeners=set()
         self.view={'explode':0.,'xray':'normal','slice':None}
+        self.camera_state={'alpha':-math.pi/2,'beta':math.pi/2.7,'radius':10.,'target':[0.,0.,0.]}
+        self.renderer_metrics={}
 
     def publish(self,kind,payload):
         with self.lock:
@@ -33,7 +36,7 @@ class SpatialSession:
 
     def snapshot(self):
         with self.lock:
-            return {'scene':self.scene.model_dump(mode='json'),'selected':list(self.selected_part_ids),'view':dict(self.view)}
+            return {'scene':self.scene.model_dump(mode='json'),'selected':list(self.selected_part_ids),'view':dict(self.view),'camera':dict(self.camera_state)}
 
     def replace(self,scene):
         validated=SpatialScene.model_validate(scene)
@@ -92,7 +95,7 @@ class SpatialSession:
              not math.isfinite(plane['offset']) or abs(plane['offset'])>100):
             raise ValueError('Invalid clipping plane.')
         with self.lock:
-            self.view=value;self.publish('scene.patch',self.snapshot())
+            self.view={**self.view,**change};self.publish('scene.patch',self.snapshot())
 
     def manipulate(self,payload):
         if not isinstance(payload,dict) or set(payload)!={'part_id','position','rotation','revision'}:
@@ -100,8 +103,29 @@ class SpatialSession:
         with self.lock:
             if payload['part_id'] not in self.selected_part_ids:
                 raise ValueError('Only the selected part may be manipulated.')
-            self.patch([{'op':'update','part_id':payload['part_id'],'path':'transform.position','value':payload['position']},
+            self.patch([{'op':'update','part_id':payload['part_id'],'path':'transform.rotation_quaternion','value':None},
+                        {'op':'update','part_id':payload['part_id'],'path':'transform.position','value':payload['position']},
                         {'op':'update','part_id':payload['part_id'],'path':'transform.rotation','value':payload['rotation']}],payload['revision'])
+
+    def metrics(self,payload):
+        if not isinstance(payload,dict) or set(payload)-{'fps','camera','error'}:
+            raise ValueError('Invalid renderer telemetry.')
+        fps=payload.get('fps',0.)
+        if type(fps) not in (int,float) or not math.isfinite(fps) or not 0<=fps<=1000:
+            raise ValueError('Invalid renderer FPS.')
+        camera=payload.get('camera')
+        if camera is not None:
+            if not isinstance(camera,dict) or set(camera)!={'alpha','beta','radius','target'}:
+                raise ValueError('Invalid camera state.')
+            values=[camera['alpha'],camera['beta'],camera['radius']]
+            if not isinstance(camera['target'],list) or len(camera['target'])!=3:
+                raise ValueError('Invalid camera target.')
+            values+=camera['target']
+            if any(type(v) not in (int,float) or not math.isfinite(v) or abs(v)>1000 for v in values) or not .1<=camera['radius']<=100:
+                raise ValueError('Camera exceeds limits.')
+        with self.lock:
+            if camera is not None:self.camera_state=camera
+            self.renderer_metrics={'fps':fps,'error':str(payload.get('error') or '')[:300],'received_at':time.time()}
 
 
 session=SpatialSession()

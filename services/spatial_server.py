@@ -21,6 +21,15 @@ def make_app(session,token):
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost'])
 
+    @app.get('/assets/{bundle_id}/{name}')
+    async def get_asset(bundle_id:str,name:str):
+        from core.spatial.asset_import import resource
+        from fastapi import Response,HTTPException
+        value=resource(bundle_id,name)
+        if value is None:
+            raise HTTPException(404)
+        return Response(value[0],media_type=value[1],headers={'Cache-Control':'private, max-age=600','X-Content-Type-Options':'nosniff'})
+
     @app.websocket('/ws')
     async def connect(ws:WebSocket):
         origin=ws.headers.get('origin','')
@@ -57,6 +66,8 @@ def make_app(session,token):
                     session.select(message['payload'].get('ids'))
                 elif message['type']=='view.changed':
                     session.set_view(message['payload'])
+                elif message['type']=='renderer.metrics':
+                    session.metrics(message['payload'])
                 elif message['type']=='part.manipulated':
                     from core.gesture.controller import hands
                     from core.gesture.gesture_state import InteractionMode

@@ -11,22 +11,33 @@ class Transform(StrictModel):
     position: tuple[float,float,float] = (0,0,0)
     rotation: tuple[float,float,float] = (0,0,0)
     scale: tuple[float,float,float] = (1,1,1)
+    rotation_quaternion: tuple[float,float,float,float] | None = None
 
     @model_validator(mode='after')
     def bounds(self):
-        if any(abs(v)>1000 for v in (*self.position,*self.rotation)) or any(not .001<=v<=100 for v in self.scale):
+        if any(abs(v)>1000 for v in (*self.position,*self.rotation)) or any(not .001<=abs(v)<=100 for v in self.scale):
             raise ValueError('Transform exceeds workspace limits.')
+        if self.rotation_quaternion is not None and abs(sum(v*v for v in self.rotation_quaternion)-1)>.01:
+            raise ValueError('Quaternion must be normalized.')
         return self
 
 
 class Geometry(StrictModel):
-    primitive: Literal['box','sphere','cylinder','cone','tube','torus','plate','rod'] = 'box'
+    primitive: Literal['box','sphere','cylinder','cone','tube','torus','plate','rod','asset'] = 'box'
+    asset_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+    node_index: int | None = Field(default=None,ge=0,le=249)
     width: float = Field(default=1,gt=0,le=100)
     height: float = Field(default=1,gt=0,le=100)
     depth: float = Field(default=1,gt=0,le=100)
     radius: float = Field(default=.5,gt=0,le=50)
     thickness: float = Field(default=.1,gt=0,le=20)
     segments: int = Field(default=24,ge=3,le=64)
+
+    @model_validator(mode='after')
+    def asset(self):
+        if self.primitive=='asset' and (self.asset_id is None or self.node_index is None):
+            raise ValueError('Imported geometry requires its asset and semantic node index.')
+        return self
 
 
 class Material(StrictModel):

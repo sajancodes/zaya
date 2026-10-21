@@ -1,7 +1,7 @@
 from copy import deepcopy
 from .schema import SpatialScene, SpatialPart, Relationship
 
-ALLOWED_PATHS={'name','parent_id','visible','layer','transform.position','transform.rotation','transform.scale',
+ALLOWED_PATHS={'name','parent_id','visible','layer','transform.position','transform.rotation','transform.rotation_quaternion','transform.scale',
                'material.color','material.alpha','material.wireframe','geometry.width','geometry.height',
                'geometry.depth','geometry.radius','geometry.thickness','geometry.segments'}
 

@@ -20,6 +20,13 @@ owner-gated and opt-in. Missing optional dependencies never gate normal startup.
   WebGL fallback, progressive component queue, vertex-targeted sand/fade effects,
   semantic picking, camera orbit/zoom, reversible exploded view, X-ray and clipping.
 - Owner action discovery and selected-object instructions in the existing prompt.
+- Local GLB/glTF 2.0 import preserves hierarchy, names, TRS/matrix transforms and
+  quaternion orientation. Renderer loads actual mesh data via private opaque asset
+  URLs. Imports are ASSET_BASED, not automatically engineering-authoritative.
+  Remote dependencies and directory traversal are rejected. Asset bytes, semantic
+  nodes, vertices/accessors and resource counts are bounded. Current import does
+  not support data-URI buffers. Browser preview verified a real imported triangle
+  and picked its original semantic name. Cache holds up to four imported bundles.
 - Stable-pose local hand frames now drive renderer orbit, two-open-hand zoom,
   point/poke selection, pinch translation and wrist rotation. Two pinched hands
   pulling apart request explosion. Fist/loss cancels a grab. A released grab is
@@ -55,8 +62,8 @@ Deep code/semantic desktop context, ROI tracking across movement, complete named
 gesture vocabulary/two-hand temporal gesture events,
 calibration/settings persistence, shared camera arbitration with existing vision,
 physical hand-driven spatial validation, annotations, selection/group/layer explosion,
-custom clipping-plane rotation, proper gear/spring/fan geometry, GLB/glTF semantic
-import, durable spatial session recovery across a full Zaya process restart,
+custom clipping-plane rotation, proper gear/spring/fan geometry, durable spatial
+session recovery across a full Zaya process restart,
 measured latency/FPS and all requested physical demonstrations. Current cache
 persists generated scenes, but the active session/history are in memory.
 

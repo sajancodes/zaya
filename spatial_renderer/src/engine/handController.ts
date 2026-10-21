@@ -31,7 +31,7 @@ export class HandController {
    }
   }else if(hand.pose==='PINCH'&&frame.hands.length===1){
    const id=this.manager.selected();const mesh=id?this.manager.meshes.get(id):undefined;
-   if(id&&mesh){const plane=Plane.FromPositionAndNormal(mesh.getAbsolutePosition(),this.camera.getForwardRay().direction);const ray=this.ray(hand),distance=ray.intersectsPlane(plane);if(distance!==null)this.grab={id,mesh,plane,offset:mesh.getAbsolutePosition().subtract(ray.origin.add(ray.direction.scale(distance))),wrist:hand.wrist,rotation:mesh.rotation.clone(),revision:this.manager.revision()};}
+   if(id&&mesh){if(mesh.rotationQuaternion){mesh.rotation=mesh.rotationQuaternion.toEulerAngles();mesh.rotationQuaternion=null;}const plane=Plane.FromPositionAndNormal(mesh.getAbsolutePosition(),this.camera.getForwardRay().direction);const ray=this.ray(hand),distance=ray.intersectsPlane(plane);if(distance!==null)this.grab={id,mesh,plane,offset:mesh.getAbsolutePosition().subtract(ray.origin.add(ray.direction.scale(distance))),wrist:hand.wrist,rotation:mesh.rotation.clone(),revision:this.manager.revision()};}
   }
   const previous=this.previous?.hands.find(old=>old.id===hand.id);
   if(frame.hands.length===2){

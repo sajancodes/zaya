@@ -15,7 +15,13 @@ def spatial_workspace(parameters, **kwargs):
             opened=webbrowser.open(start())
             return ToolResult('partial' if not opened else 'success','Local spatial renderer launch requested; connection is confirmed separately.',
                               data={'renderer_connected':session.renderer_connected},side_effect=True)
-        if action=='build':
+        if action=='import':
+            from core.spatial.asset_import import import_asset
+            scene,root_name=import_asset(parameters.get('file_path',''))
+            for part in scene.parts:
+                part.metadata['asset_file']=root_name
+            session.replace(scene.model_dump())
+        elif action=='build':
             from core.spatial.procedural_geometry import generate
             from core.spatial.scene_planner import plan
             from core.spatial import spatial_cache
@@ -76,7 +82,7 @@ def spatial_workspace(parameters, **kwargs):
         elif action not in ('status','context','open'):
             raise ValueError('Unsupported spatial action.')
         data={'revision':session.scene.revision,'parts':len(session.scene.parts),'renderer_connected':session.renderer_connected,
-              'selection':session.context(),'view':dict(session.view),'accuracy':session.scene.accuracy}
+              'selection':session.context(),'view':dict(session.view),'accuracy':session.scene.accuracy,'renderer_metrics':dict(session.renderer_metrics)}
         return ToolResult('success','Spatial state updated.' if action not in ('status','context') else 'Current semantic spatial context.',
                           data=data,side_effect=action not in ('status','context'))
     except Exception as error:
@@ -85,7 +91,8 @@ def spatial_workspace(parameters, **kwargs):
 
 TOOL={'name':'spatial_workspace','description':'Owner-only semantic 3D workspace. Open the local renderer then build a schematic generator or structured AI scene. Modify uses validated patches preserving IDs. Ask context for exact selected part and relationships before answering this/that. Procedural geometry is schematic, never engineering-accurate. No arbitrary scripts or external URLs.',
       'parameters':{'type':'OBJECT','properties':{
-          'action':{'type':'STRING','enum':['open','build','patch','modify','select','context','status','undo','redo','explode','reassemble','xray','slice','reset_view','close']},
+          'action':{'type':'STRING','enum':['open','build','import','patch','modify','select','context','status','undo','redo','explode','reassemble','xray','slice','reset_view','close']},
+          'file_path':{'type':'STRING','description':'Owner-selected local .glb or .gltf file. Remote dependencies and path traversal are rejected.'},
           'generator':{'type':'STRING','enum':['inline_engine','v_engine','electric_motor','gearbox','turbine','motherboard','laptop','battery_pack','robot_arm']},
           'parameters_json':{'type':'STRING','description':'Generator JSON, e.g. {"cylinders":4}.'},
           'operations_json':{'type':'STRING','description':'Patch operations array; update/add/remove. Use exact IDs and revision.'},
