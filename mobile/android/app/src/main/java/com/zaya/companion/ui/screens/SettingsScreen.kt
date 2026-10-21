@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -59,7 +67,8 @@ import kotlinx.coroutines.launch
  * Keystore and is never typed, shown or backed up.
  */
 @Composable
-fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
+fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit,
+                   onOpenFiles: () -> Unit = {}, onOpenWhatsapp: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pairing by runtime.pairing.collectAsStateWithLifecycle()
@@ -79,9 +88,20 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        ScreenHeader("Settings", "This phone is a second way into the same Zaya", onBack)
+        ScreenHeader("Settings", "Make Zaya feel at home", onBack)
+        if (message.isNotBlank()) {
+            Note(message, ZayaAccent.amber)
+            Spacer(Modifier.height(12.dp))
+        }
 
-        SectionCard(title = "Connection") {
+        SectionCard(title = "Your space", subtitle = "Shared content and message controls") {
+            TextButton(onClick = onOpenFiles, modifier = Modifier.fillMaxWidth()) { Text("Files & downloads") }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            TextButton(onClick = onOpenWhatsapp, modifier = Modifier.fillMaxWidth()) { Text("WhatsApp & alerts") }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        SettingsGroup(title = "Laptop connection", subtitle = "Status, reconnect and background activity") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ConnectionPill(status)
                 Spacer(Modifier.padding(horizontal = 4.dp))
@@ -114,9 +134,10 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
-        SectionCard(
+        SettingsGroup(
             title = if (pairing == null) "Pair with your laptop" else "Pair a different laptop",
             subtitle = "On the laptop: Zaya's Settings & Controls → Remote Control → the 6-character key",
+            initiallyExpanded = pairing == null,
         ) {
             OutlinedTextField(
                 value = address,
@@ -160,10 +181,6 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
                 },
                 enabled = !busy && address.isNotBlank() && key.isNotBlank(),
             ) { Text(if (busy) "Pairing…" else "Pair") }
-            if (message.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Note(message, ZayaAccent.amber)
-            }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "Use the name Tailscale gives the laptop, for example " +
@@ -175,7 +192,7 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
-        SectionCard(
+        SettingsGroup(
             title = "Where Zaya's voice comes out",
             subtitle = "During a call the laptop routes her voice here automatically",
         ) {
@@ -205,9 +222,9 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         CallPermissionCard()
 
         Spacer(Modifier.height(12.dp))
-        SectionCard(title = "This phone") {
+        SettingsGroup(title = "About & privacy", subtitle = "This phone, your data and linked devices") {
             KeyValue("Microphone", "only while you are in a call")
-            KeyValue("Faces", "mobile/android/assets (see image.txt)")
+            KeyValue("Created by", "Sajan Rai")
             KeyValue("Secrets", "device credential sealed with the Android Keystore")
             Spacer(Modifier.height(10.dp))
             if (pairing != null) {
@@ -233,6 +250,28 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
                 "voice and text to it.",
         )
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, subtitle: String = "", initiallyExpanded: Boolean = false,
+                          content: @Composable ColumnScope.() -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    SectionCard {
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                Text(title, style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface)
+                if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Filled.ArrowDropDown, modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                contentDescription = if (expanded) "Collapse $title" else "Expand $title")
+        }
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            content()
+        }
     }
 }
 

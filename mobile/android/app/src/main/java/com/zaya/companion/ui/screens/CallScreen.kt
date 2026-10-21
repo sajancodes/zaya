@@ -75,12 +75,12 @@ fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
     }
     Column(
         Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(
-            Color(0xFF203F4B), Color(0xFF101C29), Color(0xFF080E18),
+            Color(0xFF593044), Color(0xFF2B2029), Color(0xFF181218),
         ))).safeDrawingPadding().padding(horizontal = 28.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         TextButton(onClick = onMinimize, modifier = Modifier.align(Alignment.End)) {
-            Text(if (call is CallUiState.Idle) "Back" else "Minimize", color = Color(0xFFB1C8D0))
+            Text(if (call is CallUiState.Idle) "Back" else "Minimize", color = Color(0xFFD2BBC8))
         }
         Spacer(Modifier.height(12.dp))
         Text("Zaya", style = MaterialTheme.typography.displaySmall,
@@ -91,11 +91,11 @@ fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
             dialing != null -> "Ringing…"
             ringing != null -> "Incoming call"
             else -> "Call ended"
-        }, color = Color(0xFFB1C8D0), style = MaterialTheme.typography.titleMedium)
+        }, color = Color(0xFFD2BBC8), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
         if (ringing != null && info != null) {
             Text(info.detail.ifBlank { info.reason }.take(180),
-                color = Color(0xFFD4E1E5), textAlign = TextAlign.Center,
+                color = Color(0xFFF8EAF0), textAlign = TextAlign.Center,
                 maxLines = 3, style = MaterialTheme.typography.bodyMedium)
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -152,16 +152,16 @@ private enum class PhoneGlyph { CALL, HANGUP, MIC, SPEAKER, VIDEO }
 
 @Composable
 private fun PhoneControl(
-    label: String, glyph: PhoneGlyph, tint: Color = Color(0xFF30424E),
+    label: String, glyph: PhoneGlyph, tint: Color = Color(0xFF4C3B47),
     selected: Boolean = false, onClick: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(onClick = onClick, modifier = Modifier.size(72.dp).semantics { contentDescription = label }, shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = if (selected) Color.White else tint,
-                contentColor = if (selected) Color(0xFF142331) else Color.White,
+                contentColor = if (selected) Color(0xFF35202F) else Color.White,
             )) {
-            val ink = if (selected) Color(0xFF142331) else Color.White
+            val ink = if (selected) Color(0xFF35202F) else Color.White
             Canvas(Modifier.size(30.dp)) {
                 val s = size.width / 30f
                 val stroke = 2.2f * s

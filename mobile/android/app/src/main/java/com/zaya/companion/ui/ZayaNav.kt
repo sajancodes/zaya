@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -41,12 +42,12 @@ import com.zaya.companion.ui.screens.TasksScreen
 import com.zaya.companion.ui.screens.WhatsappScreen
 
 enum class ZayaScreen(val label: String, val icon: ImageVector) {
-    HOME("Zaya", Icons.Filled.Home),
+    HOME("Home", Icons.Filled.Home),
     CHAT("Chat", Icons.Filled.Email),
     TASKS("Tasks", Icons.AutoMirrored.Filled.List),
     WHATSAPP("Alerts", Icons.Filled.Notifications),
     FILES("Files", Icons.Filled.Share),
-    SETTINGS("You", Icons.Filled.AccountCircle),
+    SETTINGS("Settings", Icons.Filled.Settings),
     CALL("Call", Icons.Filled.Home),
     NOTIFICATIONS("Inbox", Icons.Filled.Notifications),
 }
@@ -106,12 +107,11 @@ private fun ZayaScaffold(runtime: ZayaRuntime) {
                     ZayaScreen.HOME,
                     ZayaScreen.CHAT,
                     ZayaScreen.TASKS,
-                    ZayaScreen.WHATSAPP,
-                    ZayaScreen.FILES,
                     ZayaScreen.SETTINGS,
                 )) {
                     NavigationBarItem(
-                        selected = screen == item,
+                        selected = screen == item || (item == ZayaScreen.SETTINGS &&
+                            screen in listOf(ZayaScreen.FILES, ZayaScreen.WHATSAPP)),
                         onClick = { screenName = item.name },
                         icon = { Icon(item.icon, contentDescription = item.label) },
                         label = { Text(item.label) },
@@ -134,9 +134,12 @@ private fun ZayaScaffold(runtime: ZayaRuntime) {
 
                 ZayaScreen.CHAT -> ChatScreen(runtime) { screenName = ZayaScreen.HOME.name }
                 ZayaScreen.TASKS -> TasksScreen(runtime) { screenName = ZayaScreen.HOME.name }
-                ZayaScreen.WHATSAPP -> WhatsappScreen(runtime) { screenName = ZayaScreen.HOME.name }
-                ZayaScreen.FILES -> FilesScreen(runtime) { screenName = ZayaScreen.HOME.name }
-                ZayaScreen.SETTINGS -> SettingsScreen(runtime) { screenName = ZayaScreen.HOME.name }
+                ZayaScreen.WHATSAPP -> WhatsappScreen(runtime) { screenName = ZayaScreen.SETTINGS.name }
+                ZayaScreen.FILES -> FilesScreen(runtime) { screenName = ZayaScreen.SETTINGS.name }
+                ZayaScreen.SETTINGS -> SettingsScreen(runtime,
+                    onBack = { screenName = ZayaScreen.HOME.name },
+                    onOpenFiles = { screenName = ZayaScreen.FILES.name },
+                    onOpenWhatsapp = { screenName = ZayaScreen.WHATSAPP.name })
                 ZayaScreen.NOTIFICATIONS -> NotificationsScreen(runtime) {
                     screenName = ZayaScreen.HOME.name
                 }

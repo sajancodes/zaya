@@ -1,5 +1,17 @@
 package com.zaya.companion.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zaya.companion.runtime.ZayaRuntime
@@ -64,102 +77,73 @@ fun HomeScreen(
     val visual by runtime.model.visual.collectAsStateWithLifecycle()
     val caption by runtime.model.caption.collectAsStateWithLifecycle()
     val status by runtime.connection.collectAsStateWithLifecycle()
-    val serverName by runtime.model.serverName.collectAsStateWithLifecycle()
     val voice by runtime.model.voice.collectAsStateWithLifecycle()
     val call by runtime.model.call.collectAsStateWithLifecycle()
     val notifications by runtime.model.notifications.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 12.dp, top = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = serverName,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = visual.state.lowercase().replace('_', ' ') +
-                        if (visual.emotion != "neutral") " · ${visual.emotion}" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            ConnectionPill(status)
-            IconButton(onClick = onOpenNotifications) {
-                Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
-            }
-        }
-
-        ZayaFace(
-            state = visual.state,
-            emotion = visual.emotion,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 8.dp),
-        )
-
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            UpdateCard(runtime, showWhenCurrent = false)
-            CallPermissionCard(compact = true, onConfigure = onOpenSettings)
-            if (caption.text.isNotBlank()) {
-                SectionCard {
-                    Text(
-                        text = caption.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-            }
-            if (voice.note.isNotBlank()) {
-                Note(voice.note, ZayaAccent.amber)
-                Spacer(Modifier.height(10.dp))
-            }
-
-            CommandInput(runtime, placeholder = "Type to Zaya…")
-            Spacer(Modifier.height(10.dp))
-
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+        val faceHeight = (maxHeight * 0.38f).coerceIn(160.dp, 280.dp)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val ringing = call
-                when (ringing) {
-                    is CallUiState.Ringing -> Button(
-                        onClick = { runtime.answer(ringing.call.callId) },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Filled.Call, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Answer Zaya")
-                    }
-
-                    is CallUiState.Active, is CallUiState.Dialing -> OutlinedButton(
-                        onClick = { runtime.endCall() },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("End the call") }
-
-                    CallUiState.Idle -> OutlinedButton(
-                        onClick = { runtime.startCall() },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Filled.Call, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Call Zaya")
+                Column(Modifier.weight(1f)) {
+                    Text("Zaya", style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.SemiBold)
+                    Text("A little closer, wherever you are.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                BadgedBox(badge = { if (notifications.any { !it.read }) Badge() }) {
+                    IconButton(onClick = onOpenNotifications) {
+                        Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
                     }
                 }
-                Spacer(Modifier.width(10.dp))
-                OutlinedButton(onClick = onOpenSettings) { Text("Settings") }
             }
 
-            Spacer(Modifier.height(6.dp))
-            ConnectionDetail(status)
-            Spacer(Modifier.height(14.dp))
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(
+                Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                    MaterialTheme.colorScheme.surface))), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+                    ConnectionPill(status)
+                    ZayaFace(state = visual.state, emotion = visual.emotion,
+                        modifier = Modifier.fillMaxWidth().height(faceHeight))
+                    Text(visual.state.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            if (caption.text.isNotBlank()) SectionCard {
+                Text(caption.text, style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            if (voice.note.isNotBlank()) Note(voice.note, ZayaAccent.amber)
+
+            Button(onClick = {
+                when (val current = call) {
+                    is CallUiState.Ringing -> runtime.answer(current.call.callId)
+                    is CallUiState.Active, is CallUiState.Dialing -> runtime.endCall()
+                    CallUiState.Idle -> runtime.startCall()
+                }
+            }, enabled = status.isOnline || call !is CallUiState.Idle,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                shape = RoundedCornerShape(20.dp)) {
+                Icon(Icons.Filled.Call, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(when (call) {
+                    is CallUiState.Ringing -> "Answer Zaya"
+                    is CallUiState.Active, is CallUiState.Dialing -> "End call"
+                    CallUiState.Idle -> "Call Zaya"
+                })
+            }
+            SectionCard {
+                Text("What's on your mind?", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                CommandInput(runtime, placeholder = "Message Zaya…")
+            }
+            if (!status.isOnline) TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("Connect your laptop in Settings")
+            }
+            UpdateCard(runtime, showWhenCurrent = false)
         }
     }
 }
@@ -167,13 +151,13 @@ fun HomeScreen(
 /** The shared "say something to Zaya" box, used by Home and Chat. */
 @Composable
 fun CommandInput(runtime: ZayaRuntime, placeholder: String = "Message Zaya…") {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val status by runtime.connection.collectAsStateWithLifecycle()
 
     fun submit() {
         val message = text.trim()
-        if (message.isEmpty()) return
+        if (message.isEmpty() || !status.isOnline) return
         text = ""
         scope.launch { runtime.send(message) }
     }
@@ -191,7 +175,7 @@ fun CommandInput(runtime: ZayaRuntime, placeholder: String = "Message Zaya…") 
         Spacer(Modifier.width(8.dp))
         IconButton(
             onClick = { submit() },
-            enabled = text.isNotBlank(),
+            enabled = text.isNotBlank() && status.isOnline,
         ) {
             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
         }
@@ -199,9 +183,9 @@ fun CommandInput(runtime: ZayaRuntime, placeholder: String = "Message Zaya…") 
     if (!status.isOnline) {
         Text(
             text = if (status.phase == com.zaya.companion.protocol.ConnectionPhase.UNPAIRED) {
-                "Pair with your laptop first — the message will go as soon as you do."
+                "Pair with your laptop in Settings to send messages."
             } else {
-                "Offline: this is kept and sent the moment Zaya is reachable."
+                "Offline. Your draft stays here; send it once connected."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

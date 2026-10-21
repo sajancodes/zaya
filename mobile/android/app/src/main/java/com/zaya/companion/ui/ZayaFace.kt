@@ -78,8 +78,8 @@ fun ZayaFace(
 
     Box(modifier, contentAlignment = Alignment.Center) {
         val glow = when (state) {
-            Protocol.LISTENING -> Color(0xFF6366F1).copy(alpha = 0.20f)
-            Protocol.SPEAKING -> Color(0xFF8B8FF8).copy(alpha = 0.24f)
+            Protocol.LISTENING -> Color(0xFFF4A8C5).copy(alpha = 0.20f)
+            Protocol.SPEAKING -> Color(0xFFDDB8D3).copy(alpha = 0.24f)
             Protocol.THINKING -> Color(0xFF22C55E).copy(alpha = 0.16f)
             Protocol.TASK_RUNNING -> Color(0xFF22C55E).copy(alpha = 0.16f)
             Protocol.ERROR -> Color(0xFFEF4444).copy(alpha = 0.26f)
