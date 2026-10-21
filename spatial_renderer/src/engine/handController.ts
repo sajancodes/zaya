@@ -5,7 +5,7 @@ import {Connection} from './connection';
 
 export class HandController {
  private previous?:HandFrame;private at=0;private twoDistance=0;private pullDistance=0;private lastExplode=0;private lastHover=0;
- private grab?:{id:string;mesh:Mesh;plane:Plane;offset:Vector3;wrist:number;rotation:Vector3;revision:number};
+ private grab?:{id:string;hand:string;mesh:Mesh;plane:Plane;offset:Vector3;wrist:number;rotation:Vector3;revision:number};
  constructor(private scene:Scene,private camera:ArcRotateCamera,private manager:SceneManager,private connection:Connection,private label:(text:string)=>void){}
  private ray(hand:HandSample){const engine=this.scene.getEngine();return this.scene.createPickingRay(hand.x*engine.getRenderWidth(),hand.y*engine.getRenderHeight(),Matrix.Identity(),this.camera,false);}
  private pick(hand:HandSample){const pick=this.scene.pickWithRay(this.ray(hand),mesh=>typeof mesh.metadata?.part_id==='string'&&mesh.isPickable);return pick?.pickedMesh?.metadata?.part_id as string|undefined;}
@@ -20,7 +20,7 @@ export class HandController {
   if(frame.selection_only){this.previous=frame;return;}
   if(hand.pose==='FIST'){this.cancel();return;}
   if(this.grab){
-   if(this.grab.mesh.isDisposed()||this.manager.revision()!==this.grab.revision){this.cancel();return;}
+   if(this.grab.hand!==hand.id||this.grab.mesh.isDisposed()||this.manager.revision()!==this.grab.revision){this.cancel();return;}
    if(hand.pose==='PINCH'||hand.pose==='GRAB'){
     const distance=this.ray(hand).intersectsPlane(this.grab.plane);
     if(distance!==null){const world=this.ray(hand).origin.add(this.ray(hand).direction.scale(distance)).add(this.grab.offset);this.grab.mesh.position=this.grab.mesh.parent?Vector3.TransformCoordinates(world,Matrix.Invert(this.grab.mesh.parent.getWorldMatrix())):world;}
@@ -30,9 +30,9 @@ export class HandController {
     const grab=this.grab;this.grab=undefined;
     this.connection.send('part.manipulated',{part_id:grab.id,position:grab.mesh.position.asArray(),rotation:grab.mesh.rotation.asArray(),revision:grab.revision});
    }
-  }else if((hand.pose==='PINCH'||hand.pose==='GRAB')&&frame.hands.length===1){
+  }else if((hand.pose==='PINCH'||hand.pose==='GRAB')&&frame.hands.length===1&&!this.manager.building()){
    const id=this.manager.selected();const mesh=id?this.manager.meshes.get(id):undefined;
-   if(id&&mesh){if(mesh.rotationQuaternion){mesh.rotation=mesh.rotationQuaternion.toEulerAngles();mesh.rotationQuaternion=null;}const plane=Plane.FromPositionAndNormal(mesh.getAbsolutePosition(),this.camera.getForwardRay().direction);const ray=this.ray(hand),distance=ray.intersectsPlane(plane);if(distance!==null)this.grab={id,mesh,plane,offset:mesh.getAbsolutePosition().subtract(ray.origin.add(ray.direction.scale(distance))),wrist:hand.wrist,rotation:mesh.rotation.clone(),revision:this.manager.revision()};}
+   if(id&&mesh){if(mesh.rotationQuaternion){mesh.rotation=mesh.rotationQuaternion.toEulerAngles();mesh.rotationQuaternion=null;}const plane=Plane.FromPositionAndNormal(mesh.getAbsolutePosition(),this.camera.getForwardRay().direction);const ray=this.ray(hand),distance=ray.intersectsPlane(plane);if(distance!==null)this.grab={id,hand:hand.id,mesh,plane,offset:mesh.getAbsolutePosition().subtract(ray.origin.add(ray.direction.scale(distance))),wrist:hand.wrist,rotation:mesh.rotation.clone(),revision:this.manager.revision()};}
   }
   const previous=this.previous?.hands.find(old=>old.id===hand.id);
   if(frame.hands.length===2){
@@ -42,7 +42,7 @@ export class HandController {
     this.twoDistance=distance;this.pullDistance=0;
    }else if(['PINCH','GRAB'].includes(hand.pose)&&['PINCH','GRAB'].includes(second.pose)){
     if(!this.pullDistance)this.pullDistance=distance;
-    if(distance-this.pullDistance>.15&&Date.now()-this.lastExplode>1000){this.connection.send('view.changed',{explode:1.5});this.lastExplode=Date.now();this.pullDistance=distance;}
+    if(frame.gestures?.includes('TWO_HAND_PULL')&&Date.now()-this.lastExplode>1000){this.connection.send('view.changed',{explode:1.5});this.lastExplode=Date.now();this.pullDistance=distance;}
    }
   }else{
    this.twoDistance=this.pullDistance=0;

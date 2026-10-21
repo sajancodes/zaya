@@ -121,6 +121,15 @@ def import_asset(filename):
             name=uuid.uuid4().hex+dependency.suffix.lower()
             resources[name]=(content,mimetypes.guess_type(dependency.name)[0] or 'application/octet-stream')
             entry['uri']=name
+    def validate_uris(value):
+        if isinstance(value,dict):
+            for key,item in value.items():
+                if key=='uri' and item not in resources:
+                    raise ValueError('Unsupported asset extension URI; only validated local resources are allowed.')
+                validate_uris(item)
+        elif isinstance(value,list):
+            for item in value:validate_uris(item)
+    validate_uris(document)
     parents={};parts=[];prefix=hashlib.sha256(raw).hexdigest()[:10]
     for i,node in enumerate(nodes):
         if not isinstance(node,dict):raise ValueError('Invalid glTF node.')

@@ -57,6 +57,11 @@ class VirtualKeyboard:
         stable_normal = sum(getattr(hand.palm_normal,k)*getattr(self.normal,k) for k in ('x','y','z')) > .96
         if not stable_palm or not stable_normal:
             self.state, self.key = 'hover', None
+        elif hand.relative_depth < self.baseline-.05:
+            # Reacquiring an already-forward finger must not permanently move
+            # its neutral press plane forward. Deliberate retraction re-arms.
+            self.baseline,self.since=hand.relative_depth,now
+            self.state='candidate'
         elif now-self.since >= self.config.stability:
             self.state = 'armed'
             previous = self.previous

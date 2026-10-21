@@ -21,6 +21,14 @@ def make_app(session,token):
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost'])
 
+    @app.middleware('http')
+    async def isolate_assets(request,call_next):
+        response=await call_next(request)
+        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; object-src 'none'"
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['X-Content-Type-Options']='nosniff'
+        return response
+
     @app.get('/assets/{bundle_id}/{name}')
     async def get_asset(bundle_id:str,name:str):
         from core.spatial.asset_import import resource

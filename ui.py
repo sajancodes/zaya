@@ -2978,6 +2978,7 @@ class MainWindow(QMainWindow):
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
     _display_request_sig = pyqtSignal(object)
     restart_requested = pyqtSignal()
+    hand_settings_requested = pyqtSignal()
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
     _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
@@ -4471,6 +4472,8 @@ class MainWindow(QMainWindow):
         fs_btn.clicked.connect(self._toggle_fullscreen)
         restart_btn = _row(QPushButton("Restart Zaya"), self._BTN_DIM)
         restart_btn.clicked.connect(self.restart_requested.emit)
+        hands_btn=_row(QPushButton('Hand controls & 3D workspace'),self._BTN_DIM)
+        hands_btn.clicked.connect(self.hand_settings_requested.emit)
 
         self._brief_btn = _row(QPushButton())
         self._brief_btn.clicked.connect(self._toggle_brief)
@@ -5883,6 +5886,8 @@ class JarvisUI:
         self._ghost_overlay = install_ghost_overlay(
             lambda text: self._win.on_text_command(text) if self._win.on_text_command else None,
             parent=self._win)
+        from core.ghost_overlay import show_hand_settings
+        self._win.hand_settings_requested.connect(show_hand_settings)
         self.root = _RootShim(self._app)
         self._bar = None
         self.on_companion_reaction = None

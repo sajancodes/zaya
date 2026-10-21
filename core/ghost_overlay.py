@@ -38,6 +38,7 @@ def install_ghost_overlay(command_callback, parent=None):
             self.entry.returnPressed.connect(self.submit)
             self.requested.connect(self.apply)
             self.passive = None
+            self.hand_settings = None
             self.pending = None
             self.pending_lock = threading.Lock()
             app.aboutToQuit.connect(self.shutdown_optional)
@@ -69,6 +70,12 @@ def install_ghost_overlay(command_callback, parent=None):
         def apply(self, packet):
             try:
                 if packet.get('cancelled'):
+                    return
+                if packet.get('hand_settings'):
+                    if self.hand_settings is None:
+                        from core.gesture.settings_panel import HandSettingsPanel
+                        self.hand_settings=HandSettingsPanel(parent)
+                    self.hand_settings.show();self.hand_settings.raise_();self.hand_settings.activateWindow()
                     return
                 if packet.get('passive_flush'):
                     with self.pending_lock:
@@ -128,3 +135,9 @@ def passive_overlay_available():
 def update_passive_overlay(packet):
     if _bridge is not None:
         _bridge.queue_passive(packet)
+
+
+def show_hand_settings():
+    if _bridge is None:return False
+    _bridge.requested.emit({'hand_settings':True,'done':threading.Event()})
+    return True

@@ -98,3 +98,5 @@ models/hand_landmarker.task
 memory/spatial_session.json
 memory/spatial_session.tmp
 memory/spatial_assets.db*
+config/hand_controls.json
+config/hand_controls.tmp

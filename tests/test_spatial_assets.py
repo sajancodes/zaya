@@ -57,3 +57,9 @@ def test_external_or_parent_dependencies_rejected(tmp_path,uri):
 def test_imported_column_major_matrix_decomposes_without_losing_translation():
     result=asset_import.transform({'matrix':[1,0,0,0,0,1,0,0,0,0,1,0,3,4,5,1]})
     assert result['position']==[3,4,5] and result['rotation_quaternion']==[0,0,0,1]
+
+
+def test_unknown_extension_cannot_fetch_remote_uri(tmp_path):
+    data=document();data['buffers']=[];data['extensions']={'unknown':{'uri':'https://example.com/private'}}
+    path=tmp_path/'bad.gltf';path.write_text(json.dumps(data))
+    with pytest.raises(ValueError):asset_import.import_asset(path)

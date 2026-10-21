@@ -23,6 +23,7 @@ class ScreenPerception:
                 return
             self.stop_event.clear()
             self.error = ''
+            self.state=PerceptionState(activity='starting',revision=self.state.revision)
             self.worker = threading.Thread(target=self._run, name='ZayaPerception', daemon=True)
             self.worker.start()
 
@@ -44,7 +45,7 @@ class ScreenPerception:
             diff, static = FrameDiff(), 0
             from concurrent.futures import ThreadPoolExecutor
             executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='ZayaLocalOCR')
-            future=None;ocr_title='';last_ocr=0
+            future=None;ocr_title='';last_ocr=0;ocr_at=0;text_at=0
             with mss.mss() as capture:
                 monitor = capture.monitors[1]
                 while not self.stop_event.is_set():
@@ -53,10 +54,12 @@ class ScreenPerception:
                     regions = diff.update(frame, (monitor['left'], monitor['top']))
                     app, title, _, dialog = foreground()
                     text=self.state.visible_text if title==self.state.foreground_title else ''
+                    if title!=self.state.foreground_title:text_at=0
                     if future and future.done():
                         try:
                             if self.ocr_enabled and title==ocr_title:
                                 text=future.result()[:4000]
+                                text_at=ocr_at
                         except Exception:
                             pass
                         future=None
@@ -69,7 +72,7 @@ class ScreenPerception:
                         crop=frame[top:top+min(h,720),left:left+min(w,1280),:3][:,:,::-1]
                         if crop.size:
                             buffer=BytesIO();Image.fromarray(crop).save(buffer,format='PNG')
-                            future=executor.submit(_ocr_via_powershell,buffer.getvalue());ocr_title=title;last_ocr=start
+                            future=executor.submit(_ocr_via_powershell,buffer.getvalue());ocr_title=title;last_ocr=start;ocr_at=time.time()
                     import re
                     errors=tuple(line[:300] for line in text.splitlines() if re.search(r'\b(error|exception|traceback|failed|failure)\b',line,re.I))[:8]
                     static = 0 if regions else static + 1
@@ -77,7 +80,8 @@ class ScreenPerception:
                         old = self.state
                         changed = bool(regions) or title != old.foreground_title
                         self.state = PerceptionState(app, title, 'dialog' if dialog else 'active' if regions else 'static',
-                            text, errors, regions, cursor_region(), old.revision + int(changed or text!=old.visible_text), time.time())
+                            text, errors, regions, cursor_region(), old.revision + int(changed or text!=old.visible_text), time.time(),text_at,
+                            regions[0] if regions else old.tracked_region if title==old.foreground_title else ())
                     delay = .083 if static < 24 else .4
                     self.stop_event.wait(max(0, delay - (time.monotonic() - start)))
         except Exception as error:

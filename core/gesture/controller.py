@@ -15,10 +15,18 @@ class HandController:
         self.modifiers = set()
         from .spatial_controller import SpatialController
         self.spatial = SpatialController()
+        self.last_start=None
 
     def _inject(self, key):
         if self.mode != InteractionMode.KEYBOARD:
             return False
+        import os,ctypes
+        if os.name=='nt':
+            from ctypes import wintypes
+            user=ctypes.windll.user32;user.GetForegroundWindow.restype=wintypes.HWND
+            user.GetWindowThreadProcessId.argtypes=(wintypes.HWND,ctypes.POINTER(wintypes.DWORD))
+            pid=wintypes.DWORD();user.GetWindowThreadProcessId(user.GetForegroundWindow(),ctypes.byref(pid))
+            if pid.value in (0,os.getpid()):return False
         from actions.ghost_keyboard import inject_text, send_hotkey
         if key.modifier:
             if key.output.lower() in self.modifiers:
@@ -62,18 +70,31 @@ class HandController:
         from core.ghost_overlay import update_passive_overlay
         update_passive_overlay({'visible':False,'mode':'virtual_keyboard'})
 
-    def start(self, model_path, mode, device=0, fps=24, mirror=True):
+    def start(self, model_path, mode, device=0, fps=24, mirror=True,confidence=.65,sensitivity=1.):
         requested = InteractionMode(mode)
         if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD,InteractionMode.SPATIAL,InteractionMode.SELECTION):
             raise ValueError('Choose a supported interaction mode.')
         self.stop()
         with self.lock:
             self.mode = requested
+            from .calibration import Calibration
+            self.keyboard.config=Calibration(press=.2/sensitivity,release=.07/sensitivity,min_velocity=.8/sensitivity)
             try:
-                self.tracker.start(model_path,device,fps,mirror)
+                self.tracker.start(model_path,device,fps,mirror,confidence)
+                self.last_start=(model_path,mode,device,fps,mirror,confidence,sensitivity)
             except Exception:
                 self.mode = InteractionMode.DISABLED
                 raise
+
+    def pause(self):
+        self.stop();self.tracker.state='PAUSED'
+
+    def resume(self):
+        if self.tracker.state!='PAUSED' or not self.last_start:
+            raise ValueError('No paused hand session to resume.')
+        from .settings import load
+        settings=load()
+        self.start(self.last_start[0],self.last_start[1],settings.device,settings.fps,settings.mirror,settings.confidence,settings.sensitivity)
 
     def status(self):
         return {'mode':self.mode.value,'camera':self.tracker.state,'error':self.tracker.error,

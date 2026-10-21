@@ -14,6 +14,9 @@ class FrameDiff:
         if old is None:
             return ((origin[0], origin[1], width, height),)
         mask = (np.max(cv2.absdiff(old, thumb), axis=2) > 24).astype('uint8') * 255
+        # Join nearby changed glyphs into a useful OCR region; individual
+        # blinking carets still remain below the minimum contour area.
+        mask=cv2.morphologyEx(mask,cv2.MORPH_CLOSE,np.ones((3,7),dtype='uint8'))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         regions = []
         for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:16]:

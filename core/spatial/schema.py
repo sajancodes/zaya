@@ -72,6 +72,19 @@ class Relationship(StrictModel):
     kind: str = Field(max_length=60)
 
 
+class Annotation(StrictModel):
+    id:str=Field(min_length=1,max_length=80,pattern=r'^[a-zA-Z0-9_-]+$')
+    text:str=Field(min_length=1,max_length=500)
+    part_id:str | None=None
+    position:tuple[float,float,float]=(0,0,0)
+
+    @field_validator('position')
+    @classmethod
+    def bounded_position(cls,value):
+        if any(abs(v)>1000 for v in value):raise ValueError('Annotation exceeds workspace bounds.')
+        return value
+
+
 class SpatialScene(StrictModel):
     schema_version: Literal[1] = 1
     scene_id: str = Field(min_length=1,max_length=80)
@@ -80,6 +93,7 @@ class SpatialScene(StrictModel):
     accuracy: Literal['SCHEMATIC','REFERENCE_APPROXIMATION','ASSET_BASED','ENGINEERING_SOURCE'] = 'SCHEMATIC'
     parts: list[SpatialPart] = Field(default_factory=list,max_length=250)
     relationships: list[Relationship] = Field(default_factory=list,max_length=500)
+    annotations:list[Annotation]=Field(default_factory=list,max_length=100)
 
     @model_validator(mode='after')
     def graph(self):
@@ -98,6 +112,8 @@ class SpatialScene(StrictModel):
         for relation in self.relationships:
             if relation.source not in ids or relation.target not in ids:
                 raise ValueError('Relationship references an unknown part.')
+        if len({a.id for a in self.annotations})!=len(self.annotations) or any(a.part_id is not None and a.part_id not in ids for a in self.annotations):
+            raise ValueError('Annotations need unique IDs and valid targets.')
         if len(self.model_dump_json().encode())>450_000:
             raise ValueError('Scene exceeds the renderer message budget.')
         return self

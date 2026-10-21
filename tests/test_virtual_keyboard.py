@@ -59,3 +59,13 @@ def test_hand_switch_does_not_inherit_armed_pose():
     keyboard.update(hand(1.));keyboard.update(hand(1.15))
     keyboard.update(replace(hand(1.2,depth=.3),hand_id='Left'))
     assert sent==[]
+
+
+def test_reacquired_forward_finger_can_retract_and_type_normally():
+    sent=[];keyboard=VirtualKeyboard(lambda key:sent.append(key.id) is None)
+    for t in (1,1.15,1.2):keyboard.update(hand(t,depth=.3))
+    assert not sent
+    keyboard.update(hand(1.3,depth=0))
+    keyboard.update(hand(1.45,depth=0))
+    keyboard.update(hand(1.5,depth=.25))
+    assert sent==['H']

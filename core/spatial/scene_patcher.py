@@ -1,5 +1,5 @@
 from copy import deepcopy
-from .schema import SpatialScene, SpatialPart, Relationship
+from .schema import SpatialScene, SpatialPart, Relationship, Annotation
 
 ALLOWED_PATHS={'name','parent_id','visible','layer','transform.position','transform.rotation','transform.rotation_quaternion','transform.scale',
                'material.color','material.alpha','material.wireframe','geometry.width','geometry.height',
@@ -17,7 +17,18 @@ def apply_patch(scene, operations, expected_revision):
         if not isinstance(operation,dict) or set(operation)-{'op','part_id','path','value'}:
             raise ValueError('Malformed patch operation.')
         op,pid=operation.get('op'),operation.get('part_id')
-        if op in ('relationship.add','relationship.remove'):
+        if op=='scene.update':
+            if operation.get('path')!='name':raise ValueError('Only the scene name can be patched at scene scope.')
+            candidate['name']=operation.get('value')
+        elif op in ('annotation.add','annotation.remove'):
+            if op=='annotation.add':
+                annotation=Annotation.model_validate(operation.get('value')).model_dump()
+                if any(a['id']==annotation['id'] for a in candidate['annotations']):raise ValueError('Duplicate annotation ID.')
+                candidate['annotations'].append(annotation)
+            else:
+                if not any(a['id']==pid for a in candidate['annotations']):raise ValueError('Unknown annotation ID.')
+                candidate['annotations']=[a for a in candidate['annotations'] if a['id']!=pid]
+        elif op in ('relationship.add','relationship.remove'):
             relation=Relationship.model_validate(operation.get('value')).model_dump()
             if op=='relationship.add':
                 if relation not in candidate['relationships']:
@@ -42,6 +53,7 @@ def apply_patch(scene, operations, expected_revision):
                 removed |= children
             parts={key:p for key,p in parts.items() if key not in removed}
             candidate['relationships']=[r for r in candidate['relationships'] if r['source'] not in removed and r['target'] not in removed]
+            candidate['annotations']=[a for a in candidate['annotations'] if a['part_id'] not in removed]
         elif op=='update':
             path=operation.get('path')
             if pid not in parts or path not in ALLOWED_PATHS:

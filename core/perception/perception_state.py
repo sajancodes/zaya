@@ -12,6 +12,8 @@ class PerceptionState:
     cursor_region: tuple = ()
     revision: int = 0
     last_updated: float = 0
+    text_updated: float = 0
+    tracked_region: tuple = ()
 
     def public(self):
         return asdict(self)

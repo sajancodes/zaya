@@ -15,4 +15,5 @@ class SpatialController:
                 'palm':[hand.palm_center.x,hand.palm_center.y,hand.palm_center.z],
                 'wrist':math.atan2(knuckle.y-wrist.y,knuckle.x-wrist.x)})
         session.publish('interaction.frame',{'hands':values,'selection_only':selection_only,
+            'gestures':[event.type for event in events if event.metadata.get('phase')=='enter'],
             'pokes':[event.hand_id for event in events if event.type=='POKE' and event.metadata.get('phase')=='enter']})

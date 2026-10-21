@@ -32,7 +32,7 @@ def main():
                     'jpeg':base64.b64encode(frame).decode('ascii') if frame else ''})
         tracker.stop_event.set()
     threading.Thread(target=control,daemon=True).start()
-    tracker._run(sys.argv[1],int(sys.argv[2]),int(sys.argv[3]),sys.argv[4]=='1')
+    tracker._run(sys.argv[1],int(sys.argv[2]),int(sys.argv[3]),sys.argv[4]=='1',float(sys.argv[5]) if len(sys.argv)>5 else .65)
 
 
 if __name__=='__main__':

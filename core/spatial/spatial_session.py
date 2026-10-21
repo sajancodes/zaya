@@ -20,12 +20,13 @@ class SpatialSession:
         self.sequence=0
         self.renderer_connected=False
         self.listeners=set()
-        self.view={'explode':0.,'xray':'normal','slice':None}
+        self.view={'explode':0.,'explode_parts':{},'xray':'normal','slice':None}
         self.camera_state={'alpha':-math.pi/2,'beta':math.pi/2.7,'radius':10.,'target':[0.,0.,0.]}
         self.renderer_metrics={}
         self.path=Path(path) if path else None
         self.persistence_error=''
         self.saved_at=0
+        self.build_backup=None
         if self.path and self.path.is_file():
             self.restore()
 
@@ -43,14 +44,17 @@ class SpatialSession:
 
     def snapshot(self):
         with self.lock:
-            return {'scene':self.scene.model_dump(mode='json'),'selected':list(self.selected_part_ids),'view':dict(self.view),'camera':dict(self.camera_state)}
+            return {'scene':self.scene.model_dump(mode='json'),'selected':list(self.selected_part_ids),'view':dict(self.view),'camera':dict(self.camera_state),'building':self.build_backup is not None}
 
     def replace(self,scene):
         validated=SpatialScene.model_validate(scene)
         with self.lock:
+            if self.build_backup is not None:raise ValueError('A streamed scene is still being built.')
             # Revisions remain monotonic, including scene changes and undo.
             validated=validated.model_copy(update={'revision':self.scene.revision+1})
             self._remember();self.scene=validated;self.selected_part_ids=[]
+            valid={p.id for p in validated.parts}
+            self.view['explode_parts']={key:value for key,value in self.view.get('explode_parts',{}).items() if key in valid}
             self.publish('scene.create',self.snapshot())
             self.save()
 
@@ -60,21 +64,26 @@ class SpatialSession:
 
     def patch(self,operations,expected_revision):
         with self.lock:
+            if self.build_backup is not None:raise ValueError('Wait for the current streamed build before modifying parts.')
             candidate=apply_patch(self.scene,operations,expected_revision)
             self._remember();self.scene=candidate
             valid={p.id for p in candidate.parts}
             self.selected_part_ids=[p for p in self.selected_part_ids if p in valid]
+            self.view['explode_parts']={key:value for key,value in self.view.get('explode_parts',{}).items() if key in valid}
             self.publish('scene.patch',self.snapshot())
             self.save()
 
     def history(self,redo=False):
         with self.lock:
+            if self.build_backup is not None:raise ValueError('Wait for the current streamed build before undoing.')
             source,target=(self.redo_stack,self.undo_stack) if redo else (self.undo_stack,self.redo_stack)
             if not source:
                 raise ValueError('No history in that direction.')
             target.append(self.scene.model_copy(deep=True))
             self.scene=source.pop().model_copy(update={'revision':self.scene.revision+1})
             self.selected_part_ids=[]
+            valid={p.id for p in self.scene.parts}
+            self.view['explode_parts']={key:value for key,value in self.view.get('explode_parts',{}).items() if key in valid}
             self.publish('scene.patch',self.snapshot())
             self.save()
 
@@ -92,19 +101,30 @@ class SpatialSession:
             return part_context(self.scene,self.selected_part_ids)
 
     def set_view(self,change):
-        if not isinstance(change,dict) or set(change)-{'explode','xray','slice'}:
+        if not isinstance(change,dict) or set(change)-{'explode','explode_parts','xray','slice'}:
             raise ValueError('Unknown view property.')
+        if 'explode' in change and 'explode_parts' not in change:change={**change,'explode_parts':{}}
         value={**self.view,**change}
         amount=value['explode']
         if type(amount) not in (int,float) or not math.isfinite(amount) or not 0<=amount<=5:
             raise ValueError('Invalid explosion amount.')
         if value['xray'] not in ('normal','outer_transparent','selected_transparent','internal_only','wireframe'):
             raise ValueError('Unknown X-ray mode.')
+        overrides=value.get('explode_parts',{})
+        if not isinstance(overrides,dict) or not set(overrides)<={p.id for p in self.scene.parts} or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=5 for v in overrides.values()):
+            raise ValueError('Invalid part explosion offsets.')
         plane=value['slice']
-        if plane is not None and (not isinstance(plane,dict) or set(plane)!={'axis','offset'} or
-             plane['axis'] not in ('x','y','z') or type(plane['offset']) not in (int,float) or
-             not math.isfinite(plane['offset']) or abs(plane['offset'])>100):
-            raise ValueError('Invalid clipping plane.')
+        if plane is not None:
+            if not isinstance(plane,dict) or type(plane.get('offset')) not in (int,float) or not math.isfinite(plane['offset']) or abs(plane['offset'])>100:
+                raise ValueError('Invalid clipping plane.')
+            if set(plane)=={'normal','offset'}:
+                normal=plane['normal']
+                if not isinstance(normal,list) or len(normal)!=3 or any(type(v) not in (int,float) or not math.isfinite(v) or abs(v)>1000 for v in normal):raise ValueError('Invalid plane normal.')
+                length=math.hypot(*normal)
+                if length<.001 or abs(plane['offset']/length)>100:raise ValueError('Invalid plane magnitude.')
+                plane={'normal':[v/length for v in normal],'offset':plane['offset']/length};change={**change,'slice':plane}
+            elif set(plane)!={'axis','offset'} or plane['axis'] not in ('x','y','z'):
+                raise ValueError('Invalid clipping axis.')
         with self.lock:
             self.view={**self.view,**change};self.publish('scene.patch',self.snapshot())
             self.save()
@@ -141,7 +161,7 @@ class SpatialSession:
             if time.monotonic()-self.saved_at>10:self.save()
 
     def save(self):
-        if self.path is None:return
+        if self.path is None or self.build_backup is not None:return
         with self.lock:
             try:
                 value={**self.snapshot(),'version':1,'undo':[s.model_dump(mode='json') for s in self.undo_stack[-20:]],
@@ -178,7 +198,40 @@ class SpatialSession:
 
     def referenced_assets(self):
         with self.lock:
-            return {p.geometry.asset_id for scene in [self.scene,*self.undo_stack,*self.redo_stack] for p in scene.parts if p.geometry.asset_id}
+            previous=[self.build_backup[0]] if self.build_backup is not None else []
+            return {p.geometry.asset_id for scene in [self.scene,*self.undo_stack,*self.redo_stack,*previous] for p in scene.parts if p.geometry.asset_id}
+
+    def begin_build(self,name):
+        with self.lock:
+            if self.build_backup is not None:raise ValueError('Another spatial build is already running.')
+            self.build_backup=(self.scene,self.selected_part_ids,self.view)
+            self.scene=SpatialScene(scene_id=uuid.uuid4().hex,name=name[:160] or 'Generated scene',revision=self.scene.revision+1)
+            self.selected_part_ids=[];self.view={'explode':0.,'explode_parts':{},'xray':'normal','slice':None}
+            self.publish('scene.create',self.snapshot())
+            return self.scene.scene_id
+
+    def add_build_part(self,token,part):
+        with self.lock:
+            if self.build_backup is None or self.scene.scene_id!=token:raise ValueError('Stale build token.')
+            self.scene=apply_patch(self.scene,[{'op':'add','value':part}],self.scene.revision)
+            self.publish('scene.patch',self.snapshot())
+
+    def finish_build(self,token,relationships):
+        with self.lock:
+            if self.build_backup is None or self.scene.scene_id!=token:raise ValueError('Stale build token.')
+            value=self.scene.model_dump();value['relationships']=relationships;value['revision']+=1
+            candidate=SpatialScene.model_validate(value)
+            self.undo_stack.append(self.build_backup[0]);self.undo_stack=self.undo_stack[-20:];self.redo_stack.clear()
+            self.scene=candidate;self.build_backup=None
+            self.publish('scene.patch',self.snapshot());self.save()
+
+    def abort_build(self,token):
+        with self.lock:
+            if self.build_backup is None or self.scene.scene_id!=token:return
+            revision=self.scene.revision+1
+            self.scene,self.selected_part_ids,self.view=self.build_backup;self.build_backup=None
+            self.scene=self.scene.model_copy(update={'revision':revision})
+            self.publish('scene.create',self.snapshot())
 
 
 session=SpatialSession(Path(__file__).resolve().parents[2]/'memory'/'spatial_session.json')

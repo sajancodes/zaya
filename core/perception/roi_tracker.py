@@ -44,8 +44,8 @@ def resolve_region(source, state=None):
         return list(cursor_region()) or None
     if source == 'active_window':
         return list(foreground()[2]) or None
-    if source == 'tracked_roi' and state and state.changed_regions:
-        x, y, w, h = state.changed_regions[0]
+    if source == 'tracked_roi' and state and (state.tracked_region or state.changed_regions):
+        x, y, w, h = state.tracked_region or state.changed_regions[0]
         return [x, y, x + w, y + h]
     if source == 'full_monitor':
         return None

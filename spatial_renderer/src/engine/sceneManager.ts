@@ -3,14 +3,17 @@ import {Part,Snapshot} from './protocol';
 import {ProgressiveBuilder} from './progressiveBuilder';
 import {ParticleMaterializer} from './particleMaterializer';
 import {AssetManager} from './assetManager';
+import {Annotations} from './annotations';
 export class SceneManager {
  meshes=new Map<string,Mesh>();private parts=new Map<string,Part>();private signatures=new Map<string,string>();
  builder=new ProgressiveBuilder();particles:ParticleMaterializer;private snapshot?:Snapshot;
  private assets:AssetManager;private loading=new Set<string>();
  private hovered='';
- constructor(private scene:Scene,private error:(text:string)=>void=console.error){this.particles=new ParticleMaterializer(scene);this.assets=new AssetManager(scene);}
+ private annotations:Annotations;
+ constructor(private scene:Scene,private error:(text:string)=>void=console.error){this.particles=new ParticleMaterializer(scene);this.assets=new AssetManager(scene);this.annotations=new Annotations(scene,this.meshes);}
  apply(snapshot:Snapshot){
   this.snapshot=snapshot;this.parts=new Map(snapshot.scene.parts.map(p=>[p.id,p]));
+  this.annotations.apply(snapshot.scene.annotations??[]);
   for(const [id,mesh] of this.meshes)if(!this.parts.has(id)){if(mesh.metadata?.zaya_node)mesh.setEnabled(false);else if(!mesh.isDisposed())this.particles.dissolve(mesh);this.meshes.delete(id);this.signatures.delete(id);}
   const added:Part[]=[];
   for(const part of snapshot.scene.parts){if(this.meshes.has(part.id))this.update(part);else added.push(part);}
@@ -48,19 +51,20 @@ export class SceneManager {
   for(const [id,mesh] of this.meshes){const part=this.parts.get(id)!;const material=mesh.material as StandardMaterial;
    mesh.parent=part.parent_id?this.meshes.get(part.parent_id)??null:null;
    const base=Vector3.FromArray(part.transform.position);let direction=base.length()>.01?base.normalize():new Vector3(1,1,0).normalize();
-   mesh.position=Vector3.FromArray(part.transform.position).add(direction.scale(state.view.explode));
+   mesh.position=Vector3.FromArray(part.transform.position).add(direction.scale(state.view.explode_parts?.[id]??state.view.explode));
    const transparent=state.view.xray==='outer_transparent'&&part.layer==='outer'||state.view.xray==='selected_transparent'&&selected.has(id);
    material.alpha=transparent?.16:part.material.alpha;material.wireframe=state.view.xray==='wireframe'||part.material.wireframe;
    if(part.geometry.primitive==='asset')this.assets.style(part,transparent,material.wireframe,selected.has(id));
    mesh.setEnabled(part.visible&&!(state.view.xray==='internal_only'&&part.layer==='outer'));
    mesh.renderOutline=selected.has(id)||this.hovered===id;mesh.outlineColor=selected.has(id)?new Color3(1,.4,.7):new Color3(.4,.7,1);mesh.outlineWidth=.025;
   }
-  const slice=state.view.slice;this.scene.clipPlane=slice?new Plane(slice.axis==='x'?1:0,slice.axis==='y'?1:0,slice.axis==='z'?1:0,slice.offset):null;
+  const slice=state.view.slice;this.scene.clipPlane=slice?new Plane(slice.normal?.[0]??(slice.axis==='x'?1:0),slice.normal?.[1]??(slice.axis==='y'?1:0),slice.normal?.[2]??(slice.axis==='z'?1:0),slice.offset):null;
  }
- tick(ms:number){this.builder.tick(ms,p=>{if(this.parts.has(p.id)){this.create(this.parts.get(p.id)!);this.view();}});}
+ tick(ms:number){this.builder.tick(ms,p=>{if(this.parts.has(p.id)){this.create(this.parts.get(p.id)!);this.view();}});this.annotations.tick();}
  select(id:string){if(this.snapshot){this.snapshot.selected=[id];this.view();}return this.parts.get(id);}
  selected(){return this.snapshot?.selected[0];}
  revision(){return this.snapshot?.scene.revision??0;}
+ building(){return this.snapshot?.building??false;}
  restore(id:string){const part=this.parts.get(id);if(part&&this.meshes.has(id)){this.update(part);this.view();}}
  hover(id:string){if(id!==this.hovered){this.hovered=id;this.view();}return this.parts.get(id);}
 }

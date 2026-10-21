@@ -45,6 +45,8 @@ class GestureEngine:
                     speed=(hand.relative_depth-previous.relative_depth)/dt if .001<dt<.2 else 0
                     if hand.palm_center.distance(palm)>.035:
                         self.pokes[hand.hand_id]=(hand.relative_depth,hand.palm_center,False)
+                    elif not locked and hand.relative_depth<baseline-.05:
+                        self.pokes[hand.hand_id]=(hand.relative_depth,palm,False)
                     elif locked and hand.relative_depth-baseline<.07:
                         self.pokes[hand.hand_id]=(baseline,palm,False)
                     elif not locked and hand.relative_depth-baseline>.2 and speed>.8:
