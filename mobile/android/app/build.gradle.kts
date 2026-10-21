@@ -50,12 +50,6 @@ android {
         buildConfig = true
     }
 
-    testOptions {
-        // Unit tests must never need a device: an Android API that answers
-        // nothing is still better than a suite nobody can run.
-        unitTests.isReturnDefaultValues = true
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -90,7 +84,4 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.org.json)
 }

@@ -25,7 +25,7 @@ This implements E09–E18 in the supplied extended audit, preserving the existin
 
 ## Verification and limits
 
-Targeted offline Python contract tests exercise real bridge routing, wrong-device rejection, ambiguous-device failure, Android-result normalization, stale desktop-instance rejection and scope-specific terminal publication. Existing phone video regression tests are retained for the verification run; the owner requested test-file removal after checks.
+Targeted offline Python contract tests exercised real bridge routing, wrong-device rejection, ambiguous-device failure, Android-result normalization, stale desktop-instance rejection and scope-specific terminal publication. Phone video regressions were included in the combined Python run. The Python suites and 14 Android test sources were removed at the owner's request after verification.
 
 Android JVM tests and debug build run locally. Physical device calls, SMS, notification replies, permission prompts, screen capture and microphone service transitions were not exercised. Android may restrict a consent activity opened from the background; the owner can open Zaya to see the pending approval, and the request expires without executing if no decision arrives. Platform validation on the owner's phone is still required. No app restart, phone action, provider request or UI approval bypass was used.
 

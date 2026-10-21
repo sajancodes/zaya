@@ -8,6 +8,12 @@ reference below points at that revision; this survey was read-only.
 
 Companion notes live in this directory alongside this file.
 
+October 21 update: the owner requested test-source and fixture removal after
+repair verification. References to the suite below describe the historical
+snapshot. Current CI is `.github/workflows/code-checks.yml`, which compiles
+application sources and checks undefined names. Android releases run lint and
+a signed build. See the dated repair notes for the pre-removal check results.
+
 ---
 
 ## 1. Plugin API contract
@@ -294,6 +300,15 @@ Conventions worth keeping:
 - `tools/generate_poke_voices.py` — pre-renders each configured Nika reaction once
   so playback never calls AI; writes 24 kHz mono 16-bit WAVs atomically via a
   `.tmp` replace (`:9-27`).
+- `tools/analyze_codebase.py` — read-only static analysis of the source tree.
+  Standard library only (`ast`, `tokenize`, `importlib.metadata`): structure,
+  dependencies, line/comment/docstring metrics, per-function complexity and
+  nesting, and the findings that follow from them. Test folders and test files
+  are excluded from the scope by default; `--include-tests` brings them back.
+  Writes `docs/generated/codebase_analysis.md` and `.json` (both gitignored).
+  `--verify` prints the scope and environment checklist, `--self-check` proves
+  the analyzer still honours its own Python 3.3 syntax floor, and
+  `--include-generated` walks build output and caches too.
 
 ### 6.3 Dependencies
 

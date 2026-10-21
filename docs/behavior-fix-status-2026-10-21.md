@@ -45,7 +45,9 @@ possible application or device bug has been eliminated.
 
 The final combined Python run completed 593 checks: 587 passed and six skipped
 (122.680 seconds). Source compilation and scoped undefined-name checks passed.
-The 98 Python source/fixture files were then removed at the owner's request.
+The 98 Python source/fixture files and 14 Android test sources were then removed
+at the owner's request. Android's 100 JVM checks passed with zero failures;
+release lint reported zero errors and the signed release build passed.
 Earlier fixture assumptions about fabricated Meet links, simulated offline
 success, model-controlled approval and unconfirmed SMS delivery were corrected
 before that run, rather than restoring those incorrect product behaviors.

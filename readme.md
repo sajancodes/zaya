@@ -441,8 +441,7 @@ services/whatsapp/       Pairing, identity, transport, inbox and chat policy
 memory/                  Configuration helpers and private state interfaces
 dashboard/               Optional phone dashboard
 mobile/android/          Native Android companion app
-tests/                   Offline regression and integration tests
-tools/                   Setup helpers and poke-voice generation
+tools/                   Setup helpers, poke-voice generation and code analysis
 docs/                    Character, implementation and validation documentation
 ```
 
@@ -450,22 +449,21 @@ Internal names such as `JarvisLive`, `JarvisUI`, legacy profile folders, and
 startup keys remain where changing them would break compatibility. The visible
 assistant identity is Zaya, created by Sajan Rai.
 
-## Testing and troubleshooting
+## Checks and troubleshooting
 
 Run checks with the same interpreter used to launch Zaya:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install ruff
-.venv\Scripts\python.exe -m playwright install chromium
-.venv\Scripts\python.exe -m unittest discover -s tests -v
-.venv\Scripts\python.exe -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py tests tools
+.venv\Scripts\python.exe -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py dashboard plugins tools
+.venv\Scripts\python.exe -m compileall -q core actions services memory dashboard plugins tools main.py ui.py
 ```
 
-The suite covers temporary repositories/processes, browser recovery against
-local HTTP pages, Qt UI integration, audio restoration, command permissions,
-and simulated WhatsApp events. It does not send live WhatsApp messages. GitHub
-Actions runs Windows checks on pushes to `main` and `zaya-updates`; local test
-success and hosted CI status are reported separately.
+The owner requested removal of project test files on October 21, after the
+repair verification run. Its results and physical-device limits are recorded in
+the dated repair notes under `docs/`. GitHub Actions runs source checks on
+pushes to `main` and `zaya-updates`; Android releases run lint and a signed build.
+Source checks do not establish that live audio, messages or phone permissions work.
 
 | Symptom | Check |
 | --- | --- |
@@ -486,6 +484,23 @@ See [validation and rollback notes](docs/VALIDATION.md),
 [implementation plan](docs/ZAYA_IMPLEMENTATION_PLAN.md). Before reverting a
 feature, inspect dependent commits and preserve private configuration, memory,
 and linked-device credentials.
+
+### Codebase analysis
+
+`tools/analyze_codebase.py` is a read-only static analyzer for this tree. It
+uses only the Python standard library, so it needs no extra packages:
+
+```powershell
+.venv\Scripts\python.exe tools\analyze_codebase.py            # full report
+.venv\Scripts\python.exe tools\analyze_codebase.py --verify   # checklist
+```
+
+It reports the project structure, the dependency state of `requirements.txt`
+against the running interpreter, per-file line metrics, and per-function
+complexity and nesting, then lists the findings those numbers imply. The
+Markdown and JSON reports land in `docs/generated/` (gitignored). Test folders
+and test files are left out of the analysis by default; `--include-tests`
+includes them.
 
 ## Creator, credits, and license
 

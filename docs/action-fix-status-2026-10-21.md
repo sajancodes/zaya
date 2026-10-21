@@ -36,5 +36,5 @@ cancellation during generation, failed calendar persistence, dead subprocesses,
 and preserving existing output contents. Physical input, authenticated Google
 Calendar, real message delivery, and public tunnel reachability are not claimed.
 
-Tests are temporary verification scaffolding. Their eventual removal follows
-the owner's separate request after project-wide verification is complete.
+The temporary verification tests and fixtures were removed at the owner's
+request after the combined verification run passed.

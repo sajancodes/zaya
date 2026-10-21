@@ -46,11 +46,12 @@ jobs:
           echo "ZAYA_SIGNING_STORE=$RUNNER_TEMP/zaya-signing.jks" >> "$GITHUB_ENV"
       - name: Install Android build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Test and build the signed app
+      - name: Check and build the signed app
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --console=plain
+          ./gradlew :app:lintRelease --console=plain --max-workers=2
+          ./gradlew :app:assembleRelease --console=plain --max-workers=2
       - name: Prepare only APK and update metadata
         run: >-
           python tools/prepare_android_release.py

@@ -1,4 +1,4 @@
-name: Zaya regression tests
+name: Zaya code checks
 on:
   push:
     branches: [zaya-updates, main]
@@ -20,9 +20,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt ruff
-      - name: Install isolated browser test runtime
-        run: python -m playwright install chromium
       - name: Check syntax and undefined names
-        run: python -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py tests tools
-      - name: Run offline regression and integration tests
-        run: python -m unittest discover -s tests -v
+        run: python -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py dashboard plugins tools
+      - name: Compile application sources
+        run: python -m compileall -q core actions services memory dashboard plugins tools main.py ui.py
