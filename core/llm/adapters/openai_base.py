@@ -218,27 +218,72 @@ class OpenAIBaseAdapter(BaseAdapter):
             raise TimeoutError(f"Streaming request to {self.config.name} timed out", provider=self.config.name, raw_error=e)
         except requests.exceptions.ConnectionError as e:
             raise ProviderUnavailableError(f"Streaming connection to {self.config.name} failed: {e}", provider=self.config.name, raw_error=e)
+        except Exception as e:
+            # The non-streaming path wraps everything else in LLMError; the
+            # streaming path used to let raw requests exceptions escape, so
+            # the router's error handling never saw them.
+            raise LLMError(f"Unexpected network error communicating with {self.config.name}: {e}", provider=self.config.name, raw_error=e)
 
-        if resp.status_code != 200:
-            raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="replace")
-            line = line.strip()
-            if line.startswith("data: "):
-                raw_data = line[6:].strip()
-                if raw_data == "[DONE]":
-                    break
+        pending = {}
+        def take_calls():
+            calls = []
+            for index in sorted(pending):
+                value = pending[index]
                 try:
-                    chunk_json = json.loads(raw_data)
+                    arguments = json.loads(value['arguments'] or '{}')
+                except ValueError as error:
+                    raise InvalidRequestError('Incomplete streamed tool arguments', provider=self.config.name) from error
+                if not value['name'] or not isinstance(arguments, dict):
+                    raise InvalidRequestError('Invalid streamed tool call', provider=self.config.name)
+                calls.append(ToolCall(name=value['name'], arguments=arguments, id=value['id']))
+            pending.clear()
+            return calls
+
+        try:
+            if resp.status_code != 200:
+                raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                line = line.strip()
+                if line.startswith("data: "):
+                    raw_data = line[6:].strip()
+                    if raw_data == "[DONE]":
+                        break
+                    try:
+                        chunk_json = json.loads(raw_data)
+                    except (ValueError, TypeError):
+                        continue
                     choices = chunk_json.get("choices", [])
                     if choices:
                         delta = choices[0].get("delta", {})
                         delta_text = delta.get("content") or ""
                         finish_reason = choices[0].get("finish_reason")
-                        yield StreamChunk(delta_text=delta_text, finish_reason=finish_reason)
-                except Exception:
-                    continue
+                        for part in delta.get('tool_calls') or []:
+                            value = pending.setdefault(part.get('index', 0), {'name': '', 'id': '', 'arguments': ''})
+                            value['id'] = part.get('id') or value['id']
+                            function = part.get('function') or {}
+                            value['name'] += function.get('name') or ''
+                            fragment = function.get('arguments')
+                            if isinstance(fragment, dict):
+                                value['arguments'] = json.dumps(fragment)
+                            elif isinstance(fragment, str):
+                                value['arguments'] += fragment
+                        calls = take_calls() if finish_reason and pending else []
+                        yield StreamChunk(delta_text=delta_text, tool_calls=calls, finish_reason=finish_reason)
+            if pending:
+                yield StreamChunk(tool_calls=take_calls(), finish_reason='tool_calls')
+        except requests.exceptions.Timeout as error:
+            raise TimeoutError('Streaming response timed out', provider=self.config.name, raw_error=error) from error
+        except requests.exceptions.ConnectionError as error:
+            raise ProviderUnavailableError('Streaming response disconnected', provider=self.config.name, raw_error=error) from error
+        except requests.exceptions.RequestException as error:
+            raise ProviderUnavailableError('Streaming response interrupted', provider=self.config.name, raw_error=error) from error
+        finally:
+            # A streamed response holds the connection open until it is
+            # closed; without this the socket leaked on every stream.
+            closer = getattr(resp, "close", None)
+            if callable(closer):
+                closer()

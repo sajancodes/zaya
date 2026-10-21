@@ -22,6 +22,39 @@ from core.llm.types import (
 ProviderConfig = CoreProviderConfig
 
 
+def _tool_field(tool: Dict[str, Any], key: str, default: Any = "") -> Any:
+    """Read a field from a tool schema in either supported shape.
+
+    Tool schemas arrive either flat ({"name": ...}) or wrapped
+    ({"function": {"name": ...}}). The old code did
+    t.get("function", {}).get("name", "") which raised AttributeError when
+    "function" was present but was not an object.
+    """
+    value = tool.get(key)
+    if value not in (None, ""):
+        return value
+    inner = tool.get("function")
+    if isinstance(inner, dict):
+        value = inner.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _tool_definitions(tools: List[Dict[str, Any]]) -> Optional[List[ToolDefinition]]:
+    if not tools:
+        return None
+    defs = [
+        ToolDefinition(
+            name=_tool_field(t, "name"),
+            description=_tool_field(t, "description"),
+            parameters=_tool_field(t, "parameters", {}) or {},
+        )
+        for t in tools if isinstance(t, dict)
+    ]
+    return defs or None
+
+
 def normalize_tools_for_openai(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Converts tools into OpenAI format using OpenAIBaseAdapter formatting."""
     tool_defs = []
@@ -65,16 +98,7 @@ class UniversalLLMRouter:
         for m in messages:
             llm_messages.append(LLMMessage(role=m.get("role", "user"), content=m.get("content", "")))
 
-        tool_defs = None
-        if tools:
-            tool_defs = [
-                ToolDefinition(
-                    name=t.get("name") or t.get("function", {}).get("name", ""),
-                    description=t.get("description") or t.get("function", {}).get("description", ""),
-                    parameters=t.get("parameters") or t.get("function", {}).get("parameters", {})
-                )
-                for t in tools if isinstance(t, dict)
-            ]
+        tool_defs = _tool_definitions(tools)
 
         res = adapter.chat(
             messages=llm_messages,
@@ -116,16 +140,7 @@ class UniversalLLMRouter:
             else:
                 llm_messages.append(LLMMessage(role=role, content=content))
 
-        tool_defs = None
-        if tools:
-            tool_defs = [
-                ToolDefinition(
-                    name=t.get("name") or t.get("function", {}).get("name", ""),
-                    description=t.get("description") or t.get("function", {}).get("description", ""),
-                    parameters=t.get("parameters") or t.get("function", {}).get("parameters", {})
-                )
-                for t in tools if isinstance(t, dict)
-            ]
+        tool_defs = _tool_definitions(tools)
 
         res = self.router.route(
             messages=llm_messages,

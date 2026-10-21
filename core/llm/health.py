@@ -69,15 +69,24 @@ class ProviderHealth:
         self,
         failure_threshold: int = 3,
         recovery_timeout_sec: float = 30.0,
-        clock=time.monotonic
+        clock=time.monotonic,
+        half_open_probe_timeout_sec: float = 30.0
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout_sec = recovery_timeout_sec
+        # How long a half-open probe may go unanswered before another one is
+        # issued. Kept separate from recovery_timeout_sec: that one is the
+        # wait BEFORE the first probe, and a zero there must not turn the
+        # half-open state into an unlimited pass.
+        self.half_open_probe_timeout_sec = half_open_probe_timeout_sec
         self.clock = clock
         self._lock = threading.Lock()
         self.metrics: Dict[str, ProviderMetrics] = {}
         self.circuit_state: Dict[str, CircuitState] = {}
         self.opened_at: Dict[str, float] = {}
+        # When a provider was handed a trial request while half-open. One
+        # probe at a time: the circuit is a brake, not a suggestion.
+        self._half_open_probe_at: Dict[str, float] = {}
 
     def _get_metrics(self, provider_id: str) -> ProviderMetrics:
         if provider_id not in self.metrics:
@@ -90,13 +99,24 @@ class ProviderHealth:
             state = self.circuit_state.get(provider_id, CircuitState.CLOSED)
             if state == CircuitState.CLOSED:
                 return True
+            now = self.clock()
             if state == CircuitState.OPEN:
-                elapsed = self.clock() - self.opened_at.get(provider_id, 0.0)
+                elapsed = now - self.opened_at.get(provider_id, 0.0)
                 if elapsed >= self.recovery_timeout_sec:
                     self.circuit_state[provider_id] = CircuitState.HALF_OPEN
+                    self._half_open_probe_at[provider_id] = now
                     return True
                 return False
-            # HALF_OPEN allows one trial request
+            # HALF_OPEN allows exactly one trial request at a time. The old
+            # code returned True unconditionally, so a half-open provider
+            # took an unlimited share of the traffic it was supposed to be
+            # probing with. A probe that never reports back (the request was
+            # never actually dispatched) is retried after the probe timeout,
+            # so a lost probe cannot wedge the provider shut forever.
+            issued = self._half_open_probe_at.get(provider_id)
+            if issued is not None and (now - issued) < self.half_open_probe_timeout_sec:
+                return False
+            self._half_open_probe_at[provider_id] = now
             return True
 
     def record_success(self, provider_id: str, latency_ms: float) -> None:
@@ -108,6 +128,7 @@ class ProviderHealth:
             m.total_latency_ms += latency_ms
             m.last_success_time = self.clock()
             self.circuit_state[provider_id] = CircuitState.CLOSED
+            self._half_open_probe_at.pop(provider_id, None)
 
     def record_failure(self, provider_id: str, error_msg: str) -> None:
         with self._lock:
@@ -121,3 +142,4 @@ class ProviderHealth:
             if m.consecutive_failures >= self.failure_threshold:
                 self.circuit_state[provider_id] = CircuitState.OPEN
                 self.opened_at[provider_id] = self.clock()
+                self._half_open_probe_at.pop(provider_id, None)

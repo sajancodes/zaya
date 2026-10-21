@@ -190,19 +190,43 @@ class OllamaAdapter(BaseAdapter):
             raise TimeoutError("Ollama streaming timed out", provider="ollama", raw_error=e)
         except requests.exceptions.ConnectionError as e:
             raise ProviderUnavailableError("Ollama service unreachable", provider="ollama", raw_error=e)
+        except Exception as e:
+            raise LLMError(f"Ollama communication failure: {e}", provider="ollama", raw_error=e)
 
-        if resp.status_code != 200:
-            raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            try:
-                chunk = json.loads(line)
+        try:
+            if resp.status_code != 200:
+                raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
                 delta_text = chunk.get("message", {}).get("content", "")
                 done = chunk.get("done", False)
-                yield StreamChunk(delta_text=delta_text, finish_reason="stop" if done else None)
+                calls = []
+                for raw_call in chunk.get('message', {}).get('tool_calls') or []:
+                    call = raw_call.get('function') or {}
+                    args = call.get('arguments') or {}
+                    if not isinstance(args, dict):
+                        try:
+                            args = json.loads(args)
+                        except (TypeError, ValueError) as error:
+                            raise LLMError('Invalid streamed tool arguments', provider='ollama') from error
+                    if not isinstance(args, dict) or not call.get('name'):
+                        raise LLMError('Invalid streamed tool call', provider='ollama')
+                    calls.append(ToolCall(name=call['name'], arguments=args, id=raw_call.get('id', '')))
+                yield StreamChunk(delta_text=delta_text, tool_calls=calls, finish_reason="stop" if done else None)
                 if done:
                     break
-            except Exception:
-                continue
+        except requests.exceptions.Timeout as error:
+            raise TimeoutError('Ollama stream timed out', provider='ollama', raw_error=error) from error
+        except requests.exceptions.ConnectionError as error:
+            raise ProviderUnavailableError('Ollama stream disconnected', provider='ollama', raw_error=error) from error
+        except requests.exceptions.RequestException as error:
+            raise ProviderUnavailableError('Ollama stream interrupted', provider='ollama', raw_error=error) from error
+        finally:
+            closer = getattr(resp, "close", None)
+            if callable(closer):
+                closer()

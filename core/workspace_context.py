@@ -45,8 +45,11 @@ def clean_title(title: str) -> str:
     t = str(title or "").strip()
     if not t:
         return ""
-    # Strip common editor/browser suffix patterns like " - Visual Studio Code", " - Sublime Text"
-    t = re.sub(r"\s+[-—]\s+(Visual Studio Code|Google Chrome|Microsoft​? Edge|Mozilla Firefox|Brave|Sublime Text|Notepad\+\+)$", "", t, flags=re.IGNORECASE)
+    # Strip common editor/browser suffix patterns
+    # The Edge branch used to hold a literal U+200B zero-width space in the
+    # source. It is invisible, survives copy/paste unpredictably and makes the
+    # pattern unreadable; the escape says exactly the same thing. like " - Visual Studio Code", " - Sublime Text"
+    t = re.sub(r"\s+[-—]\s+(Visual Studio Code|Google Chrome|Microsoft\u200b? Edge|Mozilla Firefox|Brave|Sublime Text|Notepad\+\+)$", "", t, flags=re.IGNORECASE)
     return t.strip()
 
 

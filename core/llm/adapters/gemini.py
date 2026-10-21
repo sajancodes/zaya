@@ -59,7 +59,21 @@ class GeminiAdapter(BaseAdapter):
             role = "user" if msg.role == "user" else "model"
             parts: List[Dict[str, Any]] = []
 
-            if isinstance(msg.content, str):
+            if msg.role == "tool":
+                # A tool result is a "user" turn carrying a functionResponse
+                # part. The old code tested for the "tool" role only AFTER
+                # the str/list content branches, so a tool message (whose
+                # content is always a string) fell into the text branch and
+                # was sent to Gemini as a MODEL turn reading the raw result
+                # out loud, and the functionResponse branch was dead code.
+                role = "user"
+                parts.append({
+                    "functionResponse": {
+                        "name": msg.name or "tool_result",
+                        "response": {"output": str(msg.content)}
+                    }
+                })
+            elif isinstance(msg.content, str):
                 parts.append({"text": msg.content})
             elif isinstance(msg.content, list):
                 for p in msg.content:
@@ -72,14 +86,8 @@ class GeminiAdapter(BaseAdapter):
                                 "data": p.to_base64()
                             }
                         })
-            elif msg.role == "tool":
-                role = "user"
-                parts.append({
-                    "functionResponse": {
-                        "name": msg.name or "tool_result",
-                        "response": {"output": str(msg.content)}
-                    }
-                })
+            else:
+                parts.append({"text": str(msg.content)})
 
             if msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -234,25 +242,43 @@ class GeminiAdapter(BaseAdapter):
             raise TimeoutError("Gemini streaming timed out", provider="gemini", raw_error=e)
         except requests.exceptions.ConnectionError as e:
             raise ProviderUnavailableError("Gemini connection failed", provider="gemini", raw_error=e)
+        except Exception as e:
+            raise LLMError(f"Gemini error: {e}", provider="gemini", raw_error=e)
 
-        if resp.status_code != 200:
-            raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="replace")
-            line = line.strip()
-            if line.startswith("data: "):
-                raw = line[6:].strip()
-                try:
-                    chunk = json.loads(raw)
+        try:
+            if resp.status_code != 200:
+                raise self.classify_http_error(resp.status_code, resp.text, dict(resp.headers))
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                line = line.strip()
+                if line.startswith("data: "):
+                    raw = line[6:].strip()
+                    try:
+                        chunk = json.loads(raw)
+                    except (ValueError, TypeError):
+                        continue
                     cands = chunk.get("candidates", [])
                     if cands:
                         parts = cands[0].get("content", {}).get("parts", [])
                         for p in parts:
                             if "text" in p:
                                 yield StreamChunk(delta_text=p["text"])
-                except Exception:
-                    continue
+                            if 'functionCall' in p:
+                                call = p['functionCall']
+                                args = call.get('args') or {}
+                                if not call.get('name') or not isinstance(args, dict):
+                                    raise InvalidRequestError('Invalid streamed function call', provider='gemini')
+                                yield StreamChunk(tool_calls=[ToolCall(name=call['name'], arguments=args, id=call.get('id', ''))])
+        except requests.exceptions.Timeout as error:
+            raise TimeoutError('Gemini stream timed out', provider='gemini', raw_error=error) from error
+        except requests.exceptions.ConnectionError as error:
+            raise ProviderUnavailableError('Gemini stream disconnected', provider='gemini', raw_error=error) from error
+        except requests.exceptions.RequestException as error:
+            raise ProviderUnavailableError('Gemini stream interrupted', provider='gemini', raw_error=error) from error
+        finally:
+            closer = getattr(resp, "close", None)
+            if callable(closer):
+                closer()

@@ -10,8 +10,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def _default_config_path() -> Path:
+def _text(value: Any, default: str) -> str:
+    """Return a non-empty string setting, or the default.
+
+    Owner-edited config files can hold null or a number where a string
+    belongs; passing those straight through produced a ProviderConfig with
+    base_url=123, which blew up later in .rstrip("/").
     """
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
+def _default_config_path() -> Path:
+    """Absolute path to the app's own api_keys.json.
+
     The old default was Path("config/api_keys.json") - relative to the
     CURRENT WORKING DIRECTORY. Launched from anywhere but the project root
     the registry silently found no config, registered every provider with

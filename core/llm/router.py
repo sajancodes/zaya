@@ -98,7 +98,7 @@ class LLMRouter:
             provider_name = config.name
 
             # Try retries on this provider if retryable
-            for attempt in range(self.retry_policy.max_retries + 1):
+            for attempt in range(max(0, self.retry_policy.max_retries) + 1):
                 try:
                     self.logger_fn(
                         f"[LLMRouter:{request_id}] Dispatching to {provider_name} (model={config.model}, attempt={attempt + 1})"
@@ -194,8 +194,9 @@ class LLMRouter:
         last_error = None
         for config in candidates:
             adapter = self.get_adapter(config)
+            emitted = False
             try:
-                yield from adapter.stream_chat(
+                stream = adapter.stream_chat(
                     messages=messages,
                     tools=tools,
                     temperature=temperature,
@@ -203,10 +204,18 @@ class LLMRouter:
                     timeout_sec=timeout_sec,
                     **kwargs
                 )
+                for chunk in stream:
+                    emitted = emitted or bool(chunk.delta_text or chunk.tool_calls)
+                    yield chunk
                 return
             except (RateLimitError, RecoverableError) as e:
                 self.health.record_failure(config.name, str(e))
                 self.cooldown.cool(config.name, 30.0)
+                if emitted:
+                    # The consumer has already seen part of this answer. A new
+                    # provider cannot retract it; report interruption instead
+                    # of concatenating an unrelated replacement response.
+                    raise
                 last_error = e
                 continue
             except Exception:
