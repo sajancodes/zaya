@@ -68,6 +68,10 @@ Actual limitations:
 {limits}
 
 [EXECUTION LOOP]
+For opening an existing project in VS Code, use terminal_exec action=open_project
+with its existing folder path. Desktop paths refer to the owner's desktop,
+not a Desktop subfolder under the running Zaya project. Report a launch request
+honestly; a zero exit code does not verify the opened workspace.
 Inspect, choose a tool, execute, observe, verify, and continue toward the goal.
 For every new coding request use coding_job. Give the project directory and
 the owner's actual request as task. Zaya prepares a concrete coding brief,

@@ -15,11 +15,13 @@ def ghost_overlay(parameters: dict, **_kwargs) -> ToolResult:
     force_state = True if action in ("open", "show") else (False if action in ("close", "hide") else None)
 
     state = toggle_ghost_overlay_window(force_state=force_state)
+    if state.get('status') != 'success':
+        return ToolResult('failed', state.get('message', 'The quick-command window is unavailable.'), data=state)
     vis = state.get("visible", False)
     pos = state.get("position", [0, 0])
     msg = f"Ghost Mini Overlay dock is now {'visible at cursor coordinate ' + str(pos) if vis else 'hidden'}."
 
-    return ToolResult("success", msg, data=state)
+    return ToolResult("success", msg, data=state, side_effect=True)
 
 
 TOOL = {

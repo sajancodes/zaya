@@ -30,6 +30,8 @@ class AudioPlaybackPipeline:
         viseme_tracker: Any,
         set_speaking_cb: Callable[[bool], None],
         turn_done_event: asyncio.Event | None = None,
+        pcm_visemes: Callable | None = None,
+        pcm_level: Callable | None = None,
     ):
         self.audio_in_queue = audio_in_queue
         self.ui = ui
@@ -37,6 +39,8 @@ class AudioPlaybackPipeline:
         self.viseme_tracker = viseme_tracker
         self.set_speaking = set_speaking_cb
         self.turn_done_event = turn_done_event
+        self.pcm_visemes = pcm_visemes
+        self.pcm_level = pcm_level
         self.out_latency = 0.15
         self.play_cursor = 0.0
         self.out_level = 0.0
@@ -96,10 +100,8 @@ class AudioPlaybackPipeline:
 
         last_audio = time.monotonic()
         try:
-            import sys
-            main_mod = sys.modules.get("main")
-            _pcm_visemes = getattr(main_mod, "_pcm_visemes", None)
-            _pcm_level = getattr(main_mod, "_pcm_level", None)
+            _pcm_visemes = self.pcm_visemes
+            _pcm_level = self.pcm_level
             if _pcm_level is None:
                 def _pcm_level(samples) -> float:
                     try:
@@ -134,7 +136,13 @@ class AudioPlaybackPipeline:
                 try:
                     pcm = np.frombuffer(bytes(batch), dtype=np.int16)
                     hop = _VIS_HOP / RECEIVE_SAMPLE_RATE
-                    frames = _pcm_visemes(pcm, sr=RECEIVE_SAMPLE_RATE)
+                    lvl = _pcm_level(pcm)
+                    self.out_level = lvl
+                    # Echo protection must not depend on optional animation or
+                    # the entry point's module name (main versus __main__).
+                    if self.echo_guard:
+                        self.echo_guard.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
+                    frames = _pcm_visemes(pcm, sr=RECEIVE_SAMPLE_RATE) if _pcm_visemes else []
 
                     now = time.time()
                     horizon = self.out_latency + _CURSOR_SLACK
@@ -147,14 +155,9 @@ class AudioPlaybackPipeline:
                         frames = self.viseme_tracker.frames(frames, hop)
                         self.ui.push_visemes(frames, hop, at)
                         self.out_level = max(f[0] for f in frames)
-                        if self.echo_guard:
-                            self.echo_guard.note_output(pcm, RECEIVE_SAMPLE_RATE, self.out_level)
                     else:
-                        lvl = _pcm_level(pcm)
                         self.ui.set_audio_level(lvl)
                         self.out_level = lvl
-                        if self.echo_guard:
-                            self.echo_guard.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
                 except Exception:
                     pass
 

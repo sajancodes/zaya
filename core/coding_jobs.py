@@ -267,6 +267,12 @@ class CodingJobs:
         narrator, tally = Narrator(Path(job.project).name), Tally()
         try:
             brief = self._supervisor.prepare(job.goal, job.project)
+            from core.coding_artifacts import requested_formats, verify_artifacts
+            expected_formats = requested_formats(job.goal)
+            artifact_requirements = []
+            for extension in expected_formats:
+                brief.requirements.append(f'Deliver a valid .{extension} file in this project; another format is not a substitute.')
+                artifact_requirements.append(len(brief.requirements))
             if self._stop.is_set():
                 return
             job.requirements, job.checks = brief.requirements, brief.checks
@@ -294,6 +300,11 @@ class CodingJobs:
                 self.runtime.transition(job.runtime_id, 'verifying', active_step=f'review pass {number}')
                 self._save()
                 review = self._supervisor.review(job.goal, brief, job.response, job.observations)
+                if review.get('decision') == 'complete' and expected_formats:
+                    missing = verify_artifacts(job.project, expected_formats, job.created_at)
+                    if missing:
+                        review = {'decision': 'continue', 'requirements': [
+                            artifact_requirements[expected_formats.index(ext)] for ext in missing], 'checks': []}
                 if self._stop.is_set():
                     break
                 job.review = review.get('decision', 'blocked')

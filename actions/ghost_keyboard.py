@@ -38,64 +38,99 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 
 
-def _press_key_code(vk: int) -> None:
-    if sys.platform == "win32":
-        try:
-            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-        except Exception:
-            pass
+from ctypes import wintypes
 
 
-def _release_key_code(vk: int) -> None:
-    if sys.platform == "win32":
-        try:
-            ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-        except Exception:
-            pass
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
+                ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG), ('mouseData', wintypes.DWORD),
+                ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [('uMsg', wintypes.DWORD), ('wParamL', wintypes.WORD), ('wParamH', wintypes.WORD)]
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [('ki', KEYBDINPUT), ('mi', MOUSEINPUT), ('hi', HARDWAREINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _anonymous_ = ('data',)
+    _fields_ = [('type', wintypes.DWORD), ('data', _INPUT_UNION)]
+
+
+VK_CODES.update({'delete': 0x2E, 'left': 0x25, 'up': 0x26, 'right': 0x27,
+                 'down': 0x28, 'home': 0x24, 'end': 0x23, 'pageup': 0x21, 'pagedown': 0x22})
+VK_CODES.update({f'f{i}': 0x6F + i for i in range(1, 25)})
+
+
+def _send_input(vk=0, scan=0, flags=0) -> bool:
+    if sys.platform != 'win32':
+        return False
+    event = INPUT(type=1, ki=KEYBDINPUT(vk, scan, flags, 0, 0))
+    send = ctypes.windll.user32.SendInput
+    send.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    send.restype = wintypes.UINT
+    return send(1, ctypes.byref(event), ctypes.sizeof(INPUT)) == 1
+
+
+def _press_key_code(vk: int) -> bool:
+    return _send_input(vk=vk)
+
+
+def _release_key_code(vk: int) -> bool:
+    return _send_input(vk=vk, flags=KEYEVENTF_KEYUP)
 
 
 def send_hotkey(hotkey_str: str) -> bool:
-    """Simulates a hotkey combination like 'ctrl+alt+space' or 'ctrl+shift+i'."""
-    parts = [p.strip().lower() for p in hotkey_str.split("+")]
-    vk_list = []
-    for p in parts:
-        vk = VK_CODES.get(p)
-        if vk is None and len(p) == 1:
-            vk = ord(p.upper())
-        if vk:
-            vk_list.append(vk)
-
-    if not vk_list:
-        return False
-
-    # Press down in order
-    for vk in vk_list:
-        _press_key_code(vk)
-        time.sleep(0.01)
-
-    # Release in reverse order
-    for vk in reversed(vk_list):
-        _release_key_code(vk)
-        time.sleep(0.01)
-
-    return True
+    parts = [p.strip().lower() for p in hotkey_str.split('+')]
+    keys = []
+    for part in parts:
+        vk = VK_CODES.get(part)
+        if vk is None and len(part) == 1 and part.isascii() and part.isalnum():
+            vk = ord(part.upper())
+        if vk is None:
+            return False
+        keys.append(vk)
+    pressed = []
+    ok = True
+    try:
+        for vk in keys:
+            if not _press_key_code(vk):
+                ok = False
+                break
+            pressed.append(vk)
+    except (OSError, AttributeError):
+        ok = False
+    finally:
+        for vk in reversed(pressed):
+            try:
+                ok = _release_key_code(vk) and ok
+            except (OSError, AttributeError):
+                ok = False
+    return bool(keys) and ok
 
 
 def inject_text(text: str, delay_ms: int = 10) -> bool:
-    """Types unicode characters into the active window using Win32 keybd_event."""
-    if sys.platform != "win32":
+    if sys.platform != 'win32':
         return False
-
     try:
-        user32 = ctypes.windll.user32
-        for ch in text:
-            code = ord(ch)
-            user32.keybd_event(0, code, KEYEVENTF_UNICODE, 0)
-            user32.keybd_event(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0)
+        raw = text.encode('utf-16-le', errors='surrogatepass')
+        for offset in range(0, len(raw), 2):
+            unit = int.from_bytes(raw[offset:offset + 2], 'little')
+            down = _send_input(scan=unit, flags=KEYEVENTF_UNICODE)
+            up = _send_input(scan=unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+            if not (down and up):
+                return False
             if delay_ms > 0:
-                time.sleep(delay_ms / 1000.0)
+                time.sleep(min(delay_ms, 1000) / 1000)
         return True
-    except Exception:
+    except (OSError, AttributeError, UnicodeError):
         return False
 
 
@@ -104,18 +139,18 @@ def ghost_keyboard(parameters: dict, **_kwargs) -> ToolResult:
     require_owner()
     text = str(parameters.get("text") or "")
     hotkey = str(parameters.get("hotkey") or "").strip()
-    delay_ms = int(parameters.get("delay_ms") or 10)
+    delay_ms = max(0, min(1000, int(parameters.get("delay_ms", 10))))
 
     if hotkey:
         ok = send_hotkey(hotkey)
         if ok:
-            return ToolResult("success", f"Injected hotkey: {hotkey}", data={"hotkey": hotkey})
+            return ToolResult("success", f"Injected hotkey: {hotkey}", data={"hotkey": hotkey}, side_effect=True)
         return ToolResult("failed", f"Could not parse hotkey: {hotkey}")
 
     if text:
         ok = inject_text(text, delay_ms=delay_ms)
         if ok:
-            return ToolResult("success", f"Typed {len(text)} characters into active window.", data={"length": len(text)})
+            return ToolResult("success", f"Typed {len(text)} characters into active window.", data={"length": len(text)}, side_effect=True)
         return ToolResult("failed", "Ghost typing injection failed on this OS platform.")
 
     return ToolResult("failed", "No text or hotkey provided.")

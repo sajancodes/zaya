@@ -105,10 +105,9 @@ def compact_tool_schema(decl: dict[str, Any], max_desc_len: int = 200, max_param
     d = copy.deepcopy(decl)
     if "description" in d:
         desc = _compact_text(str(d["description"]))
-        sentences = re.split(r"(?<=[.!?])\s+", desc)
-        if len(sentences) > 2:
-            desc = " ".join(sentences[:2])
-        d["description"] = desc[:max_desc_len]
+        # Whitespace is redundant; behavioral constraints are not. Keep complete
+        # sentences and all selection/evidence rules instead of slicing prose.
+        d["description"] = desc
 
     params = d.get("parameters")
     if isinstance(params, dict):
@@ -117,10 +116,7 @@ def compact_tool_schema(decl: dict[str, Any], max_desc_len: int = 200, max_param
             for p_name, p_val in props.items():
                 if isinstance(p_val, dict) and "description" in p_val:
                     p_desc = _compact_text(str(p_val["description"]))
-                    p_sentences = re.split(r"(?<=[.!?])\s+", p_desc)
-                    if len(p_sentences) > 2:
-                        p_desc = " ".join(p_sentences[:2])
-                    p_val["description"] = p_desc[:max_param_len]
+                    p_val["description"] = p_desc
 
     return d
 

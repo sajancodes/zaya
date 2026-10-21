@@ -67,11 +67,20 @@ def generate_custom_theme_css(theme_name: str) -> str:
 def inject_css_into_browser(css_content: str, script_content: Optional[str] = None) -> Dict[str, Any]:
     """Attempts to inject style and script into active browser session via browser_control."""
     try:
-        from actions.browser_control import _sessions
-        if _sessions:
-            for session in _sessions.values():
+        from actions.browser_control import _registry
+        with _registry._lock:
+            sessions = list(_registry._sessions.values())
+            active = _registry._active_browser
+        if sessions:
+            sessions.sort(key=lambda session: getattr(session, 'browser_name', '') != active)
+            for session in sessions:
                 if getattr(session, "_page", None):
-                    async def _inject():
+                    # Bind the session now: a closure over the loop variable
+                    # would read whatever the loop ended on if the coroutine
+                    # were ever started later.
+                    target = session
+
+                    async def _inject(session=target):
                         if css_content:
                             await session._page.add_style_tag(content=css_content)
                         if script_content:

@@ -492,9 +492,6 @@ class JarvisLive:
         try:
             self._conversation = ConversationStore()
             previous = self._conversation.has_history()
-            state = self._conversation.state()
-            self._operator_scope = state.get('operator_scope', self._operator_scope)
-            self._operator_goal = state.get('operator_goal', '')
             if previous:
                 self.ui.write_log('SYS: Previous conversation saved in History. Ask what we were doing to recall the last five messages.')
         except (OSError, sqlite3.Error):
@@ -783,6 +780,8 @@ class JarvisLive:
         self._shutdown_requested = True
         from core.coding_jobs import close_jobs
         close_jobs()
+        from actions.port_tunnel import stop_all_tunnels
+        stop_all_tunnels()
         self._audio_ducker.close()
         task = getattr(self, '_run_task', None)
         if task and self._loop and not self._loop.is_closed():
@@ -1086,8 +1085,8 @@ class JarvisLive:
         import uuid
         from core.audit import redact
         from core.execution_policy import set_trust, TRUST_LOCAL_OWNER
-        self._operator_scope = str(scope) or uuid.uuid4().hex
-        self._operator_goal = str(redact(text))[:300]
+        self._operator_scope = str(scope).strip() if scope is not None and str(scope).strip() else uuid.uuid4().hex
+        self._operator_goal = str(redact(text))
         self._operator_trust = trust or TRUST_LOCAL_OWNER
         set_trust(self._operator_trust)
         store = getattr(self, '_conversation', None)
@@ -1139,6 +1138,9 @@ class JarvisLive:
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
         response.response["result"] = result.to_dict()
+        # An individual tool can be only an inspection step in a larger goal.
+        # Leave the originating remote request acknowledged until a scoped
+        # whole-goal completion exists; a tool receipt must not claim it is done.
         if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
                 or (fc.name == 'coding_job' and dict(fc.args or {}).get('action') in {'start', 'continue'})
                 or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
@@ -1267,6 +1269,8 @@ class JarvisLive:
                     await asyncio.sleep(1.5)
                     from core.coding_jobs import close_jobs
                     await asyncio.to_thread(close_jobs)
+                    from actions.port_tunnel import stop_all_tunnels
+                    await asyncio.to_thread(stop_all_tunnels)
                     import os as _os
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
@@ -1808,6 +1812,7 @@ class JarvisLive:
         print("[Zaya] 👂 Recv started")
         out_buf, in_buf = [], []
         input_row = None
+        input_scope = None
         canceled, seen_calls = set(), set()
 
         try:
@@ -1900,8 +1905,10 @@ class JarvisLive:
                                                                    TRUST_AUTHENTICATED_REMOTE_OWNER)
                                 self._begin_owner_goal(
                                     " ".join(in_buf),
+                                    scope=input_scope,
                                     trust=(TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
                                            else TRUST_LOCAL_OWNER))
+                                input_scope = self._operator_scope
                                 self._last_user_speech = time.monotonic()
 
                         if getattr(sc, 'generation_complete', False) or getattr(sc, 'waiting_for_input', False):
@@ -1921,6 +1928,7 @@ class JarvisLive:
                                 self._interrupted = False
                                 in_buf  = []
                                 input_row = None
+                                input_scope = None
                                 out_buf = []
                                 self._visemes.reset()
                                 continue
@@ -1938,6 +1946,7 @@ class JarvisLive:
                                     }))
                             in_buf = []
                             input_row = None
+                            input_scope = None
 
                             full_out = " ".join(out_buf).strip()
                             # Second line of defence: even if a repeat slips
@@ -1961,13 +1970,9 @@ class JarvisLive:
                                     }))
                             out_buf = []
 
-                            # A remote command has now been answered: move its
-                            # request from 'acknowledged' to 'completed' so the
-                            # phone can stop waiting (and stop resending).
-                            pending_remote = getattr(self, '_pending_remote', None)
-                            if pending_remote:
-                                from core.remote_commands import get_gate
-                                get_gate().complete(pending_remote.popleft(), ok=True)
+                            # Spoken turn completion is not evidence that a
+                            # particular remote action completed. Keep its
+                            # acknowledgement instead of inventing completion.
 
                             if self._vision_close_pending:
                                 # This turn_complete IS the vision answer — close camera + release busy flag
@@ -2009,6 +2014,8 @@ class JarvisLive:
             viseme_tracker=self._visemes,
             set_speaking_cb=self.set_speaking,
             turn_done_event=self._turn_done_event,
+            pcm_visemes=_pcm_visemes,
+            pcm_level=_pcm_level,
         )
         self._audio_pipeline = pipeline
         await pipeline.run()
@@ -2052,21 +2059,8 @@ class JarvisLive:
                        if lang else "")
         name_clause = f" Address the user as {name}." if name else ""
 
-        # Inject last session context if available — pop removes it so it's never repeated
-        last = await asyncio.to_thread(pop_last_session)
-        session_clause = ""
-        if last:
-            try:
-                _delta = (datetime.now() - datetime.strptime(last["date"], "%Y-%m-%d")).days
-                _when  = "earlier today" if _delta == 0 else ("yesterday" if _delta == 1 else f"{_delta} days ago")
-            except Exception:
-                _when = "last time"
-            session_clause = (
-                f" Also briefly and naturally mention that {_when}: {last['summary']}"
-            )
-
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
+            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now. "
             f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
         )
 
@@ -2447,7 +2441,6 @@ class JarvisLive:
                 from core.event_bus import bus
                 bus.publish('owner.message', text=text, source=item.get('source', 'remote'))
                 get_gate().acknowledge(request_id)
-                self._pending_remote.append(request_id)
                 await self._send_owner_text(text)
             except Exception as e:
                 print(f"[Dashboard] Command error: {e}")

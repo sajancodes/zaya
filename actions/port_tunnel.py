@@ -7,6 +7,7 @@ Supports Cloudflare Tunnels (cloudflared), Bore, and LocalTunnel.
 from __future__ import annotations
 
 import re
+import atexit
 import shutil
 import subprocess
 import threading
@@ -19,110 +20,98 @@ from core.tool_result import ToolResult
 _active_tunnels: Dict[int, Dict[str, Any]] = {}
 
 
-def start_tunnel_process(port: int, provider: str = "cloudflared") -> Dict[str, Any]:
-    """Starts a public tunnel for the given localhost port."""
-    if port in _active_tunnels:
-        existing = _active_tunnels[port]
-        return {
-            "status": "success",
-            "port": port,
-            "tunnel_url": existing.get("url", "unknown"),
-            "provider": existing.get("provider", "unknown"),
-            "message": f"Wormhole tunnel already active on port {port}."
-        }
+_tunnel_lock = threading.RLock()
 
-    provider = provider.lower()
-    cf_bin = shutil.which("cloudflared")
-    bore_bin = shutil.which("bore")
 
-    cmd = None
-    chosen_provider = provider
-
-    if (provider == "cloudflared" or provider == "auto") and cf_bin:
-        cmd = [cf_bin, "tunnel", "--url", f"http://localhost:{port}"]
-        chosen_provider = "cloudflared"
-    elif (provider == "bore" or provider == "auto") and bore_bin:
-        cmd = [bore_bin, "local", str(port), "--to", "bore.pub"]
-        chosen_provider = "bore"
-    elif shutil.which("npx"):
-        cmd = ["npx", "-y", "localtunnel", "--port", str(port)]
-        chosen_provider = "localtunnel"
-    else:
-        return {
-            "status": "error",
-            "port": port,
-            "message": "No tunneling utility (cloudflared, bore, or npx localtunnel) is available in PATH."
-        }
-
+def _terminate(proc):
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
-    except Exception as e:
-        return {"status": "error", "port": port, "message": f"Failed to start tunnel process: {e}"}
+        if proc.poll() is None:
+            proc.terminate()
+        proc.wait(timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
-    tunnel_url = None
-    start_time = time.time()
 
-    def _read_output():
-        nonlocal tunnel_url
-        pipe = proc.stderr if chosen_provider == "cloudflared" else proc.stdout
-        if pipe:
-            for line in pipe:
-                if not tunnel_url:
-                    m = re.search(r"https://[a-zA-Z0-9-]+\.(trycloudflare\.com|loca\.lt)", line)
-                    if m:
-                        tunnel_url = m.group(0)
-                    elif "bore.pub" in line:
-                        m2 = re.search(r"bore\.pub:\d+", line)
-                        if m2:
-                            tunnel_url = f"http://{m2.group(0)}"
-
-    reader = threading.Thread(target=_read_output, daemon=True)
-    reader.start()
-
-    # Wait up to 6 seconds for tunnel URL
-    while time.time() - start_time < 6.0:
-        if tunnel_url:
+def start_tunnel_process(port: int, provider: str = 'cloudflared') -> Dict[str, Any]:
+    if not 1 <= port <= 65535:
+        return {'status': 'error', 'message': 'Port must be between 1 and 65535.'}
+    with _tunnel_lock:
+        existing = _active_tunnels.get(port)
+        if existing and existing['proc'].poll() is None:
+            return {'status': 'success', 'port': port, 'tunnel_url': existing['url'],
+                    'provider': existing['provider'], 'message': f'Tunnel is running at {existing["url"]}.'}
+        _active_tunnels.pop(port, None)
+        selected = None
+        cmd = None
+        for name in ('cloudflared', 'bore', 'localtunnel'):
+            if provider not in {'auto', name}:
+                continue
+            binary = shutil.which('npx' if name == 'localtunnel' else name)
+            if not binary:
+                continue
+            selected = name
+            cmd = ([binary, 'tunnel', '--url', f'http://localhost:{port}'] if name == 'cloudflared'
+                   else [binary, 'local', str(port), '--to', 'bore.pub'] if name == 'bore'
+                   else [binary, '-y', 'localtunnel', '--port', str(port)])
             break
-        time.sleep(0.2)
+        if cmd is None:
+            return {'status': 'error', 'message': f'No installed utility for requested provider {provider}.'}
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        except OSError as error:
+            return {'status': 'error', 'message': f'Tunnel process could not start: {error}'}
+        ready = threading.Event()
+        found = []
 
-    final_url = tunnel_url or f"https://zaya-tunnel-port-{port}.local"
-    _active_tunnels[port] = {
-        "proc": proc,
-        "url": final_url,
-        "provider": chosen_provider,
-        "created_at": time.time()
-    }
-
-    return {
-        "status": "success",
-        "port": port,
-        "tunnel_url": final_url,
-        "provider": chosen_provider,
-        "message": f"Wormhole active: Localhost port {port} exposed at {final_url}"
-    }
+        def read_output(pipe):
+            try:
+                for line in pipe:
+                    match = re.search(r'https://[a-zA-Z0-9-]+\.(?:trycloudflare\.com|loca\.lt)', line)
+                    if match:
+                        found.append(match.group(0))
+                        ready.set()
+                    elif selected == 'bore':
+                        match = re.search(r'bore\.pub:\d+', line)
+                        if match:
+                            found.append('http://' + match.group(0))
+                            ready.set()
+            finally:
+                pipe.close()
+        for pipe in (proc.stdout, proc.stderr):
+            threading.Thread(target=read_output, args=(pipe,), daemon=True).start()
+        ready.wait(6)
+        if not found or proc.poll() is not None:
+            _terminate(proc)
+            return {'status': 'error', 'port': port,
+                    'message': 'Tunnel startup failed or no public URL was reported. No active tunnel was retained.'}
+        url = found[0]
+        _active_tunnels[port] = {'proc': proc, 'url': url, 'provider': selected, 'created_at': time.time()}
+        return {'status': 'success', 'port': port, 'tunnel_url': url, 'provider': selected,
+                'message': f'Tunnel process is running and reported {url}; public reachability was not independently tested.'}
 
 
 def stop_tunnel_process(port: int) -> Dict[str, Any]:
-    """Stops the active tunnel on the given port."""
-    if port not in _active_tunnels:
-        return {"status": "error", "message": f"No active wormhole tunnel found on port {port}."}
+    with _tunnel_lock:
+        tunnel = _active_tunnels.pop(port, None)
+        if tunnel is None:
+            return {'status': 'error', 'message': f'No active tunnel on port {port}.'}
+        _terminate(tunnel['proc'])
+        if tunnel['proc'].poll() is None:
+            _active_tunnels[port] = tunnel
+            return {'status': 'error', 'message': 'Tunnel termination could not be confirmed.'}
+        return {'status': 'success', 'message': f'Tunnel on port {port} stopped.'}
 
-    tunnel = _active_tunnels.pop(port)
-    proc: Optional[subprocess.Popen] = tunnel.get("proc")
-    if proc:
-        try:
-            proc.terminate()
-            proc.kill()
-        except Exception:
-            pass
 
-    return {"status": "success", "message": f"Closed wormhole tunnel on port {port}."}
+def stop_all_tunnels():
+    for port in list(_active_tunnels):
+        stop_tunnel_process(port)
+
+
+atexit.register(stop_all_tunnels)
 
 
 def deploy_wormhole(parameters: dict, **_kwargs) -> ToolResult:
@@ -147,7 +136,7 @@ def deploy_wormhole(parameters: dict, **_kwargs) -> ToolResult:
     elif action in {"status", "list"}:
         tunnels = {
             p: {"url": v.get("url"), "provider": v.get("provider")}
-            for p, v in _active_tunnels.items()
+            for p, v in list(_active_tunnels.items()) if v["proc"].poll() is None
         }
         msg = f"Active tunnels: {len(tunnels)}" if tunnels else "No active port tunnels."
         return ToolResult("success", msg, data={"active_tunnels": tunnels, "count": len(tunnels)})

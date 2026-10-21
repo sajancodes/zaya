@@ -2976,6 +2976,7 @@ class MainWindow(QMainWindow):
     _state_sig      = pyqtSignal(str)
     _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
+    _display_request_sig = pyqtSignal(object)
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
     _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
@@ -3267,6 +3268,7 @@ class MainWindow(QMainWindow):
         self._archive_history_sig.connect(self._show_saved_history)
         self._state_sig.connect(self._apply_state)
         self._content_sig.connect(self._show_content)
+        self._display_request_sig.connect(self._apply_display_request)
         self._reconfig_sig.connect(self._show_setup)
         self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
@@ -4687,6 +4689,25 @@ class MainWindow(QMainWindow):
 
         return w
 
+    def _apply_display_request(self, packet):
+        try:
+            if packet.get('cancelled'):
+                return
+            action = packet.get('action', 'show')
+            if action == 'show':
+                self._show_content(packet['title'], packet['text'])
+            elif action == 'clear':
+                self._content_display.clear()
+            elif action == 'close':
+                self._content_panel.hide()
+                if getattr(self, '_desktop_mode', False):
+                    self._results_window.hide()
+            packet['ok'] = True
+        except Exception as error:
+            packet['error'] = str(error)
+        finally:
+            packet['done'].set()
+
     def _show_content(self, title: str, text: str):
         if getattr(self, '_desktop_mode', False):
             self._results_window.show()
@@ -5855,6 +5876,10 @@ class JarvisUI:
         self._app.setStyle("Fusion")
         self._win = MainWindow(face_path)
         self._win.configure_desktop_interface()
+        from core.ghost_overlay import install_ghost_overlay
+        self._ghost_overlay = install_ghost_overlay(
+            lambda text: self._win.on_text_command(text) if self._win.on_text_command else None,
+            parent=self._win)
         self.root = _RootShim(self._app)
         self._bar = None
         self.on_companion_reaction = None
@@ -6083,9 +6108,29 @@ class JarvisUI:
         """Read configuration readiness without inspecting Qt widget state."""
         return self._win._ready_event.is_set()
 
-    def show_content(self, title: str, text: str):
-        """Thread-safe: display content in the panel below the HUD."""
-        self._win._content_sig.emit(title[:48], text[:4000])
+    def _display_request(self, action, **values):
+        from PyQt6.QtCore import QThread
+        packet = dict(values, action=action, done=threading.Event())
+        if QThread.currentThread() == self._win.thread():
+            self._win._apply_display_request(packet)
+        else:
+            self._win._display_request_sig.emit(packet)
+            if not packet['done'].wait(3):
+                packet['cancelled'] = True
+                raise TimeoutError('The display did not acknowledge this request.')
+        if not packet.get('ok'):
+            raise RuntimeError(packet.get('error', 'Display request failed.'))
+        return True
+
+    def show_content(self, title: str, text: str, format='text'):
+        """Render on the Qt thread and acknowledge actual display delivery."""
+        return self._display_request('show', title=str(title)[:48], text=str(text))
+
+    def clear_content(self):
+        return self._display_request('clear')
+
+    def close_content(self):
+        return self._display_request('close')
 
     def show_quiz(self, topic: str, questions, grade=None) -> None:
         """Thread-safe: put an interactive quiz on the board.

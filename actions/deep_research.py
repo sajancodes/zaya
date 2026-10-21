@@ -6,6 +6,7 @@ deduplication, relevance ranking, fact synthesis, and knowledge store integratio
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import sys
@@ -29,7 +30,15 @@ def get_base_dir() -> Path:
 
 
 def search_web_sources(query: str, max_results: int = 5) -> List[Dict[str, str]]:
-    """Executes web search and returns normalized sources."""
+    """Executes web search and returns normalized sources.
+
+    Returns an EMPTY list when the backend is unavailable. It never invents a
+    placeholder citation: the old fallback appended a "Intelligence Summary"
+    row whose snippet was a generic sentence and whose URL was a search
+    redirect, and the report then presented it as one of N "verified
+    reference points". A report that admits it found nothing is worth more
+    than one that quietly makes things up.
+    """
     results = []
     # 1. Try DuckDuckGo HTML search
     try:
@@ -40,25 +49,25 @@ def search_web_sources(query: str, max_results: int = 5) -> List[Dict[str, str]]
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(resp.text, "html.parser")
             for a in soup.select(".result__snippet")[:max_results]:
-                parent = a.find_parent(".result")
+                parent = a.find_parent(class_="result")
                 title_elem = parent.select_one(".result__title") if parent else None
                 url_elem = parent.select_one(".result__url") if parent else None
                 title = title_elem.get_text(strip=True) if title_elem else "Search Result"
-                raw_url = url_elem.get_text(strip=True) if url_elem else "https://duckduckgo.com"
-                if not raw_url.startswith("http"):
+                link_elem = parent.select_one('a.result__a') if parent else None
+                raw_url = (link_elem.get('href', '') if link_elem else
+                           (url_elem.get('href', '') if url_elem else ''))
+                if raw_url.startswith('//'):
+                    raw_url = 'https:' + raw_url
+                if 'duckduckgo.com/l/' in raw_url:
+                    raw_url = urllib.parse.parse_qs(urllib.parse.urlsplit(raw_url).query).get('uddg', [''])[0]
+                if raw_url and not raw_url.startswith("http"):
                     raw_url = f"https://{raw_url}"
+                if not raw_url or urllib.parse.urlsplit(raw_url).scheme not in {'http', 'https'}:
+                    continue
                 snippet = a.get_text(strip=True)
                 results.append({"title": title, "url": raw_url, "snippet": snippet})
     except Exception as e:
         logger.debug(f"DuckDuckGo search error: {e}")
-
-    # Fallback to local intelligence placeholder if network or rate-limited
-    if not results:
-        results.append({
-            "title": f"Intelligence Summary: {query}",
-            "url": f"https://search.brave.com/search?q={urllib.parse.quote(query)}",
-            "snippet": f"Key specifications, documentation, and technical consensus for {query}."
-        })
 
     return results
 
@@ -95,6 +104,26 @@ def synthesize_research_report(topic: str, sources: List[Dict[str, str]]) -> str
     citations = []
     findings = []
 
+    if not sources:
+        # Say plainly that nothing was retrieved rather than dressing an
+        # empty run up as a summary.
+        return f"""# Autonomous Deep Research Report: {topic}
+
+## Executive Summary
+No web sources could be retrieved for **{topic}** during this run. The search
+backend was unavailable, rate-limited, or blocked, so no claims are made.
+
+## Key Findings & Data
+- No source claims were retrieved, so no findings are reported.
+
+## Verification & Source Citations
+| Source Title | Link |
+| :--- | :--- |
+| _No sources retrieved_ | — |
+
+*Generated autonomously by Zaya Research Engine on {time.strftime('%Y-%m-%d %H:%M:%S')}.*
+"""
+
     for i, s in enumerate(sources, 1):
         title = s.get("title", f"Source {i}")
         snippet = s.get("snippet", "")
@@ -108,7 +137,7 @@ def synthesize_research_report(topic: str, sources: List[Dict[str, str]]) -> str
     return f"""# Autonomous Deep Research Report: {topic}
 
 ## Executive Summary
-Comprehensive intelligence compilation on **{topic}**. Information synthesized across {len(sources)} verified reference points.
+Compilation on **{topic}**, assembled from {len(sources)} retrieved source reference points.
 
 ## Key Findings & Data
 {findings_text}
@@ -128,8 +157,13 @@ def save_to_knowledge_base(topic: str, sources: List[Dict[str, str]]) -> int:
     try:
         from memory.knowledge_store import get_knowledge_store
         ks = get_knowledge_store()
+        # The knowledge store keys on (category, key) and overwrites on
+        # conflict, so a truncated topic alone made two different research
+        # runs clobber each other. A short digest of the full topic keeps
+        # them apart.
+        digest = hashlib.sha1(topic.encode("utf-8")).hexdigest()[:8]
         for i, s in enumerate(sources[:5]):
-            key = f"{topic[:30]}_ref_{i+1}".replace(" ", "_").lower()
+            key = f"{topic[:30]}_{digest}_ref_{i+1}".replace(" ", "_").lower()
             val = f"{s.get('title', '')}: {s.get('snippet', '')} (Source: {s.get('url', '')})"
             ks.set_fact(
                 category="research",
@@ -161,7 +195,7 @@ def run_deep_research_cycle(
 
     all_sources = []
     # Bounded iteration loop
-    for i, q in enumerate(sub_queries[:max_iterations]):
+    for q in sub_queries[:max_iterations]:
         collected = search_web_sources(q, max_results=4)
         all_sources.extend(collected)
 
@@ -205,10 +239,27 @@ def deep_research(parameters: dict, **_kwargs) -> str:
 
     res = run_deep_research_cycle(topic, depth=depth, save_knowledge=save_knowledge)
 
+    if res["source_count"] == 0:
+        # No sources were retrieved. Report that honestly instead of
+        # claiming a completed research cycle over invented citations.
+        return json.dumps({
+            "status": "partial",
+            "topic": res["topic"],
+            "saved_path": res["saved_path"],
+            "summary": (
+                f"Deep research could not retrieve any web sources for '{topic}' "
+                f"(search backend unavailable or blocked). A report recording that "
+                f"was written to {res['saved_path']}."
+            ),
+            "source_count": 0,
+            "report": res["report"]
+        }, indent=2)
+
     return json.dumps({
         "status": "success",
         "topic": res["topic"],
         "saved_path": res["saved_path"],
+        "source_count": res["source_count"],
         "summary": f"Deep research completed: {res['source_count']} sources cited, {res['saved_facts']} facts saved to memory. Report written to {res['saved_path']}",
         "report": res["report"]
     }, indent=2)

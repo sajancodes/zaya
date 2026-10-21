@@ -138,17 +138,21 @@ def screen_peeler(parameters: dict, **_kwargs) -> ToolResult:
             data={"extracted_text": ""}
         )
 
+    copied = False
     if _PYPERCLIP:
         try:
             pyperclip.copy(extracted)
+            copied = True
         except Exception:
             pass
 
     preview = extracted[:150] + ("..." if len(extracted) > 150 else "")
     return ToolResult(
-        "success",
-        f"ScreenPeeler extracted {len(extracted)} characters to clipboard: {preview}",
-        data={"extracted_text": extracted, "length": len(extracted)}
+        "success" if copied else "partial",
+        (f"ScreenPeeler copied {len(extracted)} characters to the clipboard: {preview}" if copied else
+         f"ScreenPeeler extracted {len(extracted)} characters, but could not update the clipboard: {preview}"),
+        data={"extracted_text": extracted, "length": len(extracted), "copied_to_clipboard": copied},
+        side_effect=copied
     )
 
 

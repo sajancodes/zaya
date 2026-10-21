@@ -1,46 +1,92 @@
-"""Ghost Mini Overlay Dock for quick-access interactions.
-Created and developed by Sajan Rai for Zaya.
-"""
+"""A real Qt quick-command window, controlled through queued GUI requests."""
 from __future__ import annotations
 
-import ctypes
-from typing import Any, Dict, Tuple
+import threading
+
+_bridge = None
 
 
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+def install_ghost_overlay(command_callback, parent=None):
+    """Call once on the Qt GUI thread; callback accepts owner-entered text."""
+    global _bridge
+    from PyQt6.QtCore import QObject, pyqtSignal as Signal, pyqtSlot as Slot, QThread, Qt
+    from PyQt6.QtGui import QCursor
+    from PyQt6.QtWidgets import QApplication, QFrame, QVBoxLayout, QLabel, QLineEdit, QPushButton
+
+    app = QApplication.instance()
+    if app is None or QThread.currentThread() != app.thread():
+        raise RuntimeError('Install the quick-command overlay on the application GUI thread.')
+    if _bridge is not None:
+        return _bridge
+
+    class OverlayBridge(QObject):
+        requested = Signal(object)
+
+        def __init__(self):
+            super().__init__(parent)
+            self.window = QFrame(parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+            self.window.setWindowTitle('Zaya quick command')
+            self.window.resize(340, 140)
+            layout = QVBoxLayout(self.window)
+            layout.addWidget(QLabel('Zaya — at your service', self.window))
+            self.entry = QLineEdit(self.window)
+            self.entry.setPlaceholderText('What would you like me to do?')
+            layout.addWidget(self.entry)
+            send = QPushButton('Send', self.window)
+            layout.addWidget(send)
+            send.clicked.connect(self.submit)
+            self.entry.returnPressed.connect(self.submit)
+            self.requested.connect(self.apply)
+
+        @Slot()
+        def submit(self):
+            text = self.entry.text().strip()
+            if text:
+                command_callback(text)
+                self.entry.clear()
+
+        @Slot(object)
+        def apply(self, packet):
+            try:
+                if packet.get('cancelled'):
+                    return
+                desired = packet['force_state']
+                visible = not self.window.isVisible() if desired is None else desired
+                if visible:
+                    point = QCursor.pos()
+                    screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+                    if screen:
+                        rect = screen.availableGeometry()
+                        point.setX(max(rect.left(), min(point.x(), rect.right() - self.window.width() + 1)))
+                        point.setY(max(rect.top(), min(point.y(), rect.bottom() - self.window.height() + 1)))
+                    self.window.move(point)
+                    self.window.show()
+                    self.window.raise_()
+                    self.window.activateWindow()
+                    self.entry.setFocus()
+                else:
+                    self.window.hide()
+                packet['result'] = {'status': 'success', 'visible': self.window.isVisible(),
+                                    'position': [self.window.x(), self.window.y()]}
+            except Exception as error:
+                packet['result'] = {'status': 'error', 'message': str(error), 'visible': False}
+            finally:
+                packet['done'].set()
+
+    _bridge = OverlayBridge()
+    return _bridge
 
 
-_overlay_state = {
-    "visible": False,
-    "position": [0, 0]
-}
-
-
-def get_cursor_pos() -> Tuple[int, int]:
-    """Returns (x, y) coordinates of the mouse cursor."""
-    try:
-        pt = POINT()
-        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-        return int(pt.x), int(pt.y)
-    except Exception:
-        return (500, 300)
-
-
-def toggle_ghost_overlay_window(force_state: bool | None = None) -> Dict[str, Any]:
-    """Toggles or sets the mini ghost overlay window visibility."""
-    global _overlay_state
-    if force_state is not None:
-        _overlay_state["visible"] = force_state
+def toggle_ghost_overlay_window(force_state=None):
+    if _bridge is None:
+        return {'status': 'error', 'visible': False, 'message': 'The Zaya quick-command window is not initialized.'}
+    from PyQt6.QtCore import QThread
+    packet = {'force_state': force_state, 'done': threading.Event()}
+    if QThread.currentThread() == _bridge.thread():
+        _bridge.apply(packet)
     else:
-        _overlay_state["visible"] = not _overlay_state["visible"]
-
-    if _overlay_state["visible"]:
-        x, y = get_cursor_pos()
-        _overlay_state["position"] = [x, y]
-
-    return {
-        "status": "success",
-        "visible": _overlay_state["visible"],
-        "position": _overlay_state["position"]
-    }
+        _bridge.requested.emit(packet)
+        if not packet['done'].wait(3):
+            packet['cancelled'] = True
+            return {'status': 'error', 'visible': False, 'message': 'The quick-command window did not acknowledge the request.'}
+    return packet.get('result', {'status': 'error', 'visible': False})

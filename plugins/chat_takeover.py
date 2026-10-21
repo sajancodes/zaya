@@ -439,30 +439,40 @@ def _active_window_id():
         return None
 
 
-def _send_reply(reply: str, os_name: str) -> None:
-    """Paste into the ALREADY-FOCUSED input box — never clicks anything.
-    The user put the caret in the message box; every chat app keeps focus
-    there after sending, so no coordinates are ever needed."""
+def _send_reply(reply: str, os_name: str, *, stop_evt=None, target_window=None) -> bool:
+    """Send only while the screenshot's destination still has focus."""
     import pyautogui
     import pyperclip
 
+    def allowed():
+        return not (stop_evt and stop_evt.is_set()) and target_window is not None and _active_window_id() == target_window
+
+    if not allowed():
+        return False
     old_clip = None
     try:
         old_clip = pyperclip.paste()
-    except Exception:
-        pass
-
-    pyperclip.copy(reply)          # paste instead of typing — non-ASCII safe
-    pyautogui.hotkey("command" if os_name == "mac" else "ctrl", "v")
-    time.sleep(0.35)
-    pyautogui.press("enter")
-    time.sleep(0.2)
-
-    if old_clip is not None:
-        try:
-            pyperclip.copy(old_clip)
-        except Exception:
-            pass
+        if not allowed():
+            return False
+        pyperclip.copy(reply)
+        if not allowed():
+            return False
+        pyautogui.hotkey('command' if os_name == 'mac' else 'ctrl', 'v')
+        if stop_evt is not None:
+            if stop_evt.wait(0.35):
+                return False
+        else:
+            time.sleep(0.35)
+        if not allowed():
+            return False
+        pyautogui.press('enter')
+        return True
+    finally:
+        if old_clip is not None:
+            try:
+                pyperclip.copy(old_clip)
+            except Exception:
+                pass
 
 
 # ── the takeover loop (daemon thread) ────────────────────────────────────────
@@ -529,7 +539,13 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
 
         while not stop_evt.is_set() and time.time() < deadline:
             try:
+                snapshot_window = _active_window_id()
+                if snapshot_window is None or (focus_id is not None and snapshot_window != focus_id):
+                    stop_evt.wait(_POLL_SECONDS)
+                    continue
                 raw, jpg = _grab_screen()
+                if _active_window_id() != snapshot_window:
+                    continue
 
                 # screen identical to last check → nothing new, save the call
                 # (only after the first look, so we never skip check #1)
@@ -540,6 +556,8 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
 
                 verdict = engine.check(jpg,
                                        recent_replies).strip().strip('"\'')
+                if stop_evt.is_set():
+                    break
                 errors  = 0
                 upper   = verdict.upper().rstrip(".!")
 
@@ -585,22 +603,19 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
                     for i, part in enumerate(_split_messages(verdict)):
                         if i and stop_evt.wait(_BURST_GAP):
                             break   # stopped mid-burst
+                        if stop_evt.is_set():
+                            break
                         cur_win = _active_window_id()
+                        if cur_win is None or cur_win != snapshot_window:
+                            _log('Zaya: Reply held because the screenshot window lost focus.')
+                            break
                         if focus_id is None:
-                            # first paste — the user is on the chat right
-                            # now, so THIS window becomes the only window
-                            # we will ever paste into
-                            focus_id = cur_win
-                            if focus_id is not None:
-                                _log("Zaya: Focus guard locked onto the "
-                                     "chat window.")
-                        elif cur_win not in (None, focus_id):
-                            _log("Zaya: Reply held — focus is not on the "
-                                 "chat window. Click the message box to let "
-                                 "me continue.")
+                            focus_id = snapshot_window
+                        if cur_win != focus_id:
                             break
                         part = _casualize(part)
-                        _send_reply(part, os_name)
+                        if not _send_reply(part, os_name, stop_evt=stop_evt, target_window=focus_id):
+                            break
                         sent.append(part)
                         _state["exchanges"].append(("", part))
                     if sent:
@@ -670,6 +685,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                             "sir.")
                 _state["stop"].set()
             _state["thread"].join(timeout=5)
+            if _state["thread"].is_alive():
+                return "Stopping chat takeover; reply generation is still finishing, and no further replies will be sent."
             n = len(_state["exchanges"])
             return (f"The conversation is yours again, sir. I sent {n} "
                     f"repl{'y' if n == 1 else 'ies'} while I had it.")

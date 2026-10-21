@@ -7,10 +7,13 @@ from __future__ import annotations
 import json
 import re
 import sys
+import io
+from xml.sax.saxutils import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.execution_policy import require_owner
+from core.artifact_paths import save_artifact, sheet_title
 
 
 def get_base_dir() -> Path:
@@ -115,8 +118,7 @@ def create_powerpoint(
         slug = re.sub(r"[^a-zA-Z0-9_-]", "_", title.lower())[:35]
         out_path = _get_output_dir() / f"{slug}.pptx"
 
-    prs.save(str(out_path))
-    return str(out_path)
+    return str(save_artifact(lambda path: prs.save(str(path)), out_path))
 
 
 def create_excel_sheet(
@@ -132,7 +134,7 @@ def create_excel_sheet(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = title[:31]
+    ws.title = sheet_title(title)
 
     # Header styling
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
@@ -171,8 +173,7 @@ def create_excel_sheet(
         slug = re.sub(r"[^a-zA-Z0-9_-]", "_", title.lower())[:35]
         out_path = _get_output_dir() / f"{slug}.xlsx"
 
-    wb.save(str(out_path))
-    return str(out_path)
+    return str(save_artifact(lambda path: wb.save(str(path)), out_path))
 
 
 def create_pdf_document(
@@ -190,7 +191,8 @@ def create_pdf_document(
         slug = re.sub(r"[^a-zA-Z0-9_-]", "_", title.lower())[:35]
         out_path = _get_output_dir() / f"{slug}.pdf"
 
-    doc = SimpleDocTemplate(str(out_path), pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
@@ -219,7 +221,7 @@ def create_pdf_document(
     )
 
     story = [
-        Paragraph(title, title_style),
+        Paragraph(escape(str(title)), title_style),
         Spacer(1, 12),
         HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#2563EB'), spaceAfter=18)
     ]
@@ -228,16 +230,16 @@ def create_pdf_document(
         sec_title = sec.get("title", "")
         sec_content = sec.get("content", "")
         if sec_title:
-            story.append(Paragraph(sec_title, h2_style))
+            story.append(Paragraph(escape(str(sec_title)), h2_style))
             story.append(Spacer(1, 6))
         for line in sec_content.splitlines():
             if line.strip():
-                story.append(Paragraph(line.strip(), body_style))
+                story.append(Paragraph(escape(line.strip()), body_style))
                 story.append(Spacer(1, 4))
         story.append(Spacer(1, 10))
 
     doc.build(story)
-    return str(out_path)
+    return str(save_artifact(lambda path: path.write_bytes(buffer.getvalue()), out_path))
 
 
 def generate_document(parameters: dict, **_kwargs) -> str:
