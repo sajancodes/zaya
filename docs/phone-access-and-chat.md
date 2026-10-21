@@ -32,3 +32,23 @@ delivery, acknowledgement state, generated greeting and incoming briefing.
 Android Kotlin compilation and release lint/build cover the Android changes.
 No physical Android device is attached; live WhatsApp behavior, permission dialogs
 and audible greetings still require owner verification on the phone.
+
+## Scheduled phone calls
+
+`call_owner` with `delay_seconds` or date/time saves a durable call; it does not
+ring immediately. `reminder` with `delivery=call` uses the same path. The live
+desktop dispatches a real incoming call when due, independently of desktop
+reminder speech and mute/quiet-period handling. Offline phones, unavailable live
+sessions and active calls leave it pending with a 30-second retry delay. Once a
+ringing request is emitted, its call ID and timestamp are saved; a missed or
+declined call is not automatically redialled. Status distinguishes a requested
+ring from an answered call. The OS scheduler starts the fixed desktop launcher
+when needed, rather than delivering a desktop reminder for a scheduled call.
+The laptop must be on and the paired phone reachable. Existing saved reminders
+retain voice delivery; cancel and recreate ones that should instead be calls.
+
+Focused inline fixtures verified deadline handling, offline recovery, a single
+actual `call.incoming` event through MobileCallManager, cancellation and restart
+persistence, legacy ledger migration, background startup without desktop speech,
+and timed-tool routing. They used a temporary ledger and fake bridge/launcher;
+no real calls, scheduled tasks or owner reminders were created or changed.

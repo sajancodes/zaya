@@ -235,7 +235,8 @@ def reminder(parameters: dict, **_kwargs) -> ToolResult:
             due_at = datetime.strptime(f"{date_str} {time_str}", fmt).timestamp()
         if not math.isfinite(due_at) or due_at <= now:
             raise ValueError("That reminder time has already passed. Give me a future time.")
-        item = store.create(message, due_at)
+        delivery = str(parameters.get('delivery') or 'voice').strip().lower()
+        item = store.create(message, due_at, delivery=delivery)
         task_name = "ZayaReminder_" + item["id"][:16]
         script_path = None
         try:
@@ -255,9 +256,11 @@ def reminder(parameters: dict, **_kwargs) -> ToolResult:
             store.update(item["id"], error=str(error)[:1000])
             if script_path is not None:
                 script_path.unlink(missing_ok=True)
-            return ToolResult("partial", "I've saved it for spoken delivery while Zaya is running, sir. Background desktop delivery could not be registered.",
+            return ToolResult("partial", ("Scheduled phone call saved; Zaya must be running at the due time because background startup could not be registered." if delivery == 'call' else "I've saved it for spoken delivery while Zaya is running, sir. Background desktop delivery could not be registered."),
                               {"reminder": store.get(item["id"])}, [{"saved": True, "background_registered": False}], side_effect=True)
-        return ToolResult("success", f"On it, sir. Reminder saved for {item['due_local']}.",
+        label = 'Phone call' if delivery == 'call' else 'Reminder'
+        return ToolResult("success", f"{label} scheduled for {item['due_local']}." +
+                          (' The paired phone and laptop must be online; a pending call retries when available.' if delivery == 'call' else ''),
                           {"reminder": store.get(item["id"])},
                           [{"saved": True, "background_registered": True, "scheduler_id": job_id}], side_effect=True)
     except (ValueError, TypeError, OSError, OverflowError) as error:
@@ -268,12 +271,14 @@ TOOL = {
     "name": "reminder",
     "description": (
         "Create a durable timed reminder with spoken delivery in Zaya and a desktop fallback. "
+        "For 'call me at/in' use delivery=call to schedule an actual ringing phone call, never an ordinary spoken reminder. "
         "For 'in N minutes' use delay_seconds=N*60, calculated from the live clock when called. "
         "Use action=status whenever the owner asks about a reminder or says you forgot it: "
         "inspect due time, voice_queued_at, desktop_notified_at and error before answering. "
         "Do not claim the owner heard a reminder merely because it was saved or queued."),
     "parameters": {"type": "OBJECT", "properties": {
         "action": {"type": "STRING", "enum": ["create", "status", "list", "cancel"]},
+        "delivery": {"type": "STRING", "enum": ["voice", "call"], "description": "call for a scheduled ringing phone call; voice for an ordinary reminder."},
         "id": {"type": "STRING", "description": "Exact saved reminder ID for status or cancellation."},
         "delay_seconds": {"type": "NUMBER", "description": "Relative delay in seconds, evaluated from the clock at this call."},
         "date": {"type": "STRING", "description": "Local date YYYY-MM-DD; today if omitted."},

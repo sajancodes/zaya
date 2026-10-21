@@ -1440,6 +1440,10 @@ class JarvisLive:
         try:
             while True:
                 await asyncio.sleep(2)
+                # Timed phone calls must not become laptop reminder speech or
+                # wait for the desktop microphone/announcement quiet period.
+                from core.mobile_calls import get_call_manager
+                await asyncio.to_thread(get_reminders().deliver_due_call, get_call_manager())
                 if not self.session or self.ui.muted:
                     continue
                 busy = self._notifications_busy()
