@@ -94,5 +94,14 @@ class SpatialSession:
         with self.lock:
             self.view=value;self.publish('scene.patch',self.snapshot())
 
+    def manipulate(self,payload):
+        if not isinstance(payload,dict) or set(payload)!={'part_id','position','rotation','revision'}:
+            raise ValueError('Invalid hand manipulation payload.')
+        with self.lock:
+            if payload['part_id'] not in self.selected_part_ids:
+                raise ValueError('Only the selected part may be manipulated.')
+            self.patch([{'op':'update','part_id':payload['part_id'],'path':'transform.position','value':payload['position']},
+                        {'op':'update','part_id':payload['part_id'],'path':'transform.rotation','value':payload['rotation']}],payload['revision'])
+
 
 session=SpatialSession()

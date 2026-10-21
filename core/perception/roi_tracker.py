@@ -18,8 +18,16 @@ def foreground():
     user.GetClassNameW(hwnd, kind, 128)
     rect = wintypes.RECT()
     user.GetWindowRect(hwnd, ctypes.byref(rect))
-    # Window class is a reliable local application hint; no process access required.
-    return kind.value, title.value, (rect.left, rect.top, rect.right, rect.bottom), kind.value == '#32770'
+    pid=wintypes.DWORD()
+    user.GetWindowThreadProcessId.argtypes=(wintypes.HWND,ctypes.POINTER(wintypes.DWORD))
+    user.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+    app=kind.value
+    try:
+        import psutil
+        app=psutil.Process(pid.value).name()
+    except Exception:
+        pass
+    return app, title.value, (rect.left, rect.top, rect.right, rect.bottom), kind.value == '#32770'
 
 
 def cursor_region(radius=160):

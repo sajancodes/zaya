@@ -93,3 +93,5 @@ memory/calendar_events.json
 memory/spatial_cache/
 spatial_renderer/node_modules/
 spatial_renderer/dist/
+models/hand_landmarker.task
+.venv-hands/

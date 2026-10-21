@@ -10,6 +10,7 @@ def test_missing_model_does_not_start_camera():
 
 
 def test_missing_mediapipe_isolated(tmp_path,monkeypatch):
+    monkeypatch.setenv('ZAYA_HAND_CHILD','1')
     import builtins
     original=builtins.__import__
     def optional(name,*args,**kwargs):

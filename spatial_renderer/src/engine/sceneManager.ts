@@ -47,4 +47,7 @@ export class SceneManager {
  }
  tick(ms:number){this.builder.tick(ms,p=>{if(this.parts.has(p.id)){this.create(this.parts.get(p.id)!);this.view();}});}
  select(id:string){if(this.snapshot){this.snapshot.selected=[id];this.view();}return this.parts.get(id);}
+ selected(){return this.snapshot?.selected[0];}
+ revision(){return this.snapshot?.scene.revision??0;}
+ restore(id:string){const part=this.parts.get(id);if(part&&this.meshes.has(id)){this.update(part);this.view();}}
 }

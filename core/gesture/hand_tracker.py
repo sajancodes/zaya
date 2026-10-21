@@ -1,8 +1,13 @@
 import threading
 import time
+import os
+import json
+import subprocess
 from pathlib import Path
 from .hand_model import normalize
 from .smoothing import LandmarkSmoother
+
+DEFAULT_MODEL=Path(__file__).resolve().parents[2]/'models'/'hand_landmarker.task'
 
 
 class HandTracker:
@@ -12,6 +17,7 @@ class HandTracker:
         self.state, self.error = 'OFF', ''
         self.stop_event = threading.Event()
         self.worker = None
+        self.child = None
 
     def start(self, model_path, device=0, fps=24, mirror=True):
         if self.worker and self.worker.is_alive():
@@ -25,12 +31,22 @@ class HandTracker:
 
     def stop(self):
         self.stop_event.set()
+        if self.child and self.child.poll() is None:
+            try:
+                self.child.stdin.write('stop\n');self.child.stdin.flush()
+            except (OSError,ValueError):
+                pass
         if self.worker:
             self.worker.join(3)
+            if self.worker.is_alive() and self.child and self.child.poll() is None:
+                self.child.terminate();self.worker.join(1)
         if not self.worker or not self.worker.is_alive():
             self.state = 'OFF'
 
     def _run(self, model_path, device, fps, mirror):
+        runtime=Path(__file__).resolve().parents[2]/'.venv-hands'/'Scripts'/'python.exe'
+        if runtime.is_file() and os.environ.get('ZAYA_HAND_CHILD')!='1':
+            return self._run_isolated(runtime,model_path,device,fps,mirror)
         camera = None
         try:
             import cv2
@@ -81,3 +97,44 @@ class HandTracker:
             self.callback(())
             if self.state != 'ERROR':
                 self.state = 'OFF'
+
+    def _run_isolated(self,runtime,model_path,device,fps,mirror):
+        previous={}
+        try:
+            flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
+            self.child=subprocess.Popen([str(runtime),'-u','-m','core.gesture.worker',str(Path(model_path).resolve()),
+                str(device),str(fps),'1' if mirror else '0'],cwd=str(Path(__file__).resolve().parents[2]),
+                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=flags)
+            while not self.stop_event.is_set():
+                line=self.child.stdout.readline(65537)
+                if not line:
+                    if not self.stop_event.is_set():
+                        raise RuntimeError('Hand worker exited before tracking completed.')
+                    break
+                if len(line)>65536:
+                    raise RuntimeError('Hand worker message exceeds limits.')
+                data=json.loads(line)
+                if data.get('state')=='ERROR':
+                    raise RuntimeError(data.get('error','Hand worker failed.'))
+                self.state=data.get('state','STARTING')
+                from .hand_model import Point
+                hands=[]
+                for item in data.get('hands',[])[:2]:
+                    hand=normalize(item['id'],[Point(*p) for p in item['landmarks']],
+                        [Point(*p) for p in item['world']],item['confidence'],item['timestamp'],previous.get(item['id']))
+                    hands.append(hand)
+                previous={h.hand_id:h for h in hands}
+                self.callback(tuple(hands))
+        except Exception as error:
+            self.state,self.error='ERROR',f'{type(error).__name__}: {error}'[:300]
+        finally:
+            if self.child:
+                if self.child.poll() is None:
+                    self.child.terminate()
+                self.child.wait(timeout=5)
+                for stream in (self.child.stdin,self.child.stdout):
+                    if stream:
+                        stream.close()
+            self.callback(())
+            if self.state!='ERROR':
+                self.state='OFF'

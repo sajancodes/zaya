@@ -13,6 +13,8 @@ class HandController:
         self.keyboard = VirtualKeyboard(self._inject)
         self.tracker = HandTracker(self.on_hands)
         self.modifiers = set()
+        from .spatial_controller import SpatialController
+        self.spatial = SpatialController()
 
     def _inject(self, key):
         if self.mode != InteractionMode.KEYBOARD:
@@ -36,7 +38,7 @@ class HandController:
         with self.lock:
             if not hands:
                 self.modifiers.clear()
-            self.engine.update(hands,hands[0].timestamp if hands else 0)
+            events=self.engine.update(hands,hands[0].timestamp if hands else 0)
             hand = hands[0] if hands else None
             if self.mode == InteractionMode.KEYBOARD:
                 sent = self.keyboard.update(hand)
@@ -45,6 +47,8 @@ class HandController:
                     'sent':sent or '', 'error':self.keyboard.error, 'modifiers':sorted(self.modifiers)})
             else:
                 self.keyboard.reset()
+                if self.mode in (InteractionMode.SPATIAL,InteractionMode.SELECTION):
+                    self.spatial.update(hands,events,self.engine,self.mode==InteractionMode.SELECTION)
 
     def stop(self):
         # Revoke injection before joining the camera; no output can race stop.
@@ -52,14 +56,15 @@ class HandController:
             self.mode = InteractionMode.DISABLED
             self.modifiers.clear()
             self.keyboard.reset()
+            self.engine.states.clear();self.engine.pokes.clear();self.engine.previous.clear()
         self.tracker.stop()
         from core.ghost_overlay import update_passive_overlay
         update_passive_overlay({'visible':False,'mode':'virtual_keyboard'})
 
     def start(self, model_path, mode, device=0, fps=24, mirror=True):
         requested = InteractionMode(mode)
-        if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD):
-            raise ValueError('Only NAVIGATION and KEYBOARD are implemented yet.')
+        if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD,InteractionMode.SPATIAL,InteractionMode.SELECTION):
+            raise ValueError('Choose a supported interaction mode.')
         self.stop()
         with self.lock:
             self.mode = requested

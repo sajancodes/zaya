@@ -34,7 +34,8 @@ def make_app(session,token):
                     # Latest authoritative snapshot heals dropped intermediate updates.
                     while not queue.empty():
                         queue.get_nowait()
-                    queue.put_nowait(packet)
+                    from core.spatial.spatial_protocol import envelope
+                    queue.put_nowait(envelope('scene.patch',session.session_id,packet['sequence'],session.snapshot()))
                 else:
                     queue.put_nowait(packet)
             loop.call_soon_threadsafe(push)
@@ -56,6 +57,12 @@ def make_app(session,token):
                     session.select(message['payload'].get('ids'))
                 elif message['type']=='view.changed':
                     session.set_view(message['payload'])
+                elif message['type']=='part.manipulated':
+                    from core.gesture.controller import hands
+                    from core.gesture.gesture_state import InteractionMode
+                    if hands.mode!=InteractionMode.SPATIAL or hands.tracker.state!='ACTIVE':
+                        raise ValueError('Hand manipulation is not owner-enabled.')
+                    session.manipulate(message['payload'])
         except (WebSocketDisconnect,ValueError,TypeError,RuntimeError):
             try:
                 await ws.close()

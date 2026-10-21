@@ -20,6 +20,18 @@ owner-gated and opt-in. Missing optional dependencies never gate normal startup.
   WebGL fallback, progressive component queue, vertex-targeted sand/fade effects,
   semantic picking, camera orbit/zoom, reversible exploded view, X-ray and clipping.
 - Owner action discovery and selected-object instructions in the existing prompt.
+- Stable-pose local hand frames now drive renderer orbit, two-open-hand zoom,
+  point/poke selection, pinch translation and wrist rotation. Two pinched hands
+  pulling apart request explosion. Fist/loss cancels a grab. A released grab is
+  one revision-checked, selected-part-only undo transaction, gated by owner-enabled
+  ACTIVE spatial tracking. Selection-only mode never manipulates.
+- Optional OCR now uses Windows in-memory streams with a bounded single worker,
+  at most one ROI submission every two seconds; foreground executable identity
+  is resolved locally. Real synthetic-text OCR succeeded without screenshot files.
+- MediaPipe and the official model are installed locally in `.venv-hands`,
+  isolated from the app's OpenCV. The fixed hidden child entry point uses bounded
+  JSON hand data, releases the camera on parent EOF/stop and cannot run commands.
+  Actual model inference on a blank synthetic image succeeded; no camera was opened.
 
 Build renderer: `cd spatial_renderer; npm ci; npm run build`.
 Use `spatial_workspace action=open`, then `action=build generator=inline_engine
@@ -39,11 +51,10 @@ reconnect. Browser preview visibly exercised an engine, X-ray and exploded view.
 
 ## Still required by the full specification
 
-Continuous OCR/error/code/meaningful-text context (current cheap loop does not
-claim these), real foreground executable identity (currently Win32 class), ROI
-tracking across movement, complete gesture vocabulary/two-hand temporal gestures,
+Deep code/semantic desktop context, ROI tracking across movement, complete named
+gesture vocabulary/two-hand temporal gesture events,
 calibration/settings persistence, shared camera arbitration with existing vision,
-hand-driven spatial manipulation, annotations, selection/group/layer explosion,
+physical hand-driven spatial validation, annotations, selection/group/layer explosion,
 custom clipping-plane rotation, proper gear/spring/fan geometry, GLB/glTF semantic
 import, durable spatial session recovery across a full Zaya process restart,
 measured latency/FPS and all requested physical demonstrations. Current cache

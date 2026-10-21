@@ -7,10 +7,9 @@ and populates the extracted text directly to the clipboard.
 from __future__ import annotations
 
 import io
-import os
+import base64
 import subprocess
 import sys
-from pathlib import Path
 from typing import List, Optional
 
 try:
@@ -65,40 +64,42 @@ def _ocr_via_powershell(png_bytes: bytes) -> str:
     if sys.platform != "win32":
         return ""
 
-    temp_img = Path(os.environ.get("TEMP", ".")) / f"_zaya_peeler_{os.getpid()}.png"
     try:
-        temp_img.write_bytes(png_bytes)
-        ps_script = f"""
+        ps_script = """
         Add-Type -AssemblyName System.Runtime.WindowsRuntime
-        $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | ? {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
-        Function Await($WinRtTask, $ResultType) {{
+        $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | ? { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+        Function Await($WinRtTask, $ResultType) {
             $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
             $netTask = $asTask.Invoke($null, @($WinRtTask))
             $netTask.Wait(-1) | Out-Null
             $netTask.Result
-        }}
+        }
         [Windows.Globalization.Language,Windows.Foundation.Diagnostics,ContentType=WindowsRuntime] | Out-Null
         [Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation.Diagnostics,ContentType=WindowsRuntime] | Out-Null
         [Windows.Media.Ocr.OcrEngine,Windows.Foundation.Diagnostics,ContentType=WindowsRuntime] | Out-Null
 
-        $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync('{str(temp_img).replace('\\', '\\\\')}')) ([Windows.Storage.StorageFile])
-        $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+        [Windows.Storage.Streams.InMemoryRandomAccessStream,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null
+        [Windows.Storage.Streams.DataWriter,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null
+        $stream = New-Object Windows.Storage.Streams.InMemoryRandomAccessStream
+        $writer = New-Object Windows.Storage.Streams.DataWriter($stream)
+        $writer.WriteBytes([Convert]::FromBase64String([Console]::In.ReadToEnd()))
+        Await ($writer.StoreAsync()) ([uint32]) | Out-Null
+        $writer.DetachStream() | Out-Null
+        $stream.Seek(0)
         $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
         $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
         $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
         $ocrResult = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
         $ocrResult.Text
         """
-        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True, timeout=8)
+        # An image never touches disk. Data is stdin, never executable script.
+        res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            input=base64.b64encode(png_bytes).decode('ascii'),capture_output=True,text=True,timeout=8,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
     except Exception:
         pass
-    finally:
-        try:
-            temp_img.unlink(missing_ok=True)
-        except Exception:
-            pass
     return ""
 
 

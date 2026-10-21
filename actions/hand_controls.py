@@ -12,7 +12,8 @@ def hand_controls(parameters, **kwargs):
             from core.ghost_overlay import passive_overlay_available
             if not passive_overlay_available():
                 return ToolResult('failed','The desktop overlay is unavailable; hand typing was not enabled.')
-            hands.start(str(parameters.get('model_path') or ''),str(parameters.get('mode') or 'NAVIGATION'),
+            from core.gesture.hand_tracker import DEFAULT_MODEL
+            hands.start(str(parameters.get('model_path') or DEFAULT_MODEL),str(parameters.get('mode') or 'NAVIGATION'),
                         parameters.get('device',0),parameters.get('fps',24),parameters.get('mirror',True))
         elif action in ('stop','pause'):
             hands.stop()
@@ -25,8 +26,8 @@ def hand_controls(parameters, **kwargs):
         return ToolResult('failed',str(error))
 
 
-TOOL = {'name':'hand_controls','description':'Owner-only opt-in local hand tracking. Start NAVIGATION or KEYBOARD; KEYBOARD authorizes deliberate hand-poke typing into the foreground app. Camera/model are optional; unavailable features do not affect Zaya. Spatial gestures are not implemented yet.',
+TOOL = {'name':'hand_controls','description':'Owner-only opt-in local hand tracking. KEYBOARD authorizes hand-poke typing; SPATIAL enables local orbit, zoom, point/poke selection and pinch manipulation in the open spatial renderer. SELECTION only points/pokes. Camera/model are optional and local; unavailable features do not affect Zaya.',
         'parameters':{'type':'OBJECT','properties':{
             'action':{'type':'STRING','enum':['start','stop','pause','status']},
-            'mode':{'type':'STRING','enum':['NAVIGATION','KEYBOARD']},'model_path':{'type':'STRING'},
+            'mode':{'type':'STRING','enum':['NAVIGATION','KEYBOARD','SPATIAL','SELECTION']},'model_path':{'type':'STRING'},
             'device':{'type':'INTEGER'},'fps':{'type':'INTEGER'},'mirror':{'type':'BOOLEAN'}}},'handler':hand_controls}

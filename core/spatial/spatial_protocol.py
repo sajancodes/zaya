@@ -24,7 +24,7 @@ class ClientProtocol:
         seq=message['sequence']
         if type(seq) is not int or seq<=self.sequence:
             raise ValueError('Duplicate or stale sequence.')
-        if message['type'] not in {'renderer.ready','renderer.metrics','selection.changed','view.changed'} or not isinstance(message['payload'],dict):
+        if message['type'] not in {'renderer.ready','renderer.metrics','selection.changed','view.changed','part.manipulated'} or not isinstance(message['payload'],dict):
             raise ValueError('Renderer message type is not allowed.')
         self.sequence=seq
         return message
