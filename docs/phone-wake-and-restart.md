@@ -39,5 +39,7 @@ unauthenticated/revoked rejection, fixed launch targets, duplicate startup,
 exit-before-launch ordering, timeout refusal and desktop restart signals.
 Source compilation and scoped undefined-name checks are also run. No test files
 are added. Full phone-to-laptop calling and real assistant restart require a
-device/application check after the update is loaded.
-
+device/application check after the update is loaded. Release lint passed with
+zero errors. Owner-only voice authorization, the real assistant-readiness
+signal and delivery of worker restart requests to the UI thread were checked.
+The hidden listener and current-user logon registration were verified locally.
