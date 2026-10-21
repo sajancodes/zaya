@@ -558,6 +558,7 @@ class MobileApi:
         active = self.calls.active()
         return {
             'protocol_version': protocol.PROTOCOL_VERSION,
+            'assistant_ready': bool(getattr(self.server, 'assistant_ready', lambda: False)()),
             'server_name': self.SERVER_NAME,
             'state': state['state'],
             'emotion': state['emotion'],

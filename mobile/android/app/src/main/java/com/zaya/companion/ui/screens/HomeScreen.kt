@@ -79,6 +79,8 @@ fun HomeScreen(
     val status by runtime.connection.collectAsStateWithLifecycle()
     val voice by runtime.model.voice.collectAsStateWithLifecycle()
     val call by runtime.model.call.collectAsStateWithLifecycle()
+    val pairing by runtime.pairing.collectAsStateWithLifecycle()
+    val waking by runtime.wakingDesktop.collectAsStateWithLifecycle()
     val notifications by runtime.model.notifications.collectAsStateWithLifecycle()
 
     BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
@@ -119,17 +121,18 @@ fun HomeScreen(
             if (voice.note.isNotBlank()) Note(voice.note, ZayaAccent.amber)
 
             Button(onClick = {
+                if (waking) { runtime.cancelWakeCall(); return@Button }
                 when (val current = call) {
                     is CallUiState.Ringing -> runtime.answer(current.call.callId)
                     is CallUiState.Active, is CallUiState.Dialing -> runtime.endCall()
                     CallUiState.Idle -> runtime.startCall()
                 }
-            }, enabled = status.isOnline || call !is CallUiState.Idle,
+            }, enabled = pairing != null || call !is CallUiState.Idle,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 shape = RoundedCornerShape(20.dp)) {
                 Icon(Icons.Filled.Call, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(when (call) {
+                Text(if (waking) "Cancel · starting Zaya…" else when (call) {
                     is CallUiState.Ringing -> "Answer Zaya"
                     is CallUiState.Active, is CallUiState.Dialing -> "End call"
                     CallUiState.Idle -> "Call Zaya"

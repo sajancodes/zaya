@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 /** One continuous phone screen, from ringing through answer to hang-up. */
 @Composable
 fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
+    val waking by runtime.wakingDesktop.collectAsStateWithLifecycle()
     val call by runtime.model.call.collectAsStateWithLifecycle()
     val visual by runtime.model.visual.collectAsStateWithLifecycle()
     val voice by runtime.model.voice.collectAsStateWithLifecycle()
@@ -141,7 +142,9 @@ fun CallScreen(runtime: ZayaRuntime, onMinimize: () -> Unit) {
                 }
                 active != null || dialing != null ->
                     PhoneControl("End call", PhoneGlyph.HANGUP, Color(0xFFE34C61)) { runtime.endCall() }
-                else -> PhoneControl("Call Zaya", PhoneGlyph.CALL, Color(0xFF36B87B)) { runtime.startCall() }
+                else -> if (waking) PhoneControl("Cancel", PhoneGlyph.HANGUP, Color(0xFFE34C61)) {
+                    runtime.cancelWakeCall()
+                } else PhoneControl("Call Zaya", PhoneGlyph.CALL, Color(0xFF36B87B)) { runtime.startCall() }
             }
         }
         Spacer(Modifier.height(20.dp))

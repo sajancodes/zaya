@@ -182,6 +182,14 @@ _service: WhatsAppService | None = None
 _lock = threading.Lock()
 
 
+def close_if_started() -> None:
+    """Release an owned bridge on desktop exit without creating a new service."""
+    with _lock:
+        service = _service
+    if service is not None:
+        service.close()
+
+
 def get_service() -> WhatsAppService:
     global _service
     with _lock:

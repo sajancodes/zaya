@@ -2977,6 +2977,7 @@ class MainWindow(QMainWindow):
     _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
     _display_request_sig = pyqtSignal(object)
+    restart_requested = pyqtSignal()
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
     _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
@@ -4468,6 +4469,8 @@ class MainWindow(QMainWindow):
 
         fs_btn = _row(QPushButton("⛶  FULLSCREEN  [F11]"), self._BTN_DIM)
         fs_btn.clicked.connect(self._toggle_fullscreen)
+        restart_btn = _row(QPushButton("Restart Zaya"), self._BTN_DIM)
+        restart_btn.clicked.connect(self.restart_requested.emit)
 
         self._brief_btn = _row(QPushButton())
         self._brief_btn.clicked.connect(self._toggle_brief)
@@ -5885,6 +5888,8 @@ class JarvisUI:
         self.on_companion_reaction = None
         self.on_companion_audio_activity = None
         self.on_shutdown = None
+        self.on_restart = None
+        self._win.restart_requested.connect(self._handle_restart)
         self._app.aboutToQuit.connect(self._shutdown_audio)
         try:
             from core.zayabar_config import load_config
@@ -5908,6 +5913,13 @@ class JarvisUI:
     def _bar_reaction(self, text):
         if self.on_companion_reaction:
             self.on_companion_reaction(text)
+
+    def request_restart(self):
+        self._win.restart_requested.emit()
+
+    def _handle_restart(self):
+        if self.on_restart:
+            self.on_restart()
 
     def _shutdown_audio(self):
         if self.on_shutdown:

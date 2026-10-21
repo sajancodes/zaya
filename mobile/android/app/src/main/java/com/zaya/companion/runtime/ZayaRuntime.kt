@@ -35,6 +35,9 @@ import com.zaya.companion.protocol.num
 import com.zaya.companion.protocol.str
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -79,6 +82,10 @@ class ZayaRuntime(
     private val reconnectSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val outbox = ArrayDeque<Pair<String, String>>()
     @Volatile private var serverInstance = ""
+    private var wakeCallJob: Job? = null
+    private var wakeGeneration = 0
+    private val _wakingDesktop = MutableStateFlow(false)
+    val wakingDesktop = _wakingDesktop.asStateFlow()
     @Volatile private var deviceId = ""
 
     private val restClient = okhttp3.OkHttpClient.Builder()
@@ -257,6 +264,7 @@ class ZayaRuntime(
     }
 
     fun stop() {
+        cancelWakeCall()
         supervisor?.cancel()
         supervisor = null
         updateChecks?.cancel()
@@ -629,9 +637,56 @@ class ZayaRuntime(
     /** The owner pressed call: ask Zaya to talk now. */
     fun startCall() {
         val message = JSONObject().put("type", Protocol.Control.CALL_START)
-        if (control?.send(message.toString()) != true) {
-            model.notice("No link to Zaya right now")
+        if (connection.value.isOnline && serverInstance.isNotEmpty() && control?.isOpen == true &&
+            control?.send(message.toString()) == true) return
+        if (wakeCallJob?.isActive == true) return
+        val pair = pairing.value ?: run { model.notice("Pair with your laptop first"); return }
+        val generation = ++wakeGeneration
+        com.zaya.companion.service.ZayaService.ensureRunning(context)
+        _wakingDesktop.value = true
+        model.setVoice(note = "Bringing Zaya online…")
+        wakeCallJob = scope.launch {
+            try {
+                val wakeError = ZayaApi(pair.baseUrl, restClient).wakeDesktop(pair)
+                if (wakeError != null) { model.setVoice(note = wakeError); return@launch }
+                start()
+                reconnectNow()
+                withTimeout(90_000L) {
+                    while (true) {
+                        if (pairing.value?.deviceId != pair.deviceId) error("Pairing changed. Call again after pairing.")
+                        if (connection.value.isOnline && serverInstance.isNotEmpty() && control?.isOpen == true) {
+                            val ready = try { api?.snapshot()?.optBoolean("assistant_ready", false) == true }
+                                catch (_: java.io.IOException) { false }
+                            if (ready) break
+                        }
+                        delay(500)
+                    }
+                }
+                coroutineContext.ensureActive()
+                if (pairing.value?.deviceId != pair.deviceId) error("Pairing changed. Call again after pairing.")
+                if (control?.send(message.toString()) != true) error("The call link closed. Please try again.")
+                model.setVoice(note = "")
+            } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+                model.setVoice(note = "Zaya did not come online in time. Check the laptop and call again.")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                model.setVoice(note = error.message ?: "Could not start Zaya")
+            } finally {
+                if (generation == wakeGeneration) {
+                    _wakingDesktop.value = false
+                    wakeCallJob = null
+                }
+            }
         }
+    }
+
+    fun cancelWakeCall() {
+        wakeGeneration++
+        wakeCallJob?.cancel()
+        wakeCallJob = null
+        _wakingDesktop.value = false
+        model.setVoice(note = "")
     }
 
     fun setMuted(value: Boolean) {

@@ -70,6 +70,7 @@ class ZayaBar(QWidget):
         self.context_menu.addAction('Mute / unmute microphone', main_window._toggle_mute)
         self.context_menu.addAction('Show companion', self.show)
         self.context_menu.addSeparator()
+        self.context_menu.addAction('Restart Zaya', main_window.restart_requested.emit)
         self.context_menu.addAction('Close Zaya', QApplication.instance().quit)
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():

@@ -1254,6 +1254,15 @@ class JarvisLive:
                 else:
                     result = "Specify action (add/remove/list) and a topic."
 
+            elif name == "restart_zaya":
+                from core.execution_policy import require_owner
+                require_owner()
+                self.ui.request_restart()
+                from core.tool_result import ToolResult
+                result = ToolResult('partial',
+                    'Restart requested. The current Zaya will close before the replacement starts.',
+                    {'restart_requested': True}, side_effect=True)
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 async def _do_shutdown():
@@ -2481,6 +2490,7 @@ class JarvisLive:
         try:
             from dashboard.server import DashboardServer
             self._dashboard = DashboardServer()
+            self._dashboard.assistant_ready = lambda: self.session is not None
             self._dashboard.set_connect_callback(self._on_phone_connected)
             asyncio.create_task(self._dashboard.serve())
             # Runs for the whole lifetime, not just inside an active session
@@ -2809,10 +2819,34 @@ def main():
     if not instance.acquire():
         return
     try:
+        from core.desktop_lifecycle import record_desktop
+        record_desktop()
         from core.runtime_logging import install_runtime_logging
         install_runtime_logging()
         ui = JarvisUI("face.png")
         instance.on_activate = ui.activate_existing
+        restart_pending = False
+        def restart_desktop():
+            nonlocal restart_pending
+            if restart_pending:
+                return
+            try:
+                from core.desktop_lifecycle import schedule_restart
+                schedule_restart()
+            except OSError as error:
+                ui.write_log(f'ERR: Could not schedule restart: {error}')
+                return
+            restart_pending = True
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(800, app.quit)
+        ui.on_restart = restart_desktop
+        def prepare_phone_wake():
+            try:
+                from core.phone_wake import install
+                install()
+            except OSError as error:
+                ui.write_log(f'ERR: Phone wake launcher unavailable: {error}')
+        threading.Thread(target=prepare_phone_wake, daemon=True, name='phone-wake-setup').start()
         stopping = threading.Event()
 
         worker = threading.Thread(target=_run_desktop_agent, args=(ui, stopping), daemon=True)
@@ -2823,9 +2857,26 @@ def main():
             stopping.set()
             ui._shutdown_audio()
             worker.join(timeout=2)
+            try:
+                from services.whatsapp.service import close_if_started
+                close_if_started()
+            except Exception as error:
+                ui.write_log(f'ERR: WhatsApp shutdown cleanup failed: {type(error).__name__}')
     finally:
         # Keep the lock until UI shutdown has restored audio and hidden Zaya.
         instance.close()
 
 if __name__ == "__main__":
     main()
+    # The UI, audio, owned bridge/jobs and startup lock are already closed.
+    # Outstanding executor workers must not keep a closed assistant alive or
+    # prevent a requested replacement from starting. Only exit this process.
+    import logging as _logging
+    _logging.shutdown()
+    for _output in (sys.stdout, sys.stderr):
+        if _output is not None:
+            try:
+                _output.flush()
+            except (OSError, ValueError):
+                pass
+    __import__('os')._exit(0)

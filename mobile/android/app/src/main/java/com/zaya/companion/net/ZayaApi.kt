@@ -1,5 +1,7 @@
 package com.zaya.companion.net
 
+import androidx.core.net.toUri
+
 import com.zaya.companion.protocol.Pairing
 import com.zaya.companion.protocol.Protocol
 import com.zaya.companion.protocol.RemoteFile
@@ -73,6 +75,30 @@ class ZayaApi(
             .put("app_version", appVersion)
             .put("platform", "android"),
     )
+
+    /** Only the already paired Tailscale host receives the durable credential. */
+    suspend fun wakeDesktop(pairing: Pairing): String? = withContext(Dispatchers.IO) {
+        val uri = pairing.baseUrl.toUri()
+        val host = uri.host.orEmpty()
+        if (!host.endsWith(".ts.net", ignoreCase = true)) {
+            return@withContext "Starting a closed Zaya requires your laptop's Tailscale address."
+        }
+        val url = android.net.Uri.Builder().scheme("http").encodedAuthority("$host:8002")
+            .path("/wake").build().toString()
+        try {
+            val body = JSONObject().put("device_id", pairing.deviceId).put("device_secret", pairing.secret)
+            val request = Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build()
+            client.newBuilder().followRedirects(false).followSslRedirects(false)
+                .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
+                .newCall(request).execute().use { response ->
+                    val data = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrNull()
+                    if (response.isSuccessful && data?.optBoolean("ok") == true) null
+                    else data?.optString("error")?.ifBlank { null } ?: "The laptop could not start Zaya."
+                }
+        } catch (_: java.io.IOException) {
+            "Could not reach the laptop launcher. The laptop must be on, signed in and connected to Tailscale."
+        }
+    }
 
     private suspend fun authenticate(url: String, body: JSONObject): AuthResult =
         withContext(Dispatchers.IO) {

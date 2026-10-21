@@ -49,6 +49,11 @@ INLINE_TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "restart_zaya",
+        "description": "Restart the Zaya assistant when the owner asks to restart Zaya, you, or the assistant. Closes the current app before launching its replacement. Does not restart Windows.",
+        "parameters": {"type": "OBJECT", "properties": {}},
+    },
+    {
         "name": "shutdown_jarvis",
         "description": "Shuts down the assistant completely when user asks to end conversation, close, or stop.",
         "parameters": {"type": "OBJECT", "properties": {}},
