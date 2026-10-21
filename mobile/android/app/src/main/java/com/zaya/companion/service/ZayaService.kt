@@ -152,10 +152,7 @@ class ZayaService : Service() {
     private fun updateNotification(status: ConnectionStatus, source: ZayaRuntime) {
         val name = source.pairing.value?.serverName
             ?: source.model.serverName.value
-        runCatching {
-            androidx.core.app.NotificationManagerCompat.from(this)
-                .notify(Notifications.ID_CONNECTION, Notifications.connection(this, status, name))
-        }
+        Notifications.post(this, Notifications.ID_CONNECTION, Notifications.connection(this, status, name))
         if (status.isOnline) {
             val active = source.model.call.value
             if (active !is CallUiState.Ringing && ringingCallId.isNotEmpty()) {
@@ -175,8 +172,9 @@ class ZayaService : Service() {
                 (if (voiceForeground && Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
         } else 0
         return runCatching {
-            if (type == 0) startForeground(Notifications.ID_CONNECTION, notification)
-            else startForeground(Notifications.ID_CONNECTION, notification, type)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                startForeground(Notifications.ID_CONNECTION, notification, type)
+            else startForeground(Notifications.ID_CONNECTION, notification)
             true
         }.getOrElse { android.util.Log.w("ZayaService", "Foreground service unavailable", it); false }
     }

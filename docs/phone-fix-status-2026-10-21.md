@@ -28,3 +28,20 @@ This implements E09–E18 in the supplied extended audit, preserving the existin
 Targeted offline Python contract tests exercise real bridge routing, wrong-device rejection, ambiguous-device failure, Android-result normalization, stale desktop-instance rejection and scope-specific terminal publication. Existing phone video regression tests are retained for the verification run; the owner requested test-file removal after checks.
 
 Android JVM tests and debug build run locally. Physical device calls, SMS, notification replies, permission prompts, screen capture and microphone service transitions were not exercised. Android may restrict a consent activity opened from the background; the owner can open Zaya to see the pending approval, and the request expires without executing if no decision arrives. Platform validation on the owner's phone is still required. No app restart, phone action, provider request or UI approval bypass was used.
+
+## Release compatibility repairs
+
+Release lint identified ten error sites, repaired at their runtime boundary without a lint baseline, permission suppression, minimum-SDK increase or feature removal:
+
+- Microphone creation handles a real SecurityException explicitly, preserving a useful permission-denied outcome.
+- Ordinary notification posting checks POST_NOTIFICATIONS on Android 13+; service status updates use this same checked path.
+- Incoming call screens use supported window flags on API26 and the newer activity APIs on API27+.
+- Typed startForeground calls use an explicit API29 guard; older phones retain the supported two-argument call.
+- Navigation-bar appearance lives in values-v27; the API26 base theme keeps its dark appearance.
+- Camera and telephony hardware are explicitly optional, matching the existing capability checks and tablet/no-camera behavior.
+
+The minimum SDK remains 26. Verification results are appended after the sequential low-worker lint, release build and JVM test runs.
+
+Release lint rerun: **passed, zero errors** (67 non-blocking warnings). No lint issue was disabled.
+
+Final sequential Android validation with `--max-workers=2`: **lintRelease passed (0 errors), assembleRelease passed including R8/signing/packaging, and all 100 JVM tests passed with zero failures or errors**. Tests ran before the owner-requested test-source removal. Physical phone behavior remains unverified as described above.
