@@ -219,7 +219,9 @@ def normalize_event(event) -> list[dict]:
 
     if name == 'owner.message':
         text = clip(event.get('text'), LIMITS['text'])
-        return [envelope('chat.message', {'role': 'user', 'text': text},
+        return [envelope('chat.message', {'role': 'user', 'text': text,
+                         'request_id': clip(event.get('request_id'), 120),
+                         'source': clip(event.get('source'), 40)},
                          timestamp=stamp)] if text else []
 
     if name in {'zaya.message', 'assistant.message'}:

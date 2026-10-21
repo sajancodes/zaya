@@ -2371,6 +2371,16 @@ class JarvisLive:
             "the decision you need. Do not ask him to explain the situation."
         )
 
+        if call.direction == 'outgoing':
+            instruction = (
+                "[PHONE CALL CONNECTED] The owner called you from his phone. Your voice now "
+                "plays on his phone and his phone microphone is the call input. Start speaking "
+                "now: greet him warmly and respectfully in your own words, then briefly invite "
+                "him to say what he needs. Choose natural, varied wording for the current "
+                "conversation; do not recite a fixed greeting or invent a reason for his call. "
+                "This is a greeting, not an instruction to start a task."
+            )
+
         async def _speak():
             try:
                 self._phone_active = True
@@ -2445,12 +2455,13 @@ class JarvisLive:
                     self.wake(reason="remote command")
                 self._begin_owner_goal(text, trust=TRUST_AUTHENTICATED_REMOTE_OWNER,
                                        scope=item.get("scope"))
-                get_gate().begin(request_id)
                 self.ui.write_log(f"[{item.get('source', 'Web')}]: {text}")
                 from core.event_bus import bus
-                bus.publish('owner.message', text=text, source=item.get('source', 'remote'))
-                get_gate().acknowledge(request_id)
+                bus.publish('owner.message', text=text, source=item.get('source', 'remote'), request_id=request_id)
                 await self._send_owner_text(text)
+                # Delivery to the live session is an acknowledgement, not proof
+                # that the requested action has executed or completed.
+                get_gate().acknowledge(request_id)
             except Exception as e:
                 print(f"[Dashboard] Command error: {e}")
                 get_gate().complete(request_id, ok=False, error=str(e))
