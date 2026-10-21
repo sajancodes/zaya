@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from memory.fact_policy import confidence as fact_confidence, expiry as fact_expiry
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +135,11 @@ class KnowledgeStore:
                 con.commit()
                 con.close()
                 # Rebuild from memory_manager JSON
-                from memory.memory_manager import load_memory
-                data = load_memory()
+                # Atomic JSON replacement permits a coherent snapshot without
+                # acquiring the manager lock while holding the index lock.
+                # Taking those locks in reverse order can deadlock a writer.
+                from memory.memory_manager import MEMORY_PATH
+                data = json.loads(MEMORY_PATH.read_text(encoding='utf-8')) if MEMORY_PATH.exists() else {}
                 self.sync_from_json(data)
                 logger.info("Corruption recovery successful: rebuilt %s from JSON store", self.path)
             except Exception as rec_err:
@@ -156,6 +160,13 @@ class KnowledgeStore:
         k = str(key or "").strip().lower()
         val = str(value or "").strip()
         if not k or not val:
+            return
+        confidence = fact_confidence(confidence)
+        if confidence < .7:
+            return
+        try:
+            expires_at = fact_expiry(expires_at)
+        except (TypeError, ValueError, OverflowError):
             return
 
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._clock()))
@@ -355,7 +366,8 @@ class KnowledgeStore:
                             FROM facts_fts
                             JOIN facts f ON f.rowid = facts_fts.rowid
                             WHERE facts_fts MATCH ?
-                              AND (f.expires_at IS NULL OR f.expires_at > ?)
+                              AND f.confidence>=0.7
+                              AND (f.expires_at IS NULL OR julianday(f.expires_at) > julianday(?))
                             ORDER BY score ASC
                             LIMIT ?
                             """,
@@ -382,7 +394,7 @@ class KnowledgeStore:
                     # If empty query, return most recently updated facts
                     if not search_terms:
                         rows = cur.execute(
-                            "SELECT category, key, value, updated_at FROM facts WHERE (expires_at IS NULL OR expires_at > ?) ORDER BY updated_at DESC LIMIT ?",
+                            "SELECT category, key, value, updated_at FROM facts WHERE confidence>=0.7 AND (expires_at IS NULL OR julianday(expires_at) > julianday(?)) ORDER BY updated_at DESC LIMIT ?",
                             (now_iso, limit),
                         ).fetchall()
                     else:
@@ -392,7 +404,7 @@ class KnowledgeStore:
                             params.extend([f"%{t}%", f"%{t}%"])
                         params.append(limit - len(results))
                         rows = cur.execute(
-                            f"SELECT category, key, value, updated_at FROM facts WHERE (expires_at IS NULL OR expires_at > ?) AND ({like_clause}) ORDER BY updated_at DESC LIMIT ?",
+                            f"SELECT category, key, value, updated_at FROM facts WHERE confidence>=0.7 AND (expires_at IS NULL OR julianday(expires_at) > julianday(?)) AND ({like_clause}) ORDER BY updated_at DESC LIMIT ?",
                             params,
                         ).fetchall()
 
@@ -440,7 +452,9 @@ class KnowledgeStore:
                 for key, entry in items.items():
                     if isinstance(entry, dict) and "value" in entry:
                         val = str(entry["value"])
-                        conf = float(entry.get("confidence", 1.0))
+                        conf = fact_confidence(entry.get("confidence", 1.0))
+                        if conf < .7:
+                            continue
                         src = str(entry.get("source", "user"))
                         exp = entry.get("expires_at")
                         self.put_fact(cat, key, val, confidence=conf, source=src, expires_at=exp)

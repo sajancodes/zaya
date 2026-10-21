@@ -35,6 +35,7 @@ STORE_PATH = Path(__file__).resolve().parent.parent / "memory" / "missions.json"
 MAX_STEPS = 5
 MAX_CHECKS = 4
 MAX_ROUNDS = 3
+MAX_STEP_ATTEMPTS = 3
 MAX_HISTORY_MISSIONS = 150
 
 _ALLOWED_TRUSTS = {TRUST_LOCAL_OWNER, TRUST_AUTHENTICATED_REMOTE_OWNER}
@@ -95,7 +96,7 @@ def classify_goal_scope(goal: str) -> set[str]:
         allowed.add("terminate_process")
 
     # File operations
-    if re.search(r"\b(write|create|edit|modify|save|append|update|touch|make|generate)\b.*\b(file|script|code|folder|directory)\b", g):
+    if re.search(r"\b(write|create|edit|modify|save|append|update|touch|make|generate|move|copy|rename)\b.*\b(file|script|code|folder|directory)\b", g):
         allowed.add("write_files")
     if re.search(r"\b(delete|remove|erase|clean|clear|purge|rm|unlink)\b", g):
         allowed.add("delete")
@@ -103,14 +104,16 @@ def classify_goal_scope(goal: str) -> set[str]:
     # Computer control and settings
     if re.search(r"\b(click|press|type|hotkey|drag|scroll|mouse|cursor|grounding)\b", g):
         allowed.add("computer_control")
-    if re.search(r"\b(volume|brightness|dark mode|wifi|bluetooth|setting|mute|unmute)\b", g):
+    if re.search(r"\b(volume|brightness|dark mode|wifi|bluetooth|setting|mute|unmute|shutdown|restart)\b", g):
         allowed.add("change_settings")
 
     # Commands / installation
-    if re.search(r"\b(run|execute|command|script|shell|terminal|powershell|pwsh|cmd)\b", g):
+    if re.search(r"\b(run|execute|open|launch|command|script|shell|terminal|powershell|pwsh|cmd)\b", g):
         allowed.add("run_command")
     if re.search(r"\b(install|setup|update game|upgrade|download)\b", g):
         allowed.add("install")
+    if re.search(r'\b(remind|reminder)\b', g):
+        allowed.add('write_files')
 
     # Git
     if re.search(r"\b(git|commit|stage)\b", g):
@@ -134,8 +137,10 @@ def validate_step(tool_name: str, parameters: dict[str, Any], allowed_scopes: se
     if tool_name not in MISSION_ALLOWED_TOOLS:
         return f"Tool '{tool_name}' is not in the mission allowed tools set."
 
-    tool_scopes = TOOL_OPERATION_CLASSES.get(tool_name, set())
-    if not (tool_scopes & allowed_scopes):
+    if not isinstance(parameters, dict):
+        return f"Parameters for tool '{tool_name}' must be a dictionary."
+    tool_scopes = _step_scopes(tool_name, parameters)
+    if not tool_scopes or not tool_scopes.issubset(allowed_scopes):
         return f"Tool '{tool_name}' requires operation classes {sorted(tool_scopes)}, but authorized scope is {sorted(allowed_scopes)}."
 
     if not isinstance(parameters, dict):
@@ -163,6 +168,54 @@ def validate_step(tool_name: str, parameters: dict[str, Any], allowed_scopes: se
         logger.debug("Schema validation error: %s", e)
 
     return None
+
+
+def _step_scopes(tool: str, params: dict) -> set[str]:
+    """Classify the selected operation, never the union of a tool's abilities."""
+    action = str(params.get('action', '')).strip().lower()
+    if tool == 'file_controller':
+        if action in {'list', 'read', 'find', 'largest', 'disk_usage', 'info'}:
+            return {'inspect_files'}
+        return {'delete'} if action == 'delete' else {'write_files'}
+    if tool == 'file_processor':
+        if action in {'info', 'stats', 'word_count', 'describe', 'ocr', 'analyze', 'read', 'extract_text', 'list', 'validate', 'summarize', 'transcribe'}:
+            return {'read'}
+        return {'run_command'} if action == 'run' else {'write_files'}
+    if tool == 'git_control':
+        if action in {'repo_info', 'status', 'diff', 'diff_staged', 'branches', 'log', 'remote', 'verify_push'}:
+            return {'read'}
+        return {'git_push'} if action == 'push' else {'git_commit'}
+    if tool == 'personal_profile':
+        return {'read'} if action in {'get', 'read', 'show', 'status', 'list', ''} else {'change_settings'}
+    if tool == 'session_activity':
+        return {'read'} if action in {'get', 'read', 'status', 'list', ''} else {'change_settings'}
+    if tool == 'browser_control':
+        return {'read'} if action in {'tabs', 'list_tabs', 'read', 'get_text', 'status', 'screenshot'} else {'computer_control'}
+    if tool == 'runtime_logs':
+        return {'read'} if action in {'read', 'status', ''} else {'computer_control'}
+    if tool == 'computer_settings':
+        if not action:
+            return set()  # Require an explicit action rather than model inference.
+        if action in {'press_key', 'type_text', 'write_on_screen', 'type', 'write'} or any(
+                token in action for token in ('scroll', 'window', 'tab', 'click', 'refresh', 'reload', 'fullscreen', 'zoom')):
+            return {'computer_control'}
+        return {'change_settings'}
+    if tool == 'game_updater':
+        if action in {'list', 'download_status', 'schedule_status'}:
+            return {'read'}
+        if params.get('shutdown_when_done') not in (None, False, 'false', '0', 0):
+            return {'install', 'change_settings'}
+        # A mission must not inherit an unrelated global shutdown setting.
+        params.setdefault('shutdown_when_done', False)
+        return {'install'}
+    if tool == 'reminder':
+        return {'read'} if action in {'status', 'list'} else {'write_files'}
+    if tool == 'open_app':
+        return {'run_command'}
+    if tool == 'web_search':
+        return {'search'}
+    # Single-purpose tools do not combine read and mutation scopes.
+    return TOOL_OPERATION_CLASSES.get(tool, set())
 
 
 @dataclass
@@ -391,6 +444,11 @@ class MissionSupervisor:
             step_to_run = None
             for s in mission.steps:
                 if s["status"] == "pending":
+                    if int(s.get('attempts', 0)) >= MAX_STEP_ATTEMPTS:
+                        mission.status, mission.error = 'failed', 'Step retry budget exhausted.'
+                        self._save()
+                        return
+                    s['attempts'] = int(s.get('attempts', 0)) + 1
                     step_to_run = s
                     s["status"] = "running"
                     mission.current_step = s["id"]
@@ -431,6 +489,7 @@ class MissionSupervisor:
                         "step_id": step_id,
                         "tool": tool_name,
                         "parameters": params,
+                        "runtime_task_id": result.data.get('runtime_task_id'),
                     }
                     mission.updated_at = self._clock()
                     self._save()
@@ -450,7 +509,7 @@ class MissionSupervisor:
                         s["error"] = error_text
                 mission.updated_at = self._clock()
                 if not success:
-                    if result.retryable and not result.side_effect:
+                    if result.retryable and not result.side_effect and step_to_run.get('attempts', 0) < MAX_STEP_ATTEMPTS:
                         step_to_run["status"] = "pending"
                         step_to_run["error"] = f"Retryable error: {error_text}"
                     else:
@@ -488,6 +547,11 @@ class MissionSupervisor:
                 with self._lock:
                     for s in mission.steps:
                         if s["status"] == "pending":
+                            if int(s.get('attempts', 0)) >= MAX_STEP_ATTEMPTS:
+                                mission.status, mission.error = 'failed', 'Step retry budget exhausted.'
+                                self._save()
+                                return
+                            s['attempts'] = int(s.get('attempts', 0)) + 1
                             step_to_run = s
                             s["status"] = "running"
                             mission.current_step = s["id"]
@@ -531,6 +595,7 @@ class MissionSupervisor:
                                 "step_id": step_id,
                                 "tool": tool_name,
                                 "parameters": params,
+                                "runtime_task_id": result.data.get('runtime_task_id'),
                             }
                             mission.updated_at = self._clock()
                             self._save()
@@ -553,9 +618,9 @@ class MissionSupervisor:
 
                         if not success:
                             # Check retryability
-                            if result.retryable and not result.side_effect:
-                                s["status"] = "pending"
-                                s["error"] = f"Retryable error: {error_text}"
+                            if result.retryable and not result.side_effect and step_to_run.get('attempts', 0) < MAX_STEP_ATTEMPTS:
+                                step_to_run["status"] = "pending"
+                                step_to_run["error"] = f"Retryable error: {error_text}"
                             else:
                                 mission.status = "failed"
                                 mission.error = error_text
@@ -573,11 +638,6 @@ class MissionSupervisor:
         from core.task_runtime import get_runtime
         from memory.config_manager import get_auto_execute_enabled
 
-        # Check confirmation requirement for destructive/privileged tools
-        destructive_tools = {"terminate_app", "terminal_exec"}
-        if tool_name in destructive_tools and not get_auto_execute_enabled():
-            return ToolResult("failed", "Action requires human confirmation."), True
-
         reg = get_action_registry()
         rec = reg._actions.get(tool_name)
         if not rec or not rec.handler:
@@ -586,6 +646,24 @@ class MissionSupervisor:
         handler = rec.handler
 
         async def _invoke():
+            if tool_name == 'terminate_app' and not get_auto_execute_enabled():
+                from core import confirm
+                from core.operator import current_task
+                from core.execution_policy import with_trust
+                task_id = current_task.get()
+                runtime = get_runtime()
+                def approved():
+                    with with_trust(trust_level):
+                        try:
+                            result = normalize(handler(params))
+                        except Exception as error:
+                            result = ToolResult('failed', f'Confirmed step failed: {type(error).__name__}')
+                        runtime.finish(task_id, result)
+                        return str(result)
+                def cancelled(reason):
+                    runtime.transition(task_id, 'cancelled', error=reason)
+                return normalize(confirm.request('mission-terminate-' + task_id,
+                    'Terminate application for mission', str(params), approved, on_cancel=cancelled))
             res = handler(params)
             if asyncio.iscoroutine(res):
                 res = await res
@@ -602,10 +680,12 @@ class MissionSupervisor:
                     trust_level=trust_level,
                 )
             )
-            loop.close()
-            return res, False
+            return res, res.status == 'waiting_confirmation'
         except Exception as e:
             return ToolResult("failed", f"Operator execution exception: {e}"), False
+        finally:
+            if 'loop' in locals():
+                loop.close()
 
     def _review_and_verify_mission(self, mission_id: str) -> None:
         """Bounded review loop and real verification of checks."""
@@ -655,7 +735,7 @@ class MissionSupervisor:
         """Verify real deterministic outcomes from checks."""
         checks = mission.checks
         if not checks:
-            return True, "No verification checks specified."
+            return False, "No verification checks specified."
 
         verifications: list[str] = []
         all_passed = True
@@ -663,10 +743,10 @@ class MissionSupervisor:
         for check in checks:
             c_lower = check.lower()
             # File existence check
-            m = re.search(r"file\s*(?:exists\s*:?|:\s*)?\s*['\"]?([\w\-\\./:]+)['\"]?(?:\s+exists)?", c_lower)
-            if m and (":\\" in m.group(1) or "/" in m.group(1) or "." in m.group(1)):
-                target_path = Path(m.group(1))
-                if target_path.exists():
+            m = re.fullmatch(r"\s*file\s+exists\s*:\s*(.+?)\s*", check, re.IGNORECASE)
+            if m:
+                target_path = Path(m.group(1).strip().strip('\"\''))
+                if target_path.is_file():
                     verifications.append(f"Verified: {target_path} exists")
                 else:
                     all_passed = False
@@ -674,12 +754,12 @@ class MissionSupervisor:
                 continue
 
             # Process / window running check
-            m_proc = re.search(r"process\s+['\"]?([\w\-\\.]+)['\"]?\s+running", c_lower)
+            m_proc = re.fullmatch(r"\s*process\s+['\"]?([\w\-\\.]+)['\"]?\s+running\s*", c_lower)
             if m_proc:
                 pname = m_proc.group(1).lower()
                 try:
                     import psutil
-                    running = any(pname in (p.info["name"] or "").lower() for p in psutil.process_iter(["name"]))
+                    running = any(pname == (p.info["name"] or "").lower() for p in psutil.process_iter(["name"]))
                     if running:
                         verifications.append(f"Verified: {pname} is running")
                     else:
@@ -689,13 +769,8 @@ class MissionSupervisor:
                     all_passed = False
                 continue
 
-            # Default outcome verification: check that steps executed without error
-            step_results = [s.get("result", "") for s in mission.steps if s.get("status") == "completed"]
-            if any(step_results):
-                verifications.append(f"Verified via step results ({len(step_results)} steps returned output)")
-            else:
-                all_passed = False
-                verifications.append(f"Unverifiable check: '{check}'")
+            all_passed = False
+            verifications.append(f"Unverifiable check: '{check}'")
 
         return all_passed, "; ".join(verifications)
 
@@ -752,14 +827,32 @@ class MissionSupervisor:
                 return ToolResult("failed", f"Mission {mission_id} not found.")
 
             if mission.status == "waiting_confirmation":
+                task_id = (mission.pending_confirmation or {}).get('runtime_task_id')
                 if not approved:
+                    if task_id:
+                        from core import confirm
+                        confirm.cancel_task(task_id)
                     mission.status = "cancelled"
                     mission.error = "Confirmation denied by owner."
                     mission.updated_at = self._clock()
                     self._save()
                     return ToolResult("success", f"Mission {mission_id} denied and cancelled.", {"mission": mission.public()}, side_effect=True)
 
-                # Approved -> resume execution
+                # A model-provided boolean cannot resolve the real UI gate.
+                # Continue only after its originating task records completion.
+                if not task_id:
+                    return ToolResult('waiting_confirmation', 'Use the actual confirmation interface; this mission has no verified approval result.')
+                from core.task_runtime import get_runtime
+                task = get_runtime().get(task_id)
+                if task.state != 'completed':
+                    if task.state in {'cancelled', 'failed'}:
+                        mission.status, mission.error = task.state, task.error or 'The confirmed step did not complete.'
+                        self._save()
+                        return ToolResult('failed', mission.error)
+                    return ToolResult('waiting_confirmation', 'The actual confirmation is still pending. Confirm on the interface, then continue.')
+                for step in mission.steps:
+                    if step['id'] == mission.pending_confirmation['step_id']:
+                        step['status'], step['result'] = 'completed', 'Completion recorded by the confirmed operator task.'
                 mission.status = "running"
                 mission.pending_confirmation = None
                 mission.updated_at = self._clock()
@@ -803,6 +896,10 @@ class MissionSupervisor:
             event = self._cancel_events.get(mission_id)
             if event:
                 event.set()
+            task_id = (mission.pending_confirmation or {}).get('runtime_task_id')
+            if task_id:
+                from core import confirm
+                confirm.cancel_task(task_id)
             mission.status = "cancelled"
             mission.updated_at = self._clock()
             self._save()

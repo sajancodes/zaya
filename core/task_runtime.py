@@ -43,8 +43,10 @@ class TaskRuntime:
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS runtime_tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS tool_results (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS tool_request_claims (request_id TEXT PRIMARY KEY, created_at REAL NOT NULL)')
         # A process restart cannot prove an in-flight side effect failed. Do not replay it.
-        for task in self.list():
+        rows = self.db.execute('SELECT id,payload FROM runtime_tasks').fetchall()
+        for task in (self._load_task(*row) for row in rows):
             if task.state not in TERMINAL:
                 self.transition(task.id, 'paused', error='Application restarted; inspect evidence before resuming.')
 
@@ -157,6 +159,18 @@ class TaskRuntime:
         with self._lock, self.db:
             self.db.execute('INSERT OR IGNORE INTO tool_results VALUES (?,?)',
                             (request_id, json.dumps(audit.redact(result.to_dict()), default=str)))
+
+    def claim_request(self, request_id: str) -> bool:
+        """Durably reserve an invocation before any side effect can start."""
+        with self._lock, self.db:
+            cursor = self.db.execute('INSERT OR IGNORE INTO tool_request_claims VALUES (?,?)',
+                                     (request_id, time.time()))
+            return cursor.rowcount == 1
+
+    def release_request(self, request_id: str) -> None:
+        """Release only requests whose completed result proves no side effect."""
+        with self._lock, self.db:
+            self.db.execute('DELETE FROM tool_request_claims WHERE request_id=?', (request_id,))
 
 
 _runtime: TaskRuntime | None = None

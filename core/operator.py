@@ -26,9 +26,16 @@ class Operator:
         cached = self.runtime.cached(request_id) if request_id else None
         if cached:
             return cached
+        if request_id and not self.runtime.claim_request(request_id):
+            # Check again after the atomic claim: the first invocation may
+            # have completed between our first cache read and this reservation.
+            return self.runtime.cached(request_id) or ToolResult(
+                'partial', 'This request is already running or its earlier outcome is uncertain. It was not repeated.',
+                {'request_reserved': True}, retryable=False)
         task = self.runtime.create(goal or name, source=actual_source, trust_level=actual_trust)
         task_token, request_token = current_task.set(task.id), current_request.set(request_id)
         started = time.monotonic()
+        uncertain = False
         try:
             for attempt in range(task.max_attempts):
                 self.runtime.attempt(task.id, name)
@@ -39,6 +46,7 @@ class Operator:
                     self.runtime.transition(task.id, 'cancelled')
                     raise
                 except Exception as error:
+                    uncertain = True
                     result = ToolResult('failed', f'{name} failed: {audit.redact(str(error))}')
                 if self.runtime.get(task.id).state not in {'completed', 'failed', 'cancelled'}:
                     self.runtime.transition(task.id, 'verifying', evidence=result.evidence)
@@ -48,6 +56,10 @@ class Operator:
                     self.runtime.finish(task.id, result)
                 if request_id and result.status == 'success' and result.side_effect:
                     self.runtime.remember(request_id, result)
+                if result.status == 'waiting_confirmation':
+                    result.data = {**result.data, 'runtime_task_id': task.id}
+                elif request_id and not result.side_effect and not uncertain:
+                    self.runtime.release_request(request_id)
                 bus.publish('tool.failed' if result.status == 'failed' else 'tool.completed',
                             tool=name, task_id=task.id, status=result.status)
                 audit.write({'task_id': task.id, 'tool': name, 'status': result.status,

@@ -136,6 +136,10 @@ def notify_scheduled(rid, database, os_name):
             raise RuntimeError('The scheduler ran before this reminder was due.')
         if remaining > 0:
             time.sleep(remaining)  # Minute-resolution schedulers may start early.
+        item = store.get(rid)
+        if (item['cancelled_at'] is not None or item['desktop_notified_at'] is not None
+                or item['voice_queued_at'] is not None):
+            return True
         notify_desktop(item['message'], os_name)
         store.update(rid, desktop_notified_at=store.clock(), error='')
         return True
