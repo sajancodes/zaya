@@ -12,7 +12,6 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [webGLSupported, setWebGLSupported] = useState<boolean>(true);
-  const scrollRef = useRef<number>(0);
   const mouseRef = useRef<{ x: number; y: number; targetX: number; targetY: number }>({
     x: 0,
     y: 0,
@@ -39,21 +38,20 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // 2. Scene, Fog & Perspective Camera
+    // 2. Scene, Fog & Fixed Cinematic Camera
     const scene = new THREE.Scene();
-    // Deep cosmic fog blending to void black / deep space midnight
-    scene.fog = new THREE.FogExp2(0x010409, 0.008);
+    scene.fog = new THREE.FogExp2(0x010409, 0.0035);
 
     const camera = new THREE.PerspectiveCamera(
-      54,
+      48,
       window.innerWidth / window.innerHeight,
       0.1,
-      1200
+      1500
     );
-    // Initial hero camera position framing the cosmic highway
-    camera.position.set(0, 0.8, 30);
+    // Fixed cinematic viewpoint: Framing Earth in the mid/left, Moon orbiting, and Saturn in the distance
+    camera.position.set(0, 1.5, 34);
 
-    // 3. Renderer Setup
+    // 3. High-Performance Renderer
     const renderer = new THREE.WebGLRenderer({
       powerPreference: 'high-performance',
       antialias: true,
@@ -63,134 +61,343 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x010409, 1.0);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.25;
     container.appendChild(renderer.domElement);
 
-    // 4. Procedural Textures (Generated via Off-screen Canvas)
-    // Texture A: Star Particle Texture
-    const starCanvas = document.createElement('canvas');
-    starCanvas.width = 64;
-    starCanvas.height = 64;
-    const sCtx = starCanvas.getContext('2d');
-    if (sCtx) {
-      const grad = sCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-      grad.addColorStop(0.2, 'rgba(235, 252, 255, 0.9)');
-      grad.addColorStop(0.5, 'rgba(95, 234, 255, 0.4)');
-      grad.addColorStop(0.8, 'rgba(64, 136, 255, 0.1)');
-      grad.addColorStop(1, 'rgba(1, 4, 9, 0)');
-      sCtx.fillStyle = grad;
-      sCtx.fillRect(0, 0, 64, 64);
-    }
-    const starTexture = new THREE.CanvasTexture(starCanvas);
+    // 4. Procedural High-Detail Planet Textures (Generated via Off-screen Canvas)
 
-    // Texture B: Volumetric Dark Cosmic Nebula Cloud Puff Texture
+    // A. Real Earth Surface Map (1024x512)
+    const earthCanvas = document.createElement('canvas');
+    earthCanvas.width = 1024;
+    earthCanvas.height = 512;
+    const eCtx = earthCanvas.getContext('2d');
+    if (eCtx) {
+      // 1. Deep Ocean Base with realistic marine depth
+      const oceanGrad = eCtx.createLinearGradient(0, 0, 0, 512);
+      oceanGrad.addColorStop(0, '#10273f');
+      oceanGrad.addColorStop(0.3, '#0b1d33');
+      oceanGrad.addColorStop(0.5, '#081729');
+      oceanGrad.addColorStop(0.7, '#0b1d33');
+      oceanGrad.addColorStop(1, '#10273f');
+      eCtx.fillStyle = oceanGrad;
+      eCtx.fillRect(0, 0, 1024, 512);
+
+      // 2. Continents: Real world landmass outlines with organic fractal borders
+      eCtx.save();
+
+      // Coastal Shallow Shelf Water (Turquoise Cyan)
+      eCtx.strokeStyle = 'rgba(28, 128, 168, 0.5)';
+      eCtx.lineWidth = 8;
+      eCtx.lineJoin = 'round';
+
+      const drawLandmass = (
+        points: [number, number][],
+        fillColor: string,
+        strokeShelf: boolean = true
+      ) => {
+        if (points.length < 3) return;
+        eCtx.beginPath();
+        eCtx.moveTo(points[0][0], points[0][1]);
+        for (let i = 1; i < points.length; i++) {
+          eCtx.lineTo(points[i][0], points[i][1]);
+        }
+        eCtx.closePath();
+        if (strokeShelf) eCtx.stroke();
+        eCtx.fillStyle = fillColor;
+        eCtx.fill();
+      };
+
+      // North America
+      drawLandmass([
+        [100, 75], [160, 65], [230, 80], [320, 85], [370, 110],
+        [320, 135], [300, 180], [270, 220], [285, 255], [265, 275],
+        [240, 275], [215, 305], [195, 270], [180, 230], [130, 190],
+        [90, 140], [80, 95]
+      ], '#2f4f2c');
+
+      // Greenland (Ice cap)
+      drawLandmass([
+        [360, 50], [420, 45], [440, 75], [390, 105], [350, 80]
+      ], '#eaf3f8');
+
+      // South America
+      drawLandmass([
+        [285, 320], [330, 315], [380, 345], [405, 385], [385, 435],
+        [350, 470], [315, 495], [310, 450], [290, 400], [275, 350]
+      ], '#284626');
+
+      // Europe
+      drawLandmass([
+        [490, 130], [535, 110], [570, 135], [540, 175], [500, 190],
+        [475, 220], [460, 200], [470, 160]
+      ], '#3b5832');
+
+      // Scandinavia
+      drawLandmass([
+        [525, 75], [560, 70], [550, 125], [520, 120]
+      ], '#344e2e');
+
+      // Africa
+      drawLandmass([
+        [480, 230], [540, 215], [605, 230], [635, 275], [645, 335],
+        [605, 395], [570, 450], [540, 420], [510, 350], [470, 320],
+        [465, 270]
+      ], '#736142'); // Sahara / Savannah ochre
+
+      // Congo / Central Africa green basin
+      drawLandmass([
+        [515, 330], [565, 330], [580, 380], [545, 400], [520, 365]
+      ], '#264222', false);
+
+      // Asia
+      drawLandmass([
+        [580, 120], [670, 100], [770, 85], [880, 95], [925, 140],
+        [880, 190], [820, 195], [835, 255], [770, 280], [730, 330],
+        [690, 290], [650, 260], [600, 240]
+      ], '#3d5634');
+
+      // India
+      drawLandmass([
+        [680, 265], [725, 270], [705, 335], [680, 300]
+      ], '#455e37');
+
+      // Southeast Asia & Indonesia
+      drawLandmass([
+        [775, 305], [825, 310], [805, 360], [770, 340]
+      ], '#224424');
+
+      // Australia
+      drawLandmass([
+        [820, 390], [880, 385], [915, 420], [890, 470], [835, 465],
+        [810, 425]
+      ], '#886d47'); // Outback ochre
+
+      // Antarctica (Immense Southern Ice Sheet)
+      drawLandmass([
+        [0, 485], [200, 475], [400, 480], [600, 470], [800, 480],
+        [1024, 485], [1024, 512], [0, 512]
+      ], '#f0f7fb');
+
+      // Arctic Sea Ice Sheet
+      drawLandmass([
+        [0, 0], [1024, 0], [1024, 40], [750, 45], [500, 35],
+        [250, 45], [0, 35]
+      ], '#f0f7fb');
+
+      // Mountain Ranges & Peaks (Snow / slate accents)
+      eCtx.strokeStyle = 'rgba(235, 245, 255, 0.7)';
+      eCtx.lineWidth = 3;
+      // Himalayas
+      eCtx.beginPath();
+      eCtx.moveTo(710, 245);
+      eCtx.lineTo(775, 240);
+      eCtx.stroke();
+      // Andes
+      eCtx.beginPath();
+      eCtx.moveTo(290, 330);
+      eCtx.lineTo(315, 470);
+      eCtx.stroke();
+      // Rockies
+      eCtx.beginPath();
+      eCtx.moveTo(180, 120);
+      eCtx.lineTo(220, 230);
+      eCtx.stroke();
+
+      eCtx.restore();
+    }
+    const earthTexture = new THREE.CanvasTexture(earthCanvas);
+
+    // B. Earth Specular / Roughness Map (Oceans shiny, land matte)
+    const specCanvas = document.createElement('canvas');
+    specCanvas.width = 512;
+    specCanvas.height = 256;
+    const spCtx = specCanvas.getContext('2d');
+    if (spCtx) {
+      // Draw ocean black (roughness = 0 -> mirror specular reflection for sunlight)
+      spCtx.fillStyle = '#000000';
+      spCtx.fillRect(0, 0, 512, 256);
+      // Copy landmasses as white (roughness = 1 -> diffuse land)
+      spCtx.drawImage(earthCanvas, 0, 0, 512, 256);
+      const imgData = spCtx.getImageData(0, 0, 512, 256);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // If not ocean blue, turn bright white for matte roughness
+        const isOcean = d[i] < 25 && d[i + 1] < 45 && d[i + 2] > 40;
+        const val = isOcean ? 15 : 230;
+        d[i] = val;
+        d[i + 1] = val;
+        d[i + 2] = val;
+      }
+      spCtx.putImageData(imgData, 0, 0);
+    }
+    const earthRoughnessMap = new THREE.CanvasTexture(specCanvas);
+
+    // C. Real Earth Clouds Layer (1024x512)
     const cloudCanvas = document.createElement('canvas');
-    cloudCanvas.width = 256;
-    cloudCanvas.height = 256;
-    const cCtx = cloudCanvas.getContext('2d');
-    if (cCtx) {
-      const grad = cCtx.createRadialGradient(128, 128, 0, 128, 128, 128);
-      grad.addColorStop(0, 'rgba(4, 19, 33, 0.85)');
-      grad.addColorStop(0.35, 'rgba(3, 12, 22, 0.7)');
-      grad.addColorStop(0.65, 'rgba(64, 136, 255, 0.25)');
-      grad.addColorStop(0.85, 'rgba(95, 234, 255, 0.15)');
-      grad.addColorStop(1, 'rgba(1, 4, 9, 0)');
-      cCtx.fillStyle = grad;
-      cCtx.fillRect(0, 0, 256, 256);
-    }
-    const cloudTexture = new THREE.CanvasTexture(cloudCanvas);
+    cloudCanvas.width = 1024;
+    cloudCanvas.height = 512;
+    const clCtx = cloudCanvas.getContext('2d');
+    if (clCtx) {
+      clCtx.clearRect(0, 0, 1024, 512);
 
-    // Texture C: Vertical Light Beam Gradient
-    const beamCanvas = document.createElement('canvas');
-    beamCanvas.width = 64;
-    beamCanvas.height = 256;
-    const bCtx = beamCanvas.getContext('2d');
-    if (bCtx) {
-      const grad = bCtx.createLinearGradient(0, 0, 0, 256);
-      grad.addColorStop(0, 'rgba(235, 252, 255, 0.95)');
-      grad.addColorStop(0.2, 'rgba(95, 234, 255, 0.7)');
-      grad.addColorStop(0.7, 'rgba(64, 136, 255, 0.25)');
-      grad.addColorStop(1, 'rgba(1, 4, 9, 0)');
-      bCtx.fillStyle = grad;
-      bCtx.fillRect(0, 0, 64, 256);
-    }
-    const beamTexture = new THREE.CanvasTexture(beamCanvas);
+      // Equatorial ITCZ Cloud Bands & Swirls
+      for (let i = 0; i < 90; i++) {
+        const x = Math.random() * 1024;
+        const y = 220 + (Math.random() - 0.5) * 80;
+        const r = 25 + Math.random() * 55;
+        const grad = clCtx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
+        grad.addColorStop(0.5, 'rgba(240, 248, 255, 0.4)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        clCtx.fillStyle = grad;
+        clCtx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
 
-    // 5. Cosmic Lighting Environment
-    const ambientLight = new THREE.AmbientLight(0x041321, 0.8);
-    scene.add(ambientLight);
-
-    const directionalRim = new THREE.DirectionalLight(0xebfcff, 1.5);
-    directionalRim.position.set(-30, 40, 20);
-    scene.add(directionalRim);
-
-    // Radiant Sun Orb Light at Upper Right
-    const sunOrbLight = new THREE.PointLight(0x5feaff, 4.0, 400);
-    sunOrbLight.position.set(26, 13, -92);
-    scene.add(sunOrbLight);
-
-    // Foreground Planet Cyan Specular Light
-    const fgPlanetLight = new THREE.PointLight(0x4088ff, 1.8, 80);
-    fgPlanetLight.position.set(-18, -4, 18);
-    scene.add(fgPlanetLight);
-
-    // 6. Volumetric Dark Cosmic Nebula Clouds (Bottom and Sides Framing)
-    const nebulaGroup = new THREE.Group();
-    const cloudMaterial = new THREE.SpriteMaterial({
-      map: cloudTexture,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.NormalBlending,
-      depthWrite: false
-    });
-
-    const cloudCount = window.innerWidth < 768 ? 26 : 48;
-    const cloudSprites: { sprite: THREE.Sprite; rotSpeed: number; baseScale: number }[] = [];
-
-    for (let i = 0; i < cloudCount; i++) {
-      const sprite = new THREE.Sprite(cloudMaterial);
-      // Position primarily in lower half, flanks, and receding depth
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const x = (Math.random() * 35 + 8) * side;
-      const y = -14 - Math.random() * 22;
-      const z = 20 - Math.random() * 180;
-      sprite.position.set(x, y, z);
-
-      const baseScale = 25 + Math.random() * 35;
-      sprite.scale.set(baseScale, baseScale, 1);
-
-      nebulaGroup.add(sprite);
-      cloudSprites.push({
-        sprite,
-        rotSpeed: (Math.random() - 0.5) * 0.0003,
-        baseScale
+      // Mid-Latitude Cyclonic Storm Swirls
+      const stormCenters = [
+        [280, 150], [680, 160], [850, 170],
+        [320, 380], [620, 410], [820, 390]
+      ];
+      stormCenters.forEach(([sx, sy]) => {
+        for (let a = 0; a < 6; a++) {
+          const angle = (a / 6) * Math.PI * 2;
+          const dist = 30 + a * 8;
+          const cx = sx + Math.cos(angle) * dist;
+          const cy = sy + Math.sin(angle) * (dist * 0.55);
+          const r = 35 + Math.random() * 25;
+          const grad = clCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+          grad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+          grad.addColorStop(0.6, 'rgba(230, 245, 255, 0.35)');
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          clCtx.fillStyle = grad;
+          clCtx.fillRect(cx - r, cy - r, r * 2, r * 2);
+        }
       });
     }
-    scene.add(nebulaGroup);
+    const earthCloudTexture = new THREE.CanvasTexture(cloudCanvas);
 
-    // 7. Realistic Multi-Layer Starfield
-    const starCount = 1800;
+    // D. Real Moon Texture (512x256)
+    const moonCanvas = document.createElement('canvas');
+    moonCanvas.width = 512;
+    moonCanvas.height = 256;
+    const mCtx = moonCanvas.getContext('2d');
+    if (mCtx) {
+      mCtx.fillStyle = '#9aa0a6';
+      mCtx.fillRect(0, 0, 512, 256);
+
+      // Dark Basaltic Lunar Maria (Plains)
+      const maria = [
+        [150, 100, 50], [220, 90, 60], [280, 120, 45],
+        [180, 150, 55], [350, 110, 40]
+      ];
+      maria.forEach(([x, y, r]) => {
+        const grad = mCtx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, 'rgba(70, 75, 82, 0.85)');
+        grad.addColorStop(0.7, 'rgba(90, 95, 102, 0.6)');
+        grad.addColorStop(1, 'rgba(154, 160, 166, 0)');
+        mCtx.fillStyle = grad;
+        mCtx.fillRect(x - r, y - r, r * 2, r * 2);
+      });
+
+      // Bright Impact Craters with Rays
+      for (let i = 0; i < 40; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 256;
+        const r = 4 + Math.random() * 12;
+        mCtx.strokeStyle = 'rgba(240, 245, 250, 0.75)';
+        mCtx.lineWidth = 1.5;
+        mCtx.beginPath();
+        mCtx.arc(x, y, r, 0, Math.PI * 2);
+        mCtx.stroke();
+      }
+    }
+    const moonTexture = new THREE.CanvasTexture(moonCanvas);
+
+    // E. Real Saturn Banded Atmosphere Map (512x256)
+    const saturnCanvas = document.createElement('canvas');
+    saturnCanvas.width = 512;
+    saturnCanvas.height = 256;
+    const satCtx = saturnCanvas.getContext('2d');
+    if (satCtx) {
+      const grad = satCtx.createLinearGradient(0, 0, 0, 256);
+      grad.addColorStop(0, '#5a4c38');
+      grad.addColorStop(0.15, '#c8ad85');
+      grad.addColorStop(0.3, '#dfc59e');
+      grad.addColorStop(0.45, '#eed9b7');
+      grad.addColorStop(0.5, '#f5e4cc');
+      grad.addColorStop(0.55, '#eed9b7');
+      grad.addColorStop(0.7, '#cbb28b');
+      grad.addColorStop(0.85, '#9d8463');
+      grad.addColorStop(1, '#534433');
+      satCtx.fillStyle = grad;
+      satCtx.fillRect(0, 0, 512, 256);
+
+      // Fine atmospheric jet-stream streaks
+      for (let y = 0; y < 256; y += 4) {
+        satCtx.fillStyle = (y % 8 === 0) ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+        satCtx.fillRect(0, y, 512, 2);
+      }
+    }
+    const saturnTexture = new THREE.CanvasTexture(saturnCanvas);
+
+    // F. Saturn Ring Texture (512x64 with Cassini Division)
+    const ringCanvas = document.createElement('canvas');
+    ringCanvas.width = 512;
+    ringCanvas.height = 64;
+    const rCtx = ringCanvas.getContext('2d');
+    if (rCtx) {
+      const rGrad = rCtx.createLinearGradient(0, 0, 512, 0);
+      rGrad.addColorStop(0, 'rgba(160, 135, 100, 0)');
+      rGrad.addColorStop(0.12, 'rgba(180, 150, 115, 0.35)'); // C Ring (Crepe)
+      rGrad.addColorStop(0.32, 'rgba(225, 195, 155, 0.95)'); // B Ring (Dense)
+      rGrad.addColorStop(0.64, 'rgba(215, 185, 145, 0.85)'); // Inner edge Cassini
+      rGrad.addColorStop(0.66, 'rgba(10, 8, 6, 0.03)');       // Cassini Division (Gap)
+      rGrad.addColorStop(0.72, 'rgba(10, 8, 6, 0.03)');       // Cassini Division (Gap)
+      rGrad.addColorStop(0.74, 'rgba(205, 175, 135, 0.8)');   // A Ring
+      rGrad.addColorStop(0.96, 'rgba(175, 145, 110, 0.5)');   // Encke Gap region
+      rGrad.addColorStop(1, 'rgba(140, 115, 85, 0)');
+      rCtx.fillStyle = rGrad;
+      rCtx.fillRect(0, 0, 512, 64);
+    }
+    const saturnRingTexture = new THREE.CanvasTexture(ringCanvas);
+
+    // 5. Lighting Environment: Brilliant Directional Sunlight
+    // Simulates the Sun illuminating one hemisphere of Earth and planets realistically
+    const sunlight = new THREE.DirectionalLight(0xfff8ee, 2.4);
+    sunlight.position.set(-45, 30, 35);
+    scene.add(sunlight);
+
+    // Soft galactic ambient light so shadow sides remain visible
+    const deepSpaceAmbient = new THREE.AmbientLight(0x0a1628, 0.65);
+    scene.add(deepSpaceAmbient);
+
+    // Distant star highlight
+    const distantGlow = new THREE.DirectionalLight(0x5feaff, 0.4);
+    distantGlow.position.set(40, -20, -50);
+    scene.add(distantGlow);
+
+    // 6. Deep Space Realistic Starfield (3,200 Stars with Realistic Stellar Temperatures)
+    const starCount = 3200;
     const starGeom = new THREE.BufferGeometry();
     const starPositions = new Float32Array(starCount * 3);
     const starColors = new Float32Array(starCount * 3);
 
     const starPalette = [
-      new THREE.Color(0xffffff),
-      new THREE.Color(0xebfcff),
-      new THREE.Color(0x80cfff),
-      new THREE.Color(0x5feaff),
-      new THREE.Color(0xa5b4fc)
+      new THREE.Color(0xffffff), // Class A (White)
+      new THREE.Color(0xdbeafe), // Class B (Blue-white)
+      new THREE.Color(0x93c5fd), // Class O (Deep blue)
+      new THREE.Color(0xfef08a), // Class G (Yellow sun-like)
+      new THREE.Color(0xfed7aa)  // Class K/M (Warm orange/red)
     ];
 
     for (let i = 0; i < starCount; i++) {
-      const radius = 90 + Math.random() * 320;
+      const radius = 120 + Math.random() * 500;
       const theta = Math.random() * Math.PI * 2;
-      const phi = (Math.random() - 0.5) * Math.PI * 0.95;
+      const phi = (Math.random() - 0.5) * Math.PI;
 
       starPositions[i * 3] = radius * Math.cos(phi) * Math.sin(theta);
       starPositions[i * 3 + 1] = radius * Math.sin(phi);
-      starPositions[i * 3 + 2] = -30 - Math.random() * 320;
+      starPositions[i * 3 + 2] = radius * Math.cos(phi) * Math.cos(theta);
 
       const col = starPalette[Math.floor(Math.random() * starPalette.length)];
       starColors[i * 3] = col.r;
@@ -200,399 +407,205 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
     starGeom.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     starGeom.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
 
-    const starMat = new THREE.PointsMaterial({
-      size: 1.5,
-      map: starTexture,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    const starField = new THREE.Points(starGeom, starMat);
-    scene.add(starField);
-
-    // 8. The Destiny Highway Spline (Curving from lower-left to upper-right sun orb)
-    const curveControlPoints = [
-      new THREE.Vector3(-22, -6, 25),    // Lower-left foreground (near foreground planet)
-      new THREE.Vector3(-12, -2, 10),    // Ascending mid-ground
-      new THREE.Vector3(-2, 1, -8),      // Milestone 1 (Voice)
-      new THREE.Vector3(7, 4, -28),      // Milestone 2 (Vision & Memory)
-      new THREE.Vector3(15, 7, -50),     // Milestone 3 (Autonomy & Hands)
-      new THREE.Vector3(22, 10, -72),    // Milestone 4 (Spatial & Phone)
-      new THREE.Vector3(26, 12.8, -92),  // Approaching radiant celestial sun orb
-      new THREE.Vector3(28, 14.5, -125)  // Trailing into the infinite cosmos
-    ];
-
-    const destinyCurve = new THREE.CatmullRomCurve3(curveControlPoints);
-    destinyCurve.curveType = 'catmullrom';
-    destinyCurve.tension = 0.45;
-
-    const pathSamples = 600;
-    const curvePoints = destinyCurve.getPoints(pathSamples);
-
-    // Multi-strand luminous lines
-    const mainLineGeom = new THREE.BufferGeometry().setFromPoints(curvePoints);
-    
-    // Core Bright Line
-    const coreLineMat = new THREE.LineBasicMaterial({
-      color: 0xebfcff,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending
-    });
-    const coreLine = new THREE.Line(mainLineGeom, coreLineMat);
-    scene.add(coreLine);
-
-    // Cyan Glow Outer Line
-    const glowLineMat = new THREE.LineBasicMaterial({
-      color: 0x5feaff,
-      transparent: true,
-      opacity: 0.6,
-      blending: THREE.AdditiveBlending
-    });
-    const glowLine = new THREE.Line(mainLineGeom, glowLineMat);
-    glowLine.position.y -= 0.15;
-    scene.add(glowLine);
-
-    // Parallel Companion Strands (Offset tracks)
-    const strandCount = 4;
-    const strandLines: THREE.Line[] = [];
-    const strandOffsets = [
-      { x: -0.4, y: 0.2, c: 0x80cfff },
-      { x: 0.4, y: -0.2, c: 0x5feaff },
-      { x: -0.7, y: -0.3, c: 0x4088ff },
-      { x: 0.7, y: 0.3, c: 0x4088ff }
-    ];
-
-    strandOffsets.forEach((off) => {
-      const strandPoints = curvePoints.map((pt) =>
-        new THREE.Vector3(pt.x + off.x, pt.y + off.y, pt.z)
-      );
-      const sGeom = new THREE.BufferGeometry().setFromPoints(strandPoints);
-      const sMat = new THREE.LineBasicMaterial({
-        color: off.c,
-        transparent: true,
-        opacity: 0.35,
-        blending: THREE.AdditiveBlending
-      });
-      const sLine = new THREE.Line(sGeom, sMat);
-      scene.add(sLine);
-      strandLines.push(sLine);
-    });
-
-    // Sweeping Celestial Echo Arcs (Concentric curved rings framing the horizon)
-    const echoArcsGroup = new THREE.Group();
-    const arcRadius = [28, 42, 60];
-    arcRadius.forEach((r, idx) => {
-      const arcGeom = new THREE.BufferGeometry();
-      const aPoints: THREE.Vector3[] = [];
-      const numSegments = 60;
-      for (let s = 0; s <= numSegments; s++) {
-        const angle = -Math.PI * 0.25 + (s / numSegments) * Math.PI * 0.7;
-        aPoints.push(new THREE.Vector3(
-          Math.cos(angle) * r + 10,
-          Math.sin(angle) * (r * 0.4) - 2,
-          -40 - idx * 25
-        ));
-      }
-      arcGeom.setFromPoints(aPoints);
-      const aMat = new THREE.LineBasicMaterial({
-        color: 0x5feaff,
-        transparent: true,
-        opacity: 0.18 - idx * 0.04,
-        blending: THREE.AdditiveBlending
-      });
-      const aLine = new THREE.Line(arcGeom, aMat);
-      echoArcsGroup.add(aLine);
-    });
-    scene.add(echoArcsGroup);
-
-    // 9. Dense Streaming Particle Flow (River of Light — 1,600 Particles)
-    const streamParticleCount = window.innerWidth < 768 ? 700 : 1600;
-    const streamGeom = new THREE.BufferGeometry();
-    const streamPositions = new Float32Array(streamParticleCount * 3);
-    const streamColors = new Float32Array(streamParticleCount * 3);
-    const particleProgress: Float32Array = new Float32Array(streamParticleCount);
-    const particleSpeeds: Float32Array = new Float32Array(streamParticleCount);
-    const particleOffsetsX: Float32Array = new Float32Array(streamParticleCount);
-    const particleOffsetsY: Float32Array = new Float32Array(streamParticleCount);
-
-    for (let i = 0; i < streamParticleCount; i++) {
-      particleProgress[i] = Math.random();
-      particleSpeeds[i] = 0.0006 + Math.random() * 0.0014;
-      particleOffsetsX[i] = (Math.random() - 0.5) * 1.8;
-      particleOffsetsY[i] = (Math.random() - 0.5) * 1.2;
-
-      const pt = destinyCurve.getPointAt(particleProgress[i]);
-      streamPositions[i * 3] = pt.x + particleOffsetsX[i];
-      streamPositions[i * 3 + 1] = pt.y + particleOffsetsY[i];
-      streamPositions[i * 3 + 2] = pt.z;
-
-      const cRand = Math.random();
-      const col = cRand > 0.6 ? starPalette[1] : cRand > 0.2 ? starPalette[3] : starPalette[2];
-      streamColors[i * 3] = col.r;
-      streamColors[i * 3 + 1] = col.g;
-      streamColors[i * 3 + 2] = col.b;
+    // Star Glow Texture
+    const dotCanvas = document.createElement('canvas');
+    dotCanvas.width = 32;
+    dotCanvas.height = 32;
+    const dCtx = dotCanvas.getContext('2d');
+    if (dCtx) {
+      const grad = dCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      grad.addColorStop(0.3, 'rgba(240, 250, 255, 0.8)');
+      grad.addColorStop(0.7, 'rgba(147, 197, 253, 0.25)');
+      grad.addColorStop(1, 'rgba(1, 4, 9, 0)');
+      dCtx.fillStyle = grad;
+      dCtx.fillRect(0, 0, 32, 32);
     }
-    streamGeom.setAttribute('position', new THREE.BufferAttribute(streamPositions, 3));
-    streamGeom.setAttribute('color', new THREE.BufferAttribute(streamColors, 3));
+    const starDotTexture = new THREE.CanvasTexture(dotCanvas);
 
-    const streamMat = new THREE.PointsMaterial({
-      size: 1.6,
-      map: starTexture,
+    const starMat = new THREE.PointsMaterial({
+      size: 1.4,
+      map: starDotTexture,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
-    const streamParticles = new THREE.Points(streamGeom, streamMat);
-    scene.add(streamParticles);
+    const starField = new THREE.Points(starGeom, starMat);
+    scene.add(starField);
 
-    // 10. Foreground Planet (Lower-Left Obsidian/Ice Celestial Sphere with Orbital Arcs)
-    const fgPlanetGroup = new THREE.Group();
-    fgPlanetGroup.position.set(-17, -4.5, 12);
+    // 7. REAL EARTH SYSTEM (Earth Sphere + Clouds + Rayleigh Atmospheric Glow)
+    const earthSystem = new THREE.Group();
+    // Positioned gracefully in the left-center viewport, majestic and serene
+    earthSystem.position.set(-11, -1.8, 4);
+    // Real 23.5° axial tilt
+    earthSystem.rotation.z = (23.5 * Math.PI) / 180;
+    earthSystem.rotation.x = 0.15;
 
-    const fgSphereGeom = new THREE.SphereGeometry(6.8, 48, 48);
-    const fgSphereMat = new THREE.MeshStandardMaterial({
-      color: 0x081a2b,
-      metalness: 0.85,
-      roughness: 0.25,
-      emissive: 0x02101e,
-      emissiveIntensity: 0.5
+    // A. Earth Surface
+    const earthRadius = 9.2;
+    const earthGeom = new THREE.SphereGeometry(earthRadius, 64, 64);
+    const earthMat = new THREE.MeshStandardMaterial({
+      map: earthTexture,
+      roughnessMap: earthRoughnessMap,
+      roughness: 0.7,
+      metalness: 0.15
     });
-    const fgSphereMesh = new THREE.Mesh(fgSphereGeom, fgSphereMat);
-    fgPlanetGroup.add(fgSphereMesh);
+    const earthMesh = new THREE.Mesh(earthGeom, earthMat);
+    earthSystem.add(earthMesh);
 
-    // Atmospheric rim glow
-    const fgAtmoMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(7.2, 48, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x5feaff,
-        transparent: true,
-        opacity: 0.2,
-        side: THREE.BackSide,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    fgPlanetGroup.add(fgAtmoMesh);
-
-    // Concentric glowing orbital latitude/longitude rings
-    const fgRings: THREE.Mesh[] = [];
-    const ringRadii = [8.8, 9.8, 11.2];
-    ringRadii.forEach((r, idx) => {
-      const ringMesh = new THREE.Mesh(
-        new THREE.TorusGeometry(r, 0.06, 16, 96),
-        new THREE.MeshBasicMaterial({
-          color: idx === 1 ? 0xebfcff : 0x5feaff,
-          transparent: true,
-          opacity: 0.7 - idx * 0.15,
-          blending: THREE.AdditiveBlending
-        })
-      );
-      ringMesh.rotation.x = 0.5 + idx * 0.4;
-      ringMesh.rotation.y = 0.3 - idx * 0.3;
-      fgPlanetGroup.add(ringMesh);
-      fgRings.push(ringMesh);
+    // B. Real Earth Clouds Layer (Floating 0.15 units above surface, rotating independently)
+    const cloudGeom = new THREE.SphereGeometry(earthRadius * 1.018, 64, 64);
+    const cloudMat = new THREE.MeshStandardMaterial({
+      map: earthCloudTexture,
+      transparent: true,
+      opacity: 0.82,
+      blending: THREE.NormalBlending,
+      roughness: 0.9
     });
+    const earthCloudsMesh = new THREE.Mesh(cloudGeom, cloudMat);
+    earthSystem.add(earthCloudsMesh);
 
-    // Orbiting moon satellite
-    const fgMoonPivot = new THREE.Group();
-    fgPlanetGroup.add(fgMoonPivot);
-    const fgMoonMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.85, 24, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0x80cfff,
-        roughness: 0.5,
-        emissive: 0x4088ff,
-        emissiveIntensity: 0.4
-      })
-    );
-    fgMoonMesh.position.set(13.5, 1.5, 0);
-    fgMoonPivot.add(fgMoonMesh);
-
-    scene.add(fgPlanetGroup);
-
-    // 11. Brilliant Radiant Sun Orb (Upper Right Destination with Gyroscopic Rings)
-    const sunOrbGroup = new THREE.Group();
-    sunOrbGroup.position.set(26, 12.8, -92);
-
-    // Luminous Sun Core
-    const sunCoreMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(5.2, 36, 36),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.95,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    sunOrbGroup.add(sunCoreMesh);
-
-    // Radiant Corona Flare
-    const sunCoronaMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(8.5, 36, 36),
-      new THREE.MeshBasicMaterial({
-        color: 0x5feaff,
-        transparent: true,
-        opacity: 0.35,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    sunOrbGroup.add(sunCoronaMesh);
-
-    // Outer Aura
-    const sunAuraMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(14.0, 32, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0x4088ff,
-        transparent: true,
-        opacity: 0.12,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    sunOrbGroup.add(sunAuraMesh);
-
-    // Concentric Gyroscopic Celestial Light Rings
-    const sunRings: THREE.Mesh[] = [];
-    const sunRingRadii = [8.5, 11.5, 15.0, 19.0];
-    sunRingRadii.forEach((r, idx) => {
-      const ringMesh = new THREE.Mesh(
-        new THREE.RingGeometry(r, r + 0.3, 64),
-        new THREE.MeshBasicMaterial({
-          color: idx % 2 === 0 ? 0xebfcff : 0x5feaff,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.6 - idx * 0.1,
-          blending: THREE.AdditiveBlending
-        })
-      );
-      ringMesh.rotation.x = Math.PI * 0.38 + idx * 0.15;
-      ringMesh.rotation.y = idx * 0.25;
-      sunOrbGroup.add(ringMesh);
-      sunRings.push(ringMesh);
+    // C. Rayleigh Atmospheric Blue Rim Glow
+    const atmoGeom = new THREE.SphereGeometry(earthRadius * 1.045, 64, 64);
+    const atmoMat = new THREE.MeshBasicMaterial({
+      color: 0x4db5ff,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0.28
     });
+    const earthAtmoMesh = new THREE.Mesh(atmoGeom, atmoMat);
+    earthSystem.add(earthAtmoMesh);
 
-    scene.add(sunOrbGroup);
+    scene.add(earthSystem);
 
-    // 12. Milestone Planets Spaced Along the Destiny Highway
-    const milestonePlanets: {
-      group: THREE.Group;
-      sphere: THREE.Mesh;
-      ring: THREE.Mesh;
-      pillar: THREE.Mesh;
-      satellitePivot: THREE.Group;
-      baseY: number;
-      u: number;
-    }[] = [];
+    // 8. REAL MOON (Orbiting Earth System)
+    const moonOrbitGroup = new THREE.Group();
+    moonOrbitGroup.position.copy(earthSystem.position);
 
-    const milestoneConfig = [
-      { u: 0.22, radius: 1.8, color: 0x092036, emissive: 0x03182b, ringR: 2.8 },
-      { u: 0.44, radius: 2.3, color: 0x0c253d, emissive: 0x042038, ringR: 3.5 },
-      { u: 0.66, radius: 2.1, color: 0x092036, emissive: 0x03182b, ringR: 3.2 },
-      { u: 0.84, radius: 2.6, color: 0x0e2c48, emissive: 0x052844, ringR: 4.0 }
-    ];
-
-    milestoneConfig.forEach((cfg) => {
-      const pt = destinyCurve.getPointAt(cfg.u);
-      const group = new THREE.Group();
-      group.position.copy(pt);
-
-      // Dark Glossy Sphere
-      const sphereGeom = new THREE.SphereGeometry(cfg.radius, 32, 32);
-      const sphereMat = new THREE.MeshStandardMaterial({
-        color: cfg.color,
-        roughness: 0.3,
-        metalness: 0.8,
-        emissive: cfg.emissive,
-        emissiveIntensity: 0.4
-      });
-      const sphere = new THREE.Mesh(sphereGeom, sphereMat);
-      group.add(sphere);
-
-      // Atmospheric Rim
-      const atmo = new THREE.Mesh(
-        new THREE.SphereGeometry(cfg.radius * 1.08, 32, 32),
-        new THREE.MeshBasicMaterial({
-          color: 0x5feaff,
-          transparent: true,
-          opacity: 0.25,
-          side: THREE.BackSide,
-          blending: THREE.AdditiveBlending
-        })
-      );
-      group.add(atmo);
-
-      // Equatorial Glowing Orbital Ring
-      const ringGeom = new THREE.RingGeometry(cfg.ringR * 0.9, cfg.ringR * 1.08, 36);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x5feaff,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.65,
-        blending: THREE.AdditiveBlending
-      });
-      const ring = new THREE.Mesh(ringGeom, ringMat);
-      ring.rotation.x = Math.PI * 0.45;
-      group.add(ring);
-
-      // Vertical Beacon Light Pillar (Dropping downward from planet into nebula clouds)
-      const pillarGeom = new THREE.PlaneGeometry(0.5, 24);
-      const pillarMat = new THREE.MeshBasicMaterial({
-        map: beamTexture,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      });
-      const pillar = new THREE.Mesh(pillarGeom, pillarMat);
-      pillar.position.y = -12;
-      group.add(pillar);
-
-      // Cross plane for 3D volumetric beacon appearance
-      const pillarCross = new THREE.Mesh(pillarGeom, pillarMat);
-      pillarCross.position.y = -12;
-      pillarCross.rotation.y = Math.PI / 2;
-      group.add(pillarCross);
-
-      // Tiny Orbiting Satellite
-      const satellitePivot = new THREE.Group();
-      group.add(satellitePivot);
-      const satMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.35, 16, 16),
-        new THREE.MeshBasicMaterial({
-          color: 0xebfcff,
-          transparent: true,
-          opacity: 0.9,
-          blending: THREE.AdditiveBlending
-        })
-      );
-      satMesh.position.set(cfg.ringR * 1.25, 0, 0);
-      satellitePivot.add(satMesh);
-
-      scene.add(group);
-      milestonePlanets.push({
-        group,
-        sphere,
-        ring,
-        pillar,
-        satellitePivot,
-        baseY: pt.y,
-        u: cfg.u
-      });
+    const moonGeom = new THREE.SphereGeometry(2.3, 36, 36);
+    const moonMat = new THREE.MeshStandardMaterial({
+      map: moonTexture,
+      roughness: 0.85,
+      metalness: 0.05
     });
+    const moonMesh = new THREE.Mesh(moonGeom, moonMat);
+    moonOrbitGroup.add(moonMesh);
+    scene.add(moonOrbitGroup);
 
-    // 13. Event Listeners for Smooth Scroll & Mouse Parallax
-    const handleScroll = () => {
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      const progress = maxScroll > 0 ? window.scrollY / maxScroll : 0;
-      scrollRef.current = progress;
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
+    // 9. REAL SATURN SYSTEM WITH CONCENTRIC RINGS
+    const saturnSystem = new THREE.Group();
+    saturnSystem.position.set(28, 14, -85);
+    // Real 26.7° axial tilt
+    saturnSystem.rotation.z = 0.44;
+    saturnSystem.rotation.x = 0.28;
 
+    const saturnRadius = 6.8;
+    const saturnGeom = new THREE.SphereGeometry(saturnRadius, 48, 48);
+    const saturnMat = new THREE.MeshStandardMaterial({
+      map: saturnTexture,
+      roughness: 0.75,
+      metalness: 0.1
+    });
+    const saturnMesh = new THREE.Mesh(saturnGeom, saturnMat);
+    saturnSystem.add(saturnMesh);
+
+    // Saturn's Majestic Rings
+    const saturnRingGeom = new THREE.RingGeometry(8.5, 17.5, 96);
+    // Align ring to Saturn's equatorial plane
+    const pos = saturnRingGeom.attributes.position;
+    const v3 = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v3.fromBufferAttribute(pos, i);
+      saturnRingGeom.attributes.uv.setXY(i, (v3.length() - 8.5) / 9.0, 0.5);
+    }
+    const saturnRingMat = new THREE.MeshStandardMaterial({
+      map: saturnRingTexture,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.95,
+      roughness: 0.6
+    });
+    const saturnRingMesh = new THREE.Mesh(saturnRingGeom, saturnRingMat);
+    saturnRingMesh.rotation.x = Math.PI / 2;
+    saturnSystem.add(saturnRingMesh);
+
+    scene.add(saturnSystem);
+
+    // 10. REAL MARS IN DISTANT ORBIT
+    const marsGroup = new THREE.Group();
+    marsGroup.position.set(-36, 17, -115);
+    marsGroup.rotation.z = 0.44; // 25° tilt
+
+    const marsGeom = new THREE.SphereGeometry(3.2, 32, 32);
+    // Rust-red procedural canvas
+    const marsCanvas = document.createElement('canvas');
+    marsCanvas.width = 256;
+    marsCanvas.height = 128;
+    const marCtx = marsCanvas.getContext('2d');
+    if (marCtx) {
+      marCtx.fillStyle = '#b35432';
+      marCtx.fillRect(0, 0, 256, 128);
+      // Dark basalt patches (Syrtis Major)
+      marCtx.fillStyle = '#5c2d1c';
+      marCtx.beginPath();
+      marCtx.arc(120, 64, 35, 0, Math.PI * 2);
+      marCtx.fill();
+      // White Polar Ice Cap
+      marCtx.fillStyle = '#edf7fa';
+      marCtx.beginPath();
+      marCtx.arc(128, 6, 20, 0, Math.PI);
+      marCtx.fill();
+    }
+    const marsMat = new THREE.MeshStandardMaterial({
+      map: new THREE.CanvasTexture(marsCanvas),
+      roughness: 0.8,
+      metalness: 0.1
+    });
+    const marsMesh = new THREE.Mesh(marsGeom, marsMat);
+    marsGroup.add(marsMesh);
+    scene.add(marsGroup);
+
+    // 11. Zaya's Cyan Orbital Destiny Trails (Uniting Real Astronomy with Zaya's Brand)
+    // A delicate, high-precision cyan orbital ring curving around Earth into deep space
+    const orbitCurvePoints: THREE.Vector3[] = [];
+    const orbitRadius = 14.5;
+    for (let i = 0; i <= 100; i++) {
+      const angle = (i / 100) * Math.PI * 2;
+      orbitCurvePoints.push(
+        new THREE.Vector3(
+          Math.cos(angle) * orbitRadius,
+          Math.sin(angle) * (orbitRadius * 0.4),
+          Math.sin(angle) * (orbitRadius * 0.7)
+        )
+      );
+    }
+    const orbitGeom = new THREE.BufferGeometry().setFromPoints(orbitCurvePoints);
+    const orbitMat = new THREE.LineBasicMaterial({
+      color: 0x5feaff,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending
+    });
+    const orbitLine = new THREE.Line(orbitGeom, orbitMat);
+    orbitLine.position.copy(earthSystem.position);
+    orbitLine.rotation.x = 0.45;
+    orbitLine.rotation.y = 0.3;
+    scene.add(orbitLine);
+
+    // Small luminous satellite traveling along this orbit
+    const satMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 16, 16),
+      new THREE.MeshBasicMaterial({
+        color: 0xebfcff,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    scene.add(satMesh);
+
+    // 12. Gentle Interactive Mouse Parallax (No Scroll Movement)
     const handleMouseMove = (e: MouseEvent) => {
       if (!interactive) return;
       const x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -609,7 +622,7 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
-    // 14. Main Animation & Orbit Render Loop
+    // 13. Main Real-Time Celestial Revolution Loop
     let animId: number;
     const clock = new THREE.Clock();
 
@@ -618,104 +631,53 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
 
       if (document.hidden) return;
 
-      const delta = clock.getDelta();
       const elapsed = clock.getElapsedTime();
 
-      // Smooth mouse parallax lerp
-      mouseRef.current.x += (mouseRef.current.targetX - mouseRef.current.x) * 0.05;
-      mouseRef.current.y += (mouseRef.current.targetY - mouseRef.current.y) * 0.05;
+      // Smooth mouse parallax (Gentle and restrained, fixed perspective)
+      mouseRef.current.x += (mouseRef.current.targetX - mouseRef.current.x) * 0.035;
+      mouseRef.current.y += (mouseRef.current.targetY - mouseRef.current.y) * 0.035;
 
-      const scroll = scrollRef.current;
+      // Camera position remains fixed in place with serene mouse tilt
+      camera.position.x = mouseRef.current.x * 1.4;
+      camera.position.y = 1.5 + mouseRef.current.y * 1.0;
+      camera.lookAt(0, 0.5, 0);
 
-      // ── FLUID SCROLL-DRIVEN CAMERA FLIGHT ─────────────────────────────────
-      // When scrolling down, camera glides forward through the cosmic highway,
-      // weaving past the foreground planet, between the milestone planets,
-      // and up toward the radiant celestial sun orb.
-      const startCam = new THREE.Vector3(0, 0.8, 30);
-      const midCam = new THREE.Vector3(12, 6.5, -30);
-      const endCam = new THREE.Vector3(25, 12.0, -82);
-
-      let targetCamX: number;
-      let targetCamY: number;
-      let targetCamZ: number;
-
-      if (scroll < 0.5) {
-        const t = scroll * 2;
-        targetCamX = THREE.MathUtils.lerp(startCam.x, midCam.x, t);
-        targetCamY = THREE.MathUtils.lerp(startCam.y, midCam.y, t);
-        targetCamZ = THREE.MathUtils.lerp(startCam.z, midCam.z, t);
-      } else {
-        const t = (scroll - 0.5) * 2;
-        targetCamX = THREE.MathUtils.lerp(midCam.x, endCam.x, t);
-        targetCamY = THREE.MathUtils.lerp(midCam.y, endCam.y, t);
-        targetCamZ = THREE.MathUtils.lerp(midCam.z, endCam.z, t);
-      }
-
-      // Add gentle mouse parallax
-      targetCamX += mouseRef.current.x * 2.2;
-      targetCamY += mouseRef.current.y * 1.5;
-
-      camera.position.x += (targetCamX - camera.position.x) * 0.07;
-      camera.position.y += (targetCamY - camera.position.y) * 0.07;
-      camera.position.z += (targetCamZ - camera.position.z) * 0.07;
-
-      // Dynamic lookAt point tracking forward along the destiny highway
-      const lookAheadZ = camera.position.z - 35;
-      const lookAheadX = camera.position.x + 2.5 + mouseRef.current.x * 1.5;
-      const lookAheadY = camera.position.y + 0.8 + mouseRef.current.y * 1.0;
-      camera.lookAt(lookAheadX, lookAheadY, lookAheadZ);
-
-      // ── CELESTIAL MOTIONS: PLANETS ACTUALLY MOVING ────────────────────────
       if (!prefersReducedMotion) {
-        // Deep stars slow rotation
-        starField.rotation.y = elapsed * 0.002;
-        starField.rotation.x = elapsed * 0.0008;
+        // Deep stars slow cosmic rotation
+        starField.rotation.y = elapsed * 0.0006;
 
-        // Billowing cosmic clouds subtle drift
-        cloudSprites.forEach((c) => {
-          c.sprite.material.rotation += c.rotSpeed;
-        });
+        // 1. REAL EARTH AXIAL REVOLUTION
+        // Earth spins continuously on its axis
+        earthMesh.rotation.y = elapsed * 0.018;
 
-        // Foreground Planet Motion
-        fgSphereMesh.rotation.y = elapsed * 0.012; // Slow axial rotation
-        fgRings[0].rotation.z = elapsed * 0.015;
-        fgRings[1].rotation.y = -elapsed * 0.018;
-        fgRings[2].rotation.x = elapsed * 0.011;
-        fgMoonPivot.rotation.y = elapsed * 0.025; // Moon orbiting
+        // Earth Clouds rotate independently (different speed, atmospheric motion)
+        earthCloudsMesh.rotation.y = elapsed * 0.023;
 
-        // Radiant Celestial Sun Orb & Gyroscopic Rings Motion
-        sunCoreMesh.rotation.y = elapsed * 0.03;
-        sunCoronaMesh.rotation.z = -elapsed * 0.02;
-        sunRings.forEach((ring, idx) => {
-          const dir = idx % 2 === 0 ? 1 : -1;
-          ring.rotation.z = elapsed * 0.018 * dir;
-          ring.rotation.y = Math.sin(elapsed * 0.4 + idx) * 0.15;
-        });
+        // 2. REAL MOON ORBIT AROUND EARTH
+        // Moon revolves around Earth at realistic distance
+        const moonSpeed = 0.035;
+        const moonDist = 26;
+        moonMesh.position.set(
+          Math.cos(elapsed * moonSpeed) * moonDist,
+          Math.sin(elapsed * moonSpeed) * (moonDist * 0.25) + 1.2,
+          Math.sin(elapsed * moonSpeed) * (moonDist * 0.65)
+        );
+        moonMesh.rotation.y = elapsed * 0.015;
 
-        // Milestone Planets Motion along the Highway
-        milestonePlanets.forEach((m, idx) => {
-          m.sphere.rotation.y = elapsed * 0.02 + idx;
-          m.ring.rotation.z = elapsed * 0.035;
-          m.satellitePivot.rotation.y = elapsed * 0.05 + idx;
+        // 3. REAL SATURN AXIAL ROTATION & REVOLUTION
+        saturnMesh.rotation.y = elapsed * 0.022;
+        saturnRingMesh.rotation.z = elapsed * 0.005;
 
-          // Gentle harmonic bobbing floating in space
-          m.group.position.y = m.baseY + Math.sin(elapsed * 1.2 + idx * 1.5) * 0.35;
-        });
+        // 4. REAL MARS ROTATION
+        marsMesh.rotation.y = elapsed * 0.016;
 
-        // ── CONTINUOUS STREAMING PARTICLE FLOW (RIVER OF LIGHT) ─────────────
-        const posArray = streamGeom.attributes.position.array as Float32Array;
-        for (let i = 0; i < streamParticleCount; i++) {
-          particleProgress[i] += particleSpeeds[i];
-          if (particleProgress[i] > 1) {
-            particleProgress[i] = 0;
-          }
-
-          const pt = destinyCurve.getPointAt(particleProgress[i]);
-          posArray[i * 3] = pt.x + particleOffsetsX[i];
-          posArray[i * 3 + 1] = pt.y + particleOffsetsY[i];
-          posArray[i * 3 + 2] = pt.z;
-        }
-        streamGeom.attributes.position.needsUpdate = true;
+        // 5. ZAYA ORBITAL SATELLITE
+        const satAngle = elapsed * 0.25;
+        satMesh.position.set(
+          earthSystem.position.x + Math.cos(satAngle) * orbitRadius,
+          earthSystem.position.y + Math.sin(satAngle) * (orbitRadius * 0.4),
+          earthSystem.position.z + Math.sin(satAngle) * (orbitRadius * 0.7)
+        );
       }
 
       renderer.render(scene, camera);
@@ -723,10 +685,9 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
 
     animate();
 
-    // 15. Cleanup
+    // 14. Cleanup
     return () => {
       cancelAnimationFrame(animId);
-      window.removeEventListener('scroll', handleScroll);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', handleResize);
       if (container && renderer.domElement) {
@@ -735,17 +696,29 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
       renderer.dispose();
       starGeom.dispose();
       starMat.dispose();
-      cloudMaterial.dispose();
-      mainLineGeom.dispose();
-      coreLineMat.dispose();
-      glowLineMat.dispose();
-      streamGeom.dispose();
-      streamMat.dispose();
-      fgSphereGeom.dispose();
-      fgSphereMat.dispose();
-      starTexture.dispose();
-      cloudTexture.dispose();
-      beamTexture.dispose();
+      starDotTexture.dispose();
+      earthGeom.dispose();
+      earthMat.dispose();
+      earthTexture.dispose();
+      earthRoughnessMap.dispose();
+      cloudGeom.dispose();
+      cloudMat.dispose();
+      earthCloudTexture.dispose();
+      atmoGeom.dispose();
+      atmoMat.dispose();
+      moonGeom.dispose();
+      moonMat.dispose();
+      moonTexture.dispose();
+      saturnGeom.dispose();
+      saturnMat.dispose();
+      saturnTexture.dispose();
+      saturnRingGeom.dispose();
+      saturnRingMat.dispose();
+      saturnRingTexture.dispose();
+      marsGeom.dispose();
+      marsMat.dispose();
+      orbitGeom.dispose();
+      orbitMat.dispose();
     };
   }, [interactive]);
 
