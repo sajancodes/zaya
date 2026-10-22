@@ -27,10 +27,11 @@
       </ul>
 
       <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">3. External Network Communications</h2>
-      <p style="margin-bottom: 12px;">Zaya communicates over the internet exclusively for two explicit purposes:</p>
+      <p style="margin-bottom: 12px;">Zaya communicates over the internet exclusively for explicit, necessary purposes:</p>
       <ol style="margin-bottom: 20px; padding-left: 20px;">
-        <li><b>Your Chosen AI Provider</b>: Prompts, voice audio streams, and tool requests are sent directly to your selected provider (e.g. Google Gemini or OpenAI) using your own API key under your own provider terms.</li>
-        <li><b>Official Updates</b>: Periodic HTTPS queries to <code>https://github.com/sajancodes/zaya-companion-releases/</code> to check for published <code>desktop-update.json</code> manifests.</li>
+        <li><b>Your Chosen AI Provider</b>: Prompts, voice audio streams, and tool requests are sent directly to your selected provider (e.g. Google Gemini, OpenAI, Groq, or OpenRouter) using your own API key under your own provider terms.</li>
+        <li><b>Official Software Updates</b>: Periodic HTTPS queries to <code>https://github.com/sajancodes/zaya-companion-releases/</code> to check for published <code>desktop-update.json</code> manifests and download verified installers.</li>
+        <li><b>Optional Anonymous Telemetry</b>: If enabled by you during onboarding or in settings, a daily heartbeat packet with an anonymous UUIDv4 is sent to <code>zaya.sajan.codes</code>. Telemetry is disabled by default on clean installations.</li>
       </ol>
 
       <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">4. Anonymous Installation & Heartbeat Telemetry</h2>
@@ -47,12 +48,17 @@
         <b>What We NEVER Collect:</b> Zaya telemetry never records or transmits your API keys, prompts, conversations, voice recordings, webcam frames, screen captures, passwords, phone contacts, or private files.
       </div>
 
-      <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">5. Opt-Out Controls</h2>
+      <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">5. Website & Download Analytics</h2>
       <p style="margin-bottom: 20px;">
-        You can disable anonymous usage statistics at any time during onboarding or by opening Zaya Settings and toggling off <i>"Share anonymous usage statistics"</i>. When disabled, no telemetry packets are sent.
+        When downloading Zaya from the website, our server increments download counters. To prevent automated bot spam from skewing metrics without tracking individual visitors, our backend computes a salted, 16-character truncated one-way SHA-256 hash of the client IP. Raw IP addresses are never stored in the database.
       </p>
 
-      <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">6. Contact & Inquiries</h2>
+      <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">6. Opt-Out Controls</h2>
+      <p style="margin-bottom: 20px;">
+        You can disable anonymous usage statistics at any time during onboarding or by opening Zaya Settings and toggling off <i>"Share anonymous usage statistics"</i>. When disabled, zero telemetry packets are sent.
+      </p>
+
+      <h2 style="color: #ffffff; font-size: 20px; margin: 28px 0 12px;">7. Contact & Inquiries</h2>
       <p>
         For questions regarding Zaya privacy practices or to submit an inquiry, contact the developer at <code>ab4290025@gmail.com</code>.
       </p>

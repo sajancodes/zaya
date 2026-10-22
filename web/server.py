@@ -24,9 +24,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from web.auth import (
+    clear_login_failures,
     create_session,
     is_admin_enabled,
     is_login_rate_limited,
+    record_login_failure,
     revoke_session,
     validate_session,
     verify_admin_credentials,
@@ -144,7 +146,10 @@ async def api_telemetry_heartbeat(payload: TelemetryPayload, request: Request):
 
 @app.post("/api/downloads/event")
 async def api_download_event(payload: DownloadEventPayload, request: Request):
-    client_ip = request.client.host if request.client else None
+    client_ip = request.client.host if request.client else "unknown"
+    if is_rate_limited(client_ip):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded.")
+
     platform = payload.platform.lower().strip()
     if platform not in ("windows", "android", "linux"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid platform.")
@@ -213,8 +218,10 @@ async def api_admin_login(payload: AdminLoginPayload, request: Request, response
         )
 
     if not verify_admin_credentials(payload.username, payload.password):
+        record_login_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
+    clear_login_failures(client_ip)
     token = create_session(payload.username)
     secure_cookie = os.environ.get("SECURE_COOKIE", "true").lower() != "false"
     response.set_cookie(

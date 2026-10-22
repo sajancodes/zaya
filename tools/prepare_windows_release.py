@@ -44,6 +44,7 @@ def prepare_windows_release(
     version: str,
     build: int,
     channel: str = "stable",
+    tag: str | None = None,
     iscc_path: str | Path | None = None,
     cert_path: str | Path | None = None,
     cert_password: str | None = None,
@@ -122,6 +123,13 @@ def prepare_windows_release(
     installer_hash = calculate_sha256(installer)
     installer_size = installer.stat().st_size
 
+    # URL resolution: beta releases are prereleases (not latest), requiring tag-specific URL
+    if channel == "beta":
+        release_tag = tag or f"v{version}"
+        download_url = f"https://github.com/sajancodes/zaya-companion-releases/releases/download/{release_tag}/ZayaSetup.exe"
+    else:
+        download_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/ZayaSetup.exe"
+
     # Write desktop-update.json pointing to canonical installer
     update_manifest = {
         "schema": 1,
@@ -129,7 +137,7 @@ def prepare_windows_release(
         "version": version,
         "build": int(build),
         "filename": "ZayaSetup.exe",
-        "url": "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/ZayaSetup.exe",
+        "url": download_url,
         "sha256": installer_hash,
         "size": installer_size,
     }
@@ -155,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--version", default=VERSION, help="Semantic version string.")
     parser.add_argument("--build", type=int, default=BUILD, help="Integer build code.")
     parser.add_argument("--channel", default="stable", choices=["stable", "beta"], help="Release channel.")
+    parser.add_argument("--tag", default=None, help="Explicit release tag (e.g. v0.5.1).")
     parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
     parser.add_argument("--cert", default=None, help="Optional PFX certificate path.")
     parser.add_argument("--cert-password", default=None, help="Password for PFX certificate.")
@@ -166,6 +175,7 @@ if __name__ == "__main__":
         version=args.version,
         build=args.build,
         channel=args.channel,
+        tag=args.tag,
         iscc_path=args.iscc,
         cert_path=args.cert,
         cert_password=args.cert_password,

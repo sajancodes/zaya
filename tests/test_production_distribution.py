@@ -388,7 +388,7 @@ def test_dpapi_failure_raises_on_windows(monkeypatch):
 
 
 def test_admin_password_and_rate_limiting_guards(monkeypatch):
-    from web.auth import is_admin_enabled, is_login_rate_limited, DISALLOWED_PASSWORDS
+    from web.auth import is_admin_enabled, is_login_rate_limited, record_login_failure, clear_login_failures, DISALLOWED_PASSWORDS
 
     # Empty / unset
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
@@ -407,8 +407,112 @@ def test_admin_password_and_rate_limiting_guards(monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "SecureOwnerPassphrase2026!#")
     assert is_admin_enabled() is True
 
-    # Rate limiting: client IP gets rate limited after 5 attempts
+    # Rate limiting: failures only
     ip = "192.0.2.99"
-    for _ in range(5):
+    clear_login_failures(ip)
+    assert is_login_rate_limited(ip) is False
+    for _ in range(4):
+        record_login_failure(ip)
         assert is_login_rate_limited(ip) is False
+    # 5th failure triggers lockout
+    record_login_failure(ip)
     assert is_login_rate_limited(ip) is True
+    # Successful login resets the lockout
+    clear_login_failures(ip)
+    assert is_login_rate_limited(ip) is False
+
+
+def test_legacy_releases_table_schema_migration(tmp_path):
+    import sqlite3
+    import web.database as db
+
+    legacy_db_path = tmp_path / "legacy_analytics.db"
+    conn = sqlite3.connect(str(legacy_db_path))
+    # Create the legacy table where version was single primary key without id column
+    with conn:
+        conn.execute("""
+            CREATE TABLE releases (
+                version TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                url TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                release_notes TEXT,
+                published_at INTEGER NOT NULL
+            );
+        """)
+        conn.execute("""
+            INSERT INTO releases VALUES ('0.4.5', 'windows', 'ZayaSetup.exe', 'http://example.com', 'dummyhash', 1000, 'notes', 123456);
+        """)
+    conn.close()
+
+    # Calling init_db on the legacy DB must successfully migrate it to the new schema
+    db.init_db(legacy_db_path)
+
+    # Verify migration succeeded and upsert_release works with composite (version, platform)
+    db.upsert_release(
+        version="0.4.5",
+        platform="android",  # same version, different platform
+        filename="Zaya-Companion.apk",
+        url="http://example.com/apk",
+        sha256="apksha256",
+        size=2000,
+        published_at=123457,
+        db_path=legacy_db_path,
+    )
+
+    conn2 = db.get_connection(legacy_db_path)
+    try:
+        rows = conn2.execute("SELECT version, platform FROM releases ORDER BY platform;").fetchall()
+        assert len(rows) == 2
+        assert rows[0]["platform"] == "android" and rows[0]["version"] == "0.4.5"
+        assert rows[1]["platform"] == "windows" and rows[1]["version"] == "0.4.5"
+    finally:
+        conn2.close()
+
+
+def test_beta_windows_release_update_url(tmp_path, monkeypatch):
+    from tools.prepare_windows_release import prepare_windows_release
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "Zaya.exe").write_bytes(b"MZfakeexe")
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    fake_iscc = tmp_path / "fake_iscc.exe"
+    fake_iscc.write_bytes(b"MZfakeiscc")
+
+    # Mock ISCC compiler so prepare_windows_release succeeds without Inno Setup installed
+    monkeypatch.setattr("tools.prepare_windows_release.find_iscc", lambda: fake_iscc)
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: (out_dir / "ZayaSetup.exe").write_bytes(b"MZfakeinstaller"))
+
+    manifest = prepare_windows_release(
+        app_dir=app_dir,
+        output_dir=out_dir,
+        version="0.5.2",
+        build=10009,
+        channel="beta",
+        tag="v0.5.2-beta.1",
+        iscc_path=fake_iscc,
+    )
+
+    assert manifest["channel"] == "beta"
+    assert manifest["url"] == "https://github.com/sajancodes/zaya-companion-releases/releases/download/v0.5.2-beta.1/ZayaSetup.exe"
+
+
+def test_hand_model_download_failure_raises_explicit_runtime_error(monkeypatch, tmp_path):
+    from actions.hand_controls import _resolve_hand_model
+
+    monkeypatch.setattr("core.gesture.hand_tracker.DEFAULT_MODEL", tmp_path / "nonexistent" / "model.task")
+
+    def mock_download():
+        raise urllib.error.URLError("Connection refused by test proxy")
+
+    import urllib.error
+    monkeypatch.setattr("core.runtime_paths.find_or_download_hand_model", mock_download)
+
+    with pytest.raises(RuntimeError, match="Hand tracking model is missing and auto-download failed"):
+        _resolve_hand_model()

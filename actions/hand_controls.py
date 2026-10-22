@@ -4,14 +4,16 @@ from core.tool_result import ToolResult
 
 def _resolve_hand_model(explicit_path=None) -> str:
     from pathlib import Path
+    from core.gesture.hand_tracker import DEFAULT_MODEL
     if explicit_path:
         return str(explicit_path)
-    try:
-        from core.runtime_paths import find_or_download_hand_model
-        return str(find_or_download_hand_model())
-    except Exception:
-        from core.gesture.hand_tracker import DEFAULT_MODEL
+    if DEFAULT_MODEL.is_file():
         return str(DEFAULT_MODEL)
+    from core.runtime_paths import find_or_download_hand_model
+    try:
+        return str(find_or_download_hand_model())
+    except Exception as exc:
+        raise RuntimeError(f"Hand tracking model is missing and auto-download failed: {exc}") from exc
 
 
 def hand_controls(parameters, **kwargs):

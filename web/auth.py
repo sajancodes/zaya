@@ -54,19 +54,35 @@ def is_admin_enabled() -> bool:
 
 
 def is_login_rate_limited(client_ip: str) -> bool:
-    """Sliding-window rate limiter for admin login attempts."""
+    """Check if the requesting client IP has exceeded the failed login threshold."""
     if not client_ip:
         return False
     now = time.monotonic()
     with _login_lock:
         attempts = _login_attempts.get(client_ip, [])
         recent = [t for t in attempts if now - t < _LOGIN_RATE_LIMIT_WINDOW]
-        if len(recent) >= _LOGIN_RATE_LIMIT_MAX:
-            _login_attempts[client_ip] = recent
-            return True
+        _login_attempts[client_ip] = recent
+        return len(recent) >= _LOGIN_RATE_LIMIT_MAX
+
+
+def record_login_failure(client_ip: str) -> None:
+    """Record a failed login attempt for the client IP."""
+    if not client_ip:
+        return
+    now = time.monotonic()
+    with _login_lock:
+        attempts = _login_attempts.get(client_ip, [])
+        recent = [t for t in attempts if now - t < _LOGIN_RATE_LIMIT_WINDOW]
         recent.append(now)
         _login_attempts[client_ip] = recent
-        return False
+
+
+def clear_login_failures(client_ip: str) -> None:
+    """Reset failed login attempts for client IP upon successful authentication."""
+    if not client_ip:
+        return
+    with _login_lock:
+        _login_attempts.pop(client_ip, None)
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:

@@ -44,6 +44,39 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
+def _migrate_releases_table_if_needed(conn: sqlite3.Connection) -> None:
+    """Migrate legacy releases table (version as single PK) to composite (version, platform) schema."""
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='releases';")
+    if not cursor.fetchone():
+        return
+
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(releases);").fetchall()]
+    if "id" not in columns:
+        logger.info("Migrating legacy releases table to composite (version, platform) schema...")
+        conn.execute("""
+            CREATE TABLE releases_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                url TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                release_notes TEXT,
+                published_at INTEGER NOT NULL,
+                UNIQUE(version, platform)
+            );
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO releases_v2 (version, platform, filename, url, sha256, size, release_notes, published_at)
+            SELECT version, platform, filename, url, sha256, size, release_notes, published_at
+            FROM releases;
+        """)
+        conn.execute("DROP TABLE releases;")
+        conn.execute("ALTER TABLE releases_v2 RENAME TO releases;")
+        logger.info("Releases table migration complete.")
+
+
 def init_db(db_path: Optional[Path] = None) -> None:
     """Initialize SQLite tables and default release metadata."""
     conn = get_connection(db_path)
@@ -84,6 +117,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
                 CREATE INDEX IF NOT EXISTS idx_downloads_created_at
                 ON downloads(created_at);
             """)
+
+            _migrate_releases_table_if_needed(conn)
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS releases (
@@ -190,9 +225,9 @@ def record_download(platform: str, version: str, client_ip: Optional[str] = None
         conn.close()
 
 
-def get_latest_release(platform: str = "windows") -> Optional[Dict[str, Any]]:
+def get_latest_release(platform: str = "windows", db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     """Retrieve the latest release metadata for a given platform."""
-    conn = get_connection()
+    conn = get_connection(db_path)
     try:
         cursor = conn.execute("""
             SELECT * FROM releases
@@ -215,10 +250,11 @@ def upsert_release(
     size: int,
     release_notes: str = "",
     published_at: Optional[int] = None,
+    db_path: Optional[Path] = None,
 ) -> None:
     """Insert or update a release manifest row."""
     now = published_at or int(time.time())
-    conn = get_connection()
+    conn = get_connection(db_path)
     try:
         with conn:
             conn.execute("""
@@ -273,16 +309,16 @@ def sync_releases_from_github() -> None:
                     filename="Zaya-Companion.apk",
                     url=str(data.get("download_url", "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/Zaya-Companion.apk")),
                     sha256=str(data["sha256"]),
-                    size=int(data.get("size_bytes", 0)),
+                    size=int(data.get("size") or data.get("size_bytes", 0)),
                     release_notes=str(data.get("release_notes", f"Zaya Companion v{data['version_name']}")),
                 )
     except Exception as e:
         logger.debug(f"Could not sync Android releases from GitHub: {e}")
 
 
-def get_all_releases() -> List[Dict[str, Any]]:
+def get_all_releases(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Retrieve all release manifests ordered newest first."""
-    conn = get_connection()
+    conn = get_connection(db_path)
     try:
         cursor = conn.execute("""
             SELECT * FROM releases

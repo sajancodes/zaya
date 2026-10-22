@@ -124,7 +124,8 @@ jobs:
             --output dist/windows `
             --version ${{ needs.version.outputs.version_name }} `
             --build ${{ needs.version.outputs.version_code }} `
-            --channel ${{ github.event.inputs.channel || 'stable' }}
+            --channel ${{ github.event.inputs.channel || 'stable' }} `
+            --tag ${{ needs.version.outputs.release_tag }}
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4

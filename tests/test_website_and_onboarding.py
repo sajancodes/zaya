@@ -237,10 +237,20 @@ def test_api_telemetry_install_and_heartbeat(client):
     assert resp4.status_code == 400
 
 
-def test_api_download_event(client):
+def test_api_download_event(client, monkeypatch):
+    # Valid download event
     resp = client.post("/api/downloads/event", json={"platform": "windows", "version": "0.5.0"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+    # Invalid platform
+    resp_bad = client.post("/api/downloads/event", json={"platform": "playstation", "version": "0.5.0"})
+    assert resp_bad.status_code == 400
+
+    # Rate limiting on download event
+    monkeypatch.setattr("web.server.is_rate_limited", lambda ip: True)
+    resp_rate = client.post("/api/downloads/event", json={"platform": "windows", "version": "0.5.0"})
+    assert resp_rate.status_code == 429
 
 
 def test_api_releases_endpoints(client):

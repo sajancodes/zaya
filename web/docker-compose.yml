@@ -12,7 +12,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:///./data/zaya_analytics.db
       - ADMIN_USER=owner
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-ZayaOwner2026!}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD must be configured with a strong password (minimum 12 characters)}
       - ZAYA_WEBSITE_URL=https://zaya.sajan.codes
     volumes:
       - zaya_web_data:/app/data

@@ -106,3 +106,4 @@ web/*.db*
 web/*.tmp
 !.env.example
 installation.json
+web/data/
