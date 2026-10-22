@@ -227,7 +227,10 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
             all_records.append(rec)
             logger(f"Action rejected: {path.name} — {rec.error}")
 
-    canonical_actions = Path(__file__).resolve().parent.parent / "actions"
+    from core.runtime_paths import get_resource_dir
+    canonical_actions = get_resource_dir() / "actions"
+    if not canonical_actions.is_dir():
+        canonical_actions = Path(__file__).resolve().parent.parent / "actions"
     try:
         is_canonical = actions_dir.resolve() == canonical_actions.resolve()
     except Exception:
@@ -250,6 +253,9 @@ def get_action_registry(actions_dir: Path | None = None) -> ActionRegistry:
     global _global_registry
     if _global_registry is None:
         if actions_dir is None:
-            actions_dir = Path(__file__).resolve().parent.parent / "actions"
+            from core.runtime_paths import get_resource_dir
+            actions_dir = get_resource_dir() / "actions"
+            if not actions_dir.is_dir():
+                actions_dir = Path(__file__).resolve().parent.parent / "actions"
         _global_registry = discover_actions(actions_dir, logger=lambda _: None)
     return _global_registry

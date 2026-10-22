@@ -1,0 +1,54 @@
+ZAYA
+Built by Sajan Rai
+
+WINDOWS
+
+1. Download Zaya-Setup.exe from the official release.
+2. Run the installer.
+3. Allow microphone and camera permissions when prompted.
+4. Start Zaya from the Start Menu or desktop shortcut.
+5. Future Zaya desktop updates are detected and applied automatically.
+
+ANDROID COMPANION
+
+Recommended:
+Install Zaya Companion from Google Play once public.
+
+Alternative GitHub direct build:
+Download Zaya-Companion.apk only from the official Zaya release.
+Pair with desktop Zaya via QR code or local dashboard.
+
+UPDATES
+
+Windows:
+Zaya automatically checks for new releases in the background.
+Downloaded updates are verified (size, SHA-256 and Authenticode signature) before installation.
+User settings, memory databases, phone pairing, and configurations remain intact in %LOCALAPPDATA%\Zaya.
+
+Android:
+Google Play installations update automatically through Google Play.
+Direct APK installations follow the built-in Zaya Companion update channel with cryptographic signature verification.
+
+REQUIREMENTS
+
+Windows:
+- Windows 10 or 11 (64-bit)
+- Internet connection for online AI/Gemini Live features
+- Microphone for voice control
+- Webcam for vision and hand gesture intelligence
+
+Android:
+- Android 8.0 (API 26) or higher
+- Network connectivity to host PC or relay
+
+RELEASE ASSETS
+
+Zaya-Setup.exe
+Zaya-Companion.apk
+setup.txt
+desktop-update.json
+update.json
+SHA256SUMS.txt
+
+Zaya
+Built by Sajan Rai

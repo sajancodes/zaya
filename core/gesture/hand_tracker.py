@@ -69,8 +69,9 @@ class HandTracker:
             self.state = 'OFF'
 
     def _run(self, model_path, device, fps, mirror,confidence=.65):
-        runtime=Path(__file__).resolve().parents[2]/'.venv-hands'/'Scripts'/'python.exe'
-        if runtime.is_file() and os.environ.get('ZAYA_HAND_CHILD')!='1':
+        from core.runtime_paths import find_hand_worker
+        runtime = find_hand_worker()
+        if runtime and runtime.is_file() and os.environ.get('ZAYA_HAND_CHILD')!='1':
             return self._run_isolated(runtime,model_path,device,fps,mirror,confidence)
         camera = None
         try:
@@ -133,8 +134,11 @@ class HandTracker:
         previous={}
         try:
             flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
-            self.child=subprocess.Popen([str(runtime),'-u','-m','core.gesture.worker',str(Path(model_path).resolve()),
-                str(device),str(fps),'1' if mirror else '0',str(confidence)],cwd=str(Path(__file__).resolve().parents[2]),
+            if runtime.name.lower().endswith('.exe') and 'python' not in runtime.stem.lower():
+                cmd = [str(runtime), str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]
+            else:
+                cmd = [str(runtime), '-u', '-m', 'core.gesture.worker', str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]
+            self.child=subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[2]),
                 stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=flags)
             while not self.stop_event.is_set():
                 line=self.child.stdout.readline(1_500_001)

@@ -6,7 +6,18 @@ import threading
 from contextlib import suppress
 from pathlib import Path
 
-ROOT=Path(__file__).resolve().parents[1]/'spatial_renderer'/'dist'
+def _resolve_renderer_root():
+    from core.runtime_paths import get_resource_dir, get_app_root
+    for candidate in (
+        get_resource_dir() / 'spatial_renderer' / 'dist',
+        get_app_root() / 'spatial_renderer' / 'dist',
+        Path(__file__).resolve().parents[1] / 'spatial_renderer' / 'dist'
+    ):
+        if candidate.is_dir():
+            return candidate
+    return Path(__file__).resolve().parents[1] / 'spatial_renderer' / 'dist'
+
+ROOT = _resolve_renderer_root()
 _lock=threading.Lock()
 _server=None
 _thread=None

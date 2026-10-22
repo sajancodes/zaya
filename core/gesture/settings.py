@@ -3,7 +3,11 @@ import json
 import math
 from pathlib import Path
 
-PATH=Path(__file__).resolve().parents[2]/'config'/'hand_controls.json'
+def _default_settings_path():
+    from core.runtime_paths import get_config_dir
+    return get_config_dir() / 'hand_controls.json'
+
+PATH = _default_settings_path()
 
 
 @dataclass(frozen=True)
