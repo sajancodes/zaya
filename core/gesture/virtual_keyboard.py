@@ -31,7 +31,7 @@ class VirtualKeyboard:
         self.hand_id, self.last_press = '', -1e9
         self.error = ''
 
-    def update(self, hand):
+    def update(self, hand, rel_pos=None):
         if hand is None or hand.confidence < .65:
             self.reset()
             return None
@@ -39,7 +39,9 @@ class VirtualKeyboard:
             self.reset()
         self.hand_id = hand.hand_id
         now, tip = hand.timestamp, hand.landmarks[8]
-        target = next((k for k in self.keys if k.bounds[0]<=tip.x<k.bounds[0]+k.bounds[2] and k.bounds[1]<=tip.y<k.bounds[1]+k.bounds[3]),None)
+        pos_x = rel_pos[0] if rel_pos is not None else tip.x
+        pos_y = rel_pos[1] if rel_pos is not None else tip.y
+        target = next((k for k in self.keys if k.bounds[0]<=pos_x<k.bounds[0]+k.bounds[2] and k.bounds[1]<=pos_y<k.bounds[1]+k.bounds[3]),None)
         index_only = hand.finger_states[1] and not any(hand.finger_states[2:])
         if self.state == 'locked':
             if hand.relative_depth-self.baseline < self.config.release and now-self.last_press > self.config.debounce:
@@ -85,3 +87,25 @@ class VirtualKeyboard:
                     self.error = type(error).__name__
         self.previous = hand
         return None
+
+    def strike(self, target_key=None):
+        """Directly strikes the targeted or currently hovered key."""
+        key = target_key or self.key
+        if key is None:
+            return None
+        self.state = 'locked'
+        import time
+        self.last_press = time.monotonic()
+        try:
+            result = self.emit(key)
+            if result == 'latched':
+                self.error = ''
+                return None
+            if result is not True:
+                self.error = 'OS key injection was not confirmed.'
+                return None
+            self.error = ''
+            return key.id
+        except Exception as error:
+            self.error = type(error).__name__
+            return None

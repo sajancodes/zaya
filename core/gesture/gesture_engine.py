@@ -24,10 +24,31 @@ class GestureEngine:
         self.previous = {k:v for k,v in self.previous.items() if k in present}
         self.rotations={k:v for k,v in self.rotations.items() if k in present}
         for hand in hands:
-            _, index, middle, ring, pinky = hand.finger_states
-            pose = ('PINCH' if hand.pinch_distance < .25 else 'OPEN_PALM' if all((index,middle,ring,pinky)) else
-                    'INDEX_ONLY' if index and not any((middle,ring,pinky)) else
-                    ('GRAB' if hand.finger_states[0] else 'FIST') if not any((index,middle,ring,pinky)) else 'POINT')
+            thumb, index, middle, ring, pinky = hand.finger_states
+            thumb_up = False
+            if thumb and not any((index, middle, ring, pinky)):
+                if len(hand.landmarks) > 4 and hand.landmarks[4].y < hand.landmarks[2].y:
+                    thumb_up = True
+            pinch = hand.pinch_distance < .25
+            two_finger = index and middle and not ring and not pinky and not pinch
+            index_only = index and not any((middle, ring, pinky)) and not thumb_up
+            fist = not any((index, middle, ring, pinky)) and not thumb_up
+            open_palm = all((index, middle, ring, pinky))
+
+            if thumb_up:
+                pose = 'THUMBS_UP'
+            elif pinch:
+                pose = 'PINCH'
+            elif two_finger:
+                pose = 'TWO_FINGER'
+            elif index_only:
+                pose = 'INDEX_ONLY'
+            elif fist:
+                pose = 'FIST'
+            elif open_palm:
+                pose = 'OPEN_PALM'
+            else:
+                pose = 'POINT'
             old = self.states.get(hand.hand_id)
             if old is None or old[0] != pose:
                 if old and old[2]:
@@ -79,7 +100,7 @@ class GestureEngine:
         if self.two is None or self.two['identity']!=identity:
             self.two={'identity':identity,'distance':distance,'candidate':'','since':timestamp,'active':False}
         delta=distance-self.two['distance']
-        pulling=all(p in ('PINCH','GRAB') for p in poses)
+        pulling=all(p in ('PINCH','GRAB','FIST') for p in poses)
         name=('TWO_HAND_PULL' if delta>.15 else '') if pulling else ('TWO_HAND_SPREAD' if delta>.08 else 'TWO_HAND_CLOSE' if delta<-.08 else '') if all(p=='OPEN_PALM' for p in poses) else ''
         if name!=self.two['candidate']:
             if self.two['active']:

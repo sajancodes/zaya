@@ -37,20 +37,20 @@ def hand_controls(parameters, **kwargs):
                 return ToolResult('failed', 'Stop or pause hand controls before changing settings.')
             save(settings)
 
-        if action in ('settings', 'show'):
+        if action == 'settings':
             from core.ghost_overlay import show_vision_control_center, passive_overlay_available
-            if not passive_overlay_available() and action == 'settings':
+            if not passive_overlay_available():
                 return ToolResult('failed', 'The desktop settings panel is unavailable.')
-            if passive_overlay_available():
-                show_vision_control_center(mode=mode)
-            if action == 'show':
-                if hands.tracker.state != 'ACTIVE':
-                    start_mode = mode or 'NAVIGATION'
-                    model_path = _resolve_hand_model(parameters.get('model_path'))
-                    hands.start(model_path, start_mode,
-                                settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)
-                elif mode:
-                    hands.set_mode(mode, settings.sensitivity)
+            show_vision_control_center(mode=mode)
+
+        elif action == 'show':
+            if hands.tracker.state != 'ACTIVE':
+                start_mode = mode or 'NAVIGATION'
+                model_path = _resolve_hand_model(parameters.get('model_path'))
+                hands.start(model_path, start_mode,
+                            settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)
+            elif mode:
+                hands.set_mode(mode, settings.sensitivity)
 
         elif action == 'start':
             target_mode = str(mode or 'NAVIGATION')
@@ -62,17 +62,29 @@ def hand_controls(parameters, **kwargs):
             model_path = _resolve_hand_model(parameters.get('model_path'))
             hands.start(model_path, target_mode,
                         settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)
+            if target_mode == 'KEYBOARD':
+                hands.toggle_keyboard(True)
 
         elif action == 'set_mode':
             if not mode:
                 raise ValueError('Specify a mode to switch to (NAVIGATION, KEYBOARD, SPATIAL, SELECTION).')
             if mode == 'KEYBOARD':
-                from core.ghost_overlay import passive_overlay_available, show_vision_control_center
+                from core.ghost_overlay import passive_overlay_available
                 if not passive_overlay_available():
                     return ToolResult('failed', 'The desktop overlay is unavailable; hand typing was not enabled.')
-                if passive_overlay_available():
-                    show_vision_control_center(mode='KEYBOARD')
+                hands.toggle_keyboard(True)
             hands.set_mode(mode, settings.sensitivity)
+
+        elif action in ('read_text', 'read_selection', 'read_selected_text'):
+            from actions.read_selected_text import read_selected_text
+            return read_selected_text(parameters, **kwargs)
+
+        elif action == 'show_keyboard':
+            hands.toggle_keyboard(True)
+        elif action == 'hide_keyboard':
+            hands.toggle_keyboard(False)
+        elif action == 'toggle_keyboard':
+            hands.toggle_keyboard()
 
         elif action == 'pause':
             hands.pause()
@@ -81,10 +93,11 @@ def hand_controls(parameters, **kwargs):
         elif action == 'stop':
             if mode == 'KEYBOARD' or parameters.get('target') == 'keyboard':
                 hands.set_mode('NAVIGATION')
+                hands.toggle_keyboard(False)
             else:
                 hands.stop()
         elif action not in ('status', 'configure'):
-            raise ValueError('Use start, stop, pause, resume, show, set_mode, settings, or status.')
+            raise ValueError('Use start, stop, pause, resume, show, set_mode, settings, read_text, or status.')
 
         state = hands.status()
         state['settings'] = asdict(settings)
@@ -99,22 +112,20 @@ def hand_controls(parameters, **kwargs):
 TOOL = {
     'name': 'hand_controls',
     'description': (
-        "Owner-only opt-in webcam and hand gesture intelligence. "
+        "Owner-only opt-in webcam and hand gesture intelligence for global Windows interaction. "
         "Natural command routing: "
-        "- 'open/start/show virtual keyboard', 'type with my hands', 'hand keyboard': action='start', mode='KEYBOARD' "
-        "(opens Vision Control Center, starts or reuses active camera, shows full virtual keyboard, enables index-poke typing). "
-        "- 'close/hide/stop virtual keyboard': action='set_mode', mode='NAVIGATION' (revokes typing injection, hides keyboard, keeps webcam ACTIVE). "
-        "- 'start/open/show webcam', 'open camera', 'turn on camera', 'open hand controls': action='start', mode='NAVIGATION' "
-        "(safe default is NAVIGATION, never typing; reuses active session or brings window to front). "
-        "- 'show webcam': action='show' (brings Vision window to foreground without restarting running camera; starts if off). "
-        "- 'start spatial controls': action='set_mode', mode='SPATIAL' (enables orbit/pan/manipulation in 3D workspace). "
-        "- 'stop/close webcam', 'turn off camera', 'stop hand controls': action='stop' (stops worker and releases physical camera). "
-        "Camera/model are local; unavailable features do not affect Zaya."
+        "- 'read this text', 'read selected text': action='read_text' (reads text selected with two-finger gesture or OS selection). "
+        "- 'show/hide keyboard': action='show_keyboard' / 'hide_keyboard' (toggles top Holographic Air Keyboard HUD). "
+        "- 'open/start virtual keyboard', 'type with my hands': action='start', mode='KEYBOARD' (enables global typing HUD). "
+        "- 'start/open hand controls', 'open camera': action='start', mode='NAVIGATION' (global desktop mouse/select/scroll). "
+        "- 'start spatial controls': action='set_mode', mode='SPATIAL' (enables 3D workspace manipulation). "
+        "- 'stop hand controls', 'turn off camera': action='stop'. "
+        "Camera and models are local; monitor-first interaction without stealing focus."
     ),
     'parameters': {
         'type': 'OBJECT',
         'properties': {
-            'action': {'type': 'STRING', 'enum': ['start', 'stop', 'pause', 'resume', 'configure', 'settings', 'status', 'show', 'set_mode']},
+            'action': {'type': 'STRING', 'enum': ['start', 'stop', 'pause', 'resume', 'configure', 'settings', 'status', 'show', 'set_mode', 'read_text', 'show_keyboard', 'hide_keyboard', 'toggle_keyboard']},
             'mode': {'type': 'STRING', 'enum': ['NAVIGATION', 'KEYBOARD', 'SPATIAL', 'SELECTION']},
             'target': {'type': 'STRING', 'description': "Optional target to stop, e.g. 'keyboard' to only close keyboard and keep webcam on."},
             'model_path': {'type': 'STRING'},
