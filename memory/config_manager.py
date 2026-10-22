@@ -91,6 +91,14 @@ def load_api_keys() -> dict:
                         data[k] = decrypt_secret(data[k])
                 if 'gemini_api_keys' in data and isinstance(data['gemini_api_keys'], list):
                     data['gemini_api_keys'] = [decrypt_secret(str(x)) for x in data['gemini_api_keys']]
+                enc_keys = data.get("encrypted_keys")
+                if isinstance(enc_keys, dict):
+                    for prov, enc_val in enc_keys.items():
+                        if isinstance(enc_val, str) and enc_val:
+                            dec = decrypt_secret(enc_val)
+                            data[f"{prov}_api_key"] = dec
+                            if prov == "custom":
+                                data["custom_api_key"] = dec
             except Exception:
                 pass
             return data

@@ -126,7 +126,7 @@ async def _connect_live(client, model, config):
 # stepped over and the assistant keeps talking instead of failing to start.
 LIVE_MODEL          = _gemini.LIVE_MODELS[0]
 CHANNELS            = 1
-SEND_SAMPLE_RATE    = 16000 
+SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
@@ -342,7 +342,7 @@ def _is_repeat_chunk(txt: str, buf: list) -> bool:
     joined = " ".join(buf)
     return txt in joined
 
-def _clean_transcript(text: str) -> str:    
+def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()

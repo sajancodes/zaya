@@ -41,16 +41,29 @@ class PassiveOverlay(QFrame):
             self.hide()
             return
 
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen:
-            geom = screen.availableGeometry()
-            target_w = min(1180, int(geom.width() * 0.85))
-            target_h = min(240, int(geom.height() * 0.28))
+        target_info = self.packet.get("target") or {}
+        mon_rect = target_info.get("monitor_rect")
+        if mon_rect and len(mon_rect) >= 4:
+            mon_left, mon_top, mon_right, mon_bottom = mon_rect
+            mon_w = max(800, mon_right - mon_left)
+            mon_h = max(600, mon_bottom - mon_top)
+            target_w = min(1180, int(mon_w * 0.85))
+            target_h = min(240, int(mon_h * 0.28))
             self.resize(target_w, target_h)
-            # Dock at the top center of the active monitor
-            dock_x = geom.left() + (geom.width() - self.width()) // 2
-            dock_y = geom.top() + 8
+            dock_x = mon_left + (mon_w - self.width()) // 2
+            dock_y = mon_top + 8
             self.move(dock_x, dock_y)
+        else:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                geom = screen.availableGeometry()
+                target_w = min(1180, int(geom.width() * 0.85))
+                target_h = min(240, int(geom.height() * 0.28))
+                self.resize(target_w, target_h)
+                # Dock at the top center of the active monitor
+                dock_x = geom.left() + (geom.width() - self.width()) // 2
+                dock_y = geom.top() + 8
+                self.move(dock_x, dock_y)
 
         if not self.isVisible():
             self.show()

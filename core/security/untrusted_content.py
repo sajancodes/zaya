@@ -42,6 +42,7 @@ UNTRUSTED_KINDS = {
     "tool",
     "code",
     "log",
+    "selection",
 }
 
 _TRUST_FOR_KIND = {
@@ -62,6 +63,7 @@ _TRUST_FOR_KIND = {
     "tool": TRUST_TOOL_OUTPUT,
     "code": TRUST_DOCUMENT_CONTENT,
     "log": TRUST_TOOL_OUTPUT,
+    "selection": TRUST_DOCUMENT_CONTENT,
 }
 
 # Tools whose output is routinely produced by a third party. The central tool
@@ -92,6 +94,7 @@ EXTERNAL_TOOLS = {
     "web_customizer",
     "spatial_workspace",
     "display_content",
+    "read_selected_text",
 }
 
 

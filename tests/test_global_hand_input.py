@@ -335,6 +335,8 @@ def test_non_destructive_clipboard_restoration(monkeypatch):
     import sys
 
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr("core.selection.selected_text._snapshot_windows_clipboard", lambda: [])
+    monkeypatch.setattr("core.selection.selected_text._restore_windows_clipboard", lambda s: False)
 
     fake_clipboard = {"text": "UserOriginalData"}
 

@@ -36,7 +36,7 @@ class HandController:
         self.latest_hands = ()
         self.current_gesture = "NONE"
         self.latest_packet = {}
-        self.keyboard_visible = True
+        self.keyboard_visible = False
 
     def _inject(self, key):
         if self.mode != InteractionMode.KEYBOARD and not self.keyboard_visible:
@@ -101,8 +101,11 @@ class HandController:
             now = hands[0].timestamp if hands else time.monotonic()
             events = self.engine.update(hands, now)
             hand = hands[0]
-            gesture = self.engine.states.get(hand.hand_id, ("NONE", 0, False))[0]
-            self.current_gesture = gesture
+            state = self.engine.states.get(hand.hand_id)
+            candidate_pose = state[0] if state else "NONE"
+            stable = bool(state and state[2])
+            desktop_pose = candidate_pose if stable else "NONE"
+            self.current_gesture = candidate_pose if stable else f"({candidate_pose})"
 
             self.desktop.update_target_info()
             screen_w, screen_h = self.desktop.screen_w, self.desktop.screen_h
@@ -143,10 +146,17 @@ class HandController:
                 if not sent and (poke_occurred or index_enter) and self.keyboard.key:
                     sent = self.keyboard.strike()
 
-                if gesture == "THUMBS_UP" and any(e.type == "THUMBS_UP" and e.metadata.get("phase") == "enter" for e in events):
-                    from actions.ghost_keyboard import send_hotkey
-                    send_hotkey("enter")
-                    sent = "Enter"
+                if desktop_pose == "THUMBS_UP" and stable:
+                    if self.desktop.enter_armed and (now - self.desktop.last_enter_time > self.desktop.enter_cooldown):
+                        from actions.ghost_keyboard import send_hotkey
+
+                        send_hotkey("enter")
+                        self.desktop.enter_armed = False
+                        self.desktop.last_enter_time = now
+                        sent = "Enter"
+                else:
+                    if desktop_pose != "THUMBS_UP":
+                        self.desktop.enter_armed = True
 
                 packet = {
                     "mode": "virtual_keyboard",
@@ -192,9 +202,10 @@ class HandController:
                     }
 
                 if self.mode in (InteractionMode.NAVIGATION, InteractionMode.KEYBOARD):
-                    self.desktop.handle_frame(hand, gesture, now)
+                    self.desktop.handle_frame(hand, desktop_pose, now, stable=stable, events=events)
 
                 if self.mode in (InteractionMode.SPATIAL, InteractionMode.SELECTION):
+                    # Spatial mode isolation: global desktop input is NOT dispatched in SPATIAL
                     self.spatial.update(hands, events, self.engine, self.mode == InteractionMode.SELECTION)
 
     def stop(self):
@@ -223,12 +234,20 @@ class HandController:
             old_mode = self.mode
             if old_mode == requested:
                 return
+            self.desktop.on_tracking_lost()
             if old_mode == InteractionMode.KEYBOARD:
                 self.modifiers.clear()
                 self.keyboard.reset()
-            if requested == InteractionMode.KEYBOARD and sensitivity is not None:
-                from .calibration import Calibration
-                self.keyboard.config = Calibration(press=0.2 / sensitivity, release=0.07 / sensitivity, min_velocity=0.8 / sensitivity)
+                self.keyboard_visible = False
+                from core.ghost_overlay import update_passive_overlay
+                update_passive_overlay({"visible": False, "mode": "virtual_keyboard"})
+            if requested == InteractionMode.KEYBOARD:
+                self.keyboard_visible = True
+                if sensitivity is not None:
+                    from .calibration import Calibration
+                    self.keyboard.config = Calibration(press=0.2 / sensitivity, release=0.07 / sensitivity, min_velocity=0.8 / sensitivity)
+                from core.ghost_overlay import update_passive_overlay
+                update_passive_overlay({"visible": True, "mode": "virtual_keyboard"})
             self.mode = requested
             if self.last_start:
                 ls = list(self.last_start)

@@ -78,6 +78,7 @@ def _as_int(value: Any, default: int, low: int, high: int) -> int:
 
 def local_pipeline_settings() -> LocalPipelineSettings:
     from memory.config_manager import load_api_keys
+    from core.security.key_vault import load_provider_key, decrypt_secret
     data = load_api_keys()
     # local_llm_provider is the local-engine choice. Do not inherit the live
     # engine's llm_provider here: selecting the modular engine without a
@@ -94,11 +95,19 @@ def local_pipeline_settings() -> LocalPipelineSettings:
         for key, value in voice_map.items()
         if str(key).strip() and str(value).strip()
     }
+
+    # Load decrypted API key via key vault or legacy keys
+    api_key = load_provider_key(provider)
+    if not api_key:
+        raw_key = str(data.get(f"{provider}_api_key") or data.get("local_llm_api_key") or "").strip()
+        if raw_key:
+            api_key = decrypt_secret(raw_key)
+
     return LocalPipelineSettings(
         provider=provider,
         model=str(data.get("local_llm_model") or (spec.model if spec else "")).strip(),
         base_url=str(data.get("local_llm_base_url") or (spec.base_url if spec else "")).strip(),
-        api_key=str(data.get(f"{provider}_api_key") or data.get("local_llm_api_key") or "").strip(),
+        api_key=api_key,
         stt_provider=str(data.get("local_stt_provider") or "faster_whisper").strip().lower(),
         stt_model=str(data.get("local_stt_model") or "small").strip(),
         stt_device=str(data.get("local_stt_device") or "auto").strip(),
@@ -119,10 +128,20 @@ def local_pipeline_settings() -> LocalPipelineSettings:
 
 
 def save_local_pipeline_settings(values: dict[str, Any]) -> LocalPipelineSettings:
-    """Persist only known keys; never rewrite unrelated owner settings."""
+    """Persist only known keys; never rewrite unrelated owner settings or store secrets in plain text."""
     from memory.config_manager import _patch_config
+    from core.security.key_vault import store_provider_key
+
+    # Securely store API key via DPAPI key vault if passed
+    raw_key = str(values.get("local_llm_api_key") or "").strip()
+    provider = str(values.get("local_llm_provider") or "").strip().lower()
+    if not provider:
+        provider = local_pipeline_settings().provider
+    if raw_key and provider:
+        store_provider_key(provider, raw_key)
+
     allowed = {
-        "local_llm_provider", "local_llm_model", "local_llm_base_url", "local_llm_api_key",
+        "local_llm_provider", "local_llm_model", "local_llm_base_url",
         "local_stt_provider", "local_stt_model", "local_stt_device", "local_stt_compute",
         "local_stt_language", "local_tts_provider", "local_tts_model", "local_tts_voice_map",
         "local_tts_fallback_voice", "allow_cloud_fallback", "local_history_messages",

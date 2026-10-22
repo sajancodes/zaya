@@ -25,17 +25,76 @@ def get_screen_size() -> Tuple[int, int]:
     return 1920, 1080
 
 
+def get_target_monitor_rect(hwnd: Optional[int] = None) -> Tuple[int, int, int, int]:
+    """Returns (left, top, right, bottom) of the monitor containing hwnd or foreground window."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            target_hwnd = hwnd or user32.GetForegroundWindow() or user32.GetDesktopWindow()
+
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", wintypes.LONG),
+                    ("top", wintypes.LONG),
+                    ("right", wintypes.LONG),
+                    ("bottom", wintypes.LONG),
+                ]
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", RECT),
+                    ("rcWork", RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+
+            hmon = user32.MonitorFromWindow(target_hwnd, 2)  # MONITOR_DEFAULTTONEAREST = 2
+            if hmon:
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                    return (
+                        int(mi.rcMonitor.left),
+                        int(mi.rcMonitor.top),
+                        int(mi.rcMonitor.right),
+                        int(mi.rcMonitor.bottom),
+                    )
+        except Exception:
+            pass
+    w, h = get_screen_size()
+    return (0, 0, w, h)
+
+
 def get_foreground_info() -> dict:
-    """Returns active window title, application name, process ID, and whether it belongs to Zaya."""
+    """Returns active window title, application name, process ID, HWND, and monitor rect."""
     if sys.platform != "win32":
-        return {"app": "Desktop", "title": "External", "pid": 0, "is_zaya": False}
+        return {
+            "app": "Desktop",
+            "title": "External",
+            "pid": 0,
+            "hwnd": 0,
+            "is_zaya": False,
+            "monitor_rect": (0, 0, 1920, 1080),
+        }
     try:
         import ctypes
         from ctypes import wintypes
+
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
-            return {"app": "Windows Desktop", "title": "Desktop", "pid": 0, "is_zaya": False}
+            mon_rect = get_target_monitor_rect(None)
+            return {
+                "app": "Windows Desktop",
+                "title": "Desktop",
+                "pid": 0,
+                "hwnd": 0,
+                "is_zaya": False,
+                "monitor_rect": mon_rect,
+            }
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         buf = ctypes.create_unicode_buffer(512)
@@ -44,6 +103,7 @@ def get_foreground_info() -> dict:
         app_name = "Application"
         try:
             import psutil
+
             proc = psutil.Process(pid.value)
             raw = proc.name().lower()
             aliases = {
@@ -58,14 +118,29 @@ def get_foreground_info() -> dict:
                 "cmd.exe": "Command Prompt",
                 "powershell.exe": "PowerShell",
                 "winword.exe": "Microsoft Word",
-                "excel.exe": "Microsoft Excel"
+                "excel.exe": "Microsoft Excel",
             }
             app_name = aliases.get(raw, proc.name().replace(".exe", "").capitalize())
         except Exception:
             pass
-        return {"app": app_name, "title": title, "pid": pid.value, "is_zaya": (pid.value == os.getpid())}
+        mon_rect = get_target_monitor_rect(hwnd)
+        return {
+            "app": app_name,
+            "title": title,
+            "pid": pid.value,
+            "hwnd": int(hwnd),
+            "is_zaya": (pid.value == os.getpid()),
+            "monitor_rect": mon_rect,
+        }
     except Exception:
-        return {"app": "Desktop", "title": "Desktop", "pid": 0, "is_zaya": False}
+        return {
+            "app": "Desktop",
+            "title": "Desktop",
+            "pid": 0,
+            "hwnd": 0,
+            "is_zaya": False,
+            "monitor_rect": (0, 0, 1920, 1080),
+        }
 
 
 class DesktopController:
@@ -73,6 +148,7 @@ class DesktopController:
 
     def __init__(self, screen_size: Optional[Tuple[int, int]] = None):
         self.screen_w, self.screen_h = screen_size or get_screen_size()
+        self.monitor_rect: Tuple[int, int, int, int] = (0, 0, self.screen_w, self.screen_h)
 
         # Pointer smoothing & filtering
         self.curr_x = float(self.screen_w // 2)
@@ -82,10 +158,11 @@ class DesktopController:
         self.active_box = (0.12, 0.12, 0.88, 0.88)  # normalized (min_x, min_y, max_x, max_y)
         self.dead_zone_px = 2.0
 
-        # State flags
+        # Selection & Drag state flags
         self.is_selecting = False
         self.selection_start = (0, 0)
         self.is_dragging = False
+        self.selection_just_ended = False
 
         # Click debouncing & re-arming
         self.last_click_time = 0.0
@@ -100,12 +177,17 @@ class DesktopController:
         self.scroll_dead_zone = 0.035
         self.scroll_multiplier = 420.0
 
-        # Thumbs up / Enter
+        # Thumbs up / Enter (One-Shot Edge Triggered)
+        self.enter_armed = True
         self.last_enter_time = 0.0
-        self.enter_cooldown = 0.4
+        self.enter_cooldown = 0.35
 
         # Target app tracking
         self.target_info = get_foreground_info()
+        if screen_size is None:
+            self.monitor_rect = self.target_info.get("monitor_rect", (0, 0, self.screen_w, self.screen_h))
+        else:
+            self.monitor_rect = (0, 0, self.screen_w, self.screen_h)
         self._last_target_check = 0.0
 
     def refresh_screen_size(self):
@@ -115,10 +197,12 @@ class DesktopController:
         now = time.monotonic()
         if force or (now - self._last_target_check > 0.5):
             self.target_info = get_foreground_info()
+            if "monitor_rect" in self.target_info:
+                self.monitor_rect = self.target_info["monitor_rect"]
             self._last_target_check = now
 
     def map_coords(self, norm_x: float, norm_y: float) -> Tuple[int, int]:
-        """Maps normalized trackpad coordinates to screen pixels with bounding zone clamping."""
+        """Maps normalized trackpad coordinates to target monitor screen pixels with bounding zone clamping."""
         min_x, min_y, max_x, max_y = self.active_box
         clamped_x = max(min_x, min(max_x, norm_x))
         clamped_y = max(min_y, min(max_y, norm_y))
@@ -126,8 +210,12 @@ class DesktopController:
         rel_x = (clamped_x - min_x) / max(0.01, max_x - min_x)
         rel_y = (clamped_y - min_y) / max(0.01, max_y - min_y)
 
-        target_px_x = rel_x * (self.screen_w - 1)
-        target_px_y = rel_y * (self.screen_h - 1)
+        mon_left, mon_top, mon_right, mon_bottom = self.monitor_rect
+        mon_w = max(1, mon_right - mon_left)
+        mon_h = max(1, mon_bottom - mon_top)
+
+        target_px_x = mon_left + rel_x * (mon_w - 1)
+        target_px_y = mon_top + rel_y * (mon_h - 1)
         return int(target_px_x), int(target_px_y)
 
     def smooth_pointer(self, target_px_x: int, target_px_y: int) -> Tuple[int, int]:
@@ -145,9 +233,10 @@ class DesktopController:
         self.curr_x += alpha * dx
         self.curr_y += alpha * dy
 
-        # Clamp strictly within monitor bounds
-        self.curr_x = max(0.0, min(float(self.screen_w - 1), self.curr_x))
-        self.curr_y = max(0.0, min(float(self.screen_h - 1), self.curr_y))
+        # Clamp strictly within active monitor bounds
+        mon_left, mon_top, mon_right, mon_bottom = self.monitor_rect
+        self.curr_x = max(float(mon_left), min(float(mon_right - 1), self.curr_x))
+        self.curr_y = max(float(mon_top), min(float(mon_bottom - 1), self.curr_y))
 
         return int(self.curr_x), int(self.curr_y)
 
@@ -198,7 +287,21 @@ class DesktopController:
             except Exception:
                 pass
 
-    def handle_frame(self, hand, gesture: str, now: float) -> Tuple[int, int]:
+    def _send_key(self, key: str):
+        try:
+            from actions.ghost_keyboard import send_hotkey
+            send_hotkey(key)
+        except Exception:
+            pass
+
+    def handle_frame(
+        self,
+        hand,
+        gesture: str,
+        now: float,
+        stable: bool = True,
+        events: tuple = (),
+    ) -> Tuple[int, int]:
         """Main dispatch for outside-keyboard desktop interaction."""
         self.update_target_info()
 
@@ -215,17 +318,34 @@ class DesktopController:
         target_x, target_y = self.map_coords(raw_x, raw_y)
         smooth_x, smooth_y = self.smooth_pointer(target_x, target_y)
 
-        # 1. GESTURE: OPEN_PALM -> Smooth mouse move
+        # Reset Enter re-arm state whenever gesture is not THUMBS_UP
+        if gesture != "THUMBS_UP":
+            self.enter_armed = True
+
+        # Candidate gesture that has NOT passed the stability threshold must NOT cause OS input.
+        # Only smooth pointer movement continues during candidate/unstable states.
+        if not stable:
+            if self.is_selecting:
+                self._end_selection(smooth_x, smooth_y)
+            if self.is_dragging:
+                self._end_drag()
+            self._end_scroll()
+            self._set_cursor_pos(smooth_x, smooth_y)
+            return smooth_x, smooth_y
+
+        # 1. GESTURE: OPEN_PALM -> Smooth mouse move & safe re-arm
         if gesture == "OPEN_PALM":
             if self.is_selecting:
                 self._end_selection(smooth_x, smooth_y)
             if self.is_dragging:
                 self._end_drag()
             self._end_scroll()
+            # Only stable neutral OPEN_PALM re-arms clicking and clears selection_just_ended
             self.click_armed = True
+            self.selection_just_ended = False
             self._set_cursor_pos(smooth_x, smooth_y)
 
-        # 2. GESTURE: INDEX_ONLY -> Clean single click
+        # 2. GESTURE: INDEX_ONLY -> Clean single click (Anti-collapse guarded)
         elif gesture == "INDEX_ONLY":
             if self.is_selecting:
                 self._end_selection(smooth_x, smooth_y)
@@ -234,14 +354,18 @@ class DesktopController:
             self._end_scroll()
 
             self._set_cursor_pos(smooth_x, smooth_y)
+            # If selection just ended, do NOT click (prevents collapsing the selection)
+            if self.selection_just_ended:
+                return smooth_x, smooth_y
+
             if self.click_armed and (now - self.last_click_time > self.click_cooldown):
                 self._mouse_click()
                 self.last_click_time = now
-                self.click_armed = False
+                self.click_armed = False  # Single click; disarm until neutral re-arm
 
         # 3. GESTURE: TWO_FINGER -> Text / object selection drag
         elif gesture == "TWO_FINGER":
-            self.click_armed = True
+            self.click_armed = False  # Disarm clicks while selecting
             self._end_scroll()
             if not self.is_selecting:
                 self.is_selecting = True
@@ -257,7 +381,7 @@ class DesktopController:
                 self._end_selection(smooth_x, smooth_y)
             if self.is_dragging:
                 self._end_drag()
-            self.click_armed = True
+            self.click_armed = False
 
             curr_y_val = hand.palm_center.y
             if not self.is_scrolling or self.scroll_baseline_y is None:
@@ -272,23 +396,24 @@ class DesktopController:
                     self._mouse_wheel(wheel_units)
                     self.last_scroll_time = now
 
-        # 5. GESTURE: THUMBS_UP -> Enter / Submit
+        # 5. GESTURE: THUMBS_UP -> One-Shot Enter / Submit
         elif gesture == "THUMBS_UP":
             if self.is_selecting:
                 self._end_selection(smooth_x, smooth_y)
             if self.is_dragging:
                 self._end_drag()
             self._end_scroll()
-            self.click_armed = True
+            self.click_armed = False
 
-            if now - self.last_enter_time > self.enter_cooldown:
-                from actions.ghost_keyboard import send_hotkey
-                send_hotkey("enter")
+            # Edge-triggered: exactly ONE Enter per thumbs-up gesture cycle
+            if self.enter_armed and (now - self.last_enter_time > self.enter_cooldown):
+                self._send_key("enter")
+                self.enter_armed = False  # Disarmed until thumb released / gesture exits
                 self.last_enter_time = now
 
         # 6. GESTURE: PINCH -> Hold / drag
         elif gesture == "PINCH":
-            self.click_armed = True
+            self.click_armed = False
             self._end_scroll()
             if not self.is_dragging:
                 self.is_dragging = True
@@ -307,11 +432,13 @@ class DesktopController:
         return smooth_x, smooth_y
 
     def _end_selection(self, end_x: int, end_y: int):
-        """Releases mouse button and saves the selection context."""
+        """Releases mouse button and saves the selection context; guards against immediate click."""
         if not self.is_selecting:
             return
         self._mouse_up()
         self.is_selecting = False
+        self.click_armed = False
+        self.selection_just_ended = True  # Disarm clicks until stable neutral OPEN_PALM
 
         start_x, start_y = self.selection_start
         min_x = min(start_x, end_x)
@@ -329,6 +456,7 @@ class DesktopController:
                 target_app=self.target_info.get("app", "Desktop"),
                 target_title=self.target_info.get("title", ""),
                 target_pid=self.target_info.get("pid", 0),
+                target_hwnd=self.target_info.get("hwnd", 0),
             )
             get_selection_manager().set_selection(ctx)
 
@@ -337,6 +465,8 @@ class DesktopController:
             return
         self._mouse_up()
         self.is_dragging = False
+        self.click_armed = False
+        self.selection_just_ended = True
 
     def _end_scroll(self):
         self.is_scrolling = False
@@ -349,4 +479,6 @@ class DesktopController:
         if self.is_dragging:
             self._end_drag()
         self._end_scroll()
-        self.click_armed = True
+        self.click_armed = False
+        self.selection_just_ended = False
+        self.enter_armed = True

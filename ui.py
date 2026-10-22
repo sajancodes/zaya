@@ -2767,7 +2767,8 @@ class AIEngineOverlay(QWidget):
         self._providers = list(self._specs)
         self._provider_values = {}
         for key, spec in self._specs.items():
-            api_key = self._config.get(f"{key}_api_key")
+            from core.security.key_vault import load_provider_key
+            api_key = load_provider_key(key) or self._config.get(f"{key}_api_key")
             if not api_key and key == self._settings.provider:
                 # Older local-pipeline configs stored the key only under this
                 # shared name. Do not lose it when the owner reopens the form.
@@ -2965,11 +2966,16 @@ class AIEngineOverlay(QWidget):
             return
         try:
             save_engine_mode(engine)
+            key_text = self._key.text().strip()
+            if key_text:
+                from core.security.key_vault import store_provider_key
+                store_provider_key(provider, key_text)
+
             save_local_pipeline_settings({
                 "local_llm_provider": provider,
                 "local_llm_model": self._model.text().strip(),
                 "local_llm_base_url": self._base.text().strip(),
-                "local_llm_api_key": self._key.text().strip(),
+                "local_llm_api_key": key_text,
                 "local_stt_model": self._stt_model.text().strip() or "small",
                 "local_stt_device": self._stt_device.text().strip() or "auto",
                 "local_stt_compute": self._stt_compute.text().strip() or "int8",
@@ -2983,19 +2989,17 @@ class AIEngineOverlay(QWidget):
                 _patch_config(
                     custom_model=self._model.text().strip(),
                     custom_base_url=self._base.text().strip(),
-                    custom_api_key=self._key.text().strip(),
                     custom_local=self._custom_local.isChecked(),
                 )
             elif provider != "gemini":
                 _patch_config(**{
                     f"{provider}_model": self._model.text().strip(),
                     f"{provider}_base_url": self._base.text().strip(),
-                    f"{provider}_api_key": self._key.text().strip(),
                 })
             self._provider_values[provider] = {
                 "model": self._model.text().strip(),
                 "base_url": self._base.text().strip(),
-                "api_key": self._key.text().strip(),
+                "api_key": key_text,
             }
             self._status.setText("Saved. Restart Zaya to apply an engine or model change.")
             self._status.setStyleSheet(f"color: {C.PRI}; background: transparent;")

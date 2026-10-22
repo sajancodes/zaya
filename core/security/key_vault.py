@@ -157,6 +157,15 @@ def store_provider_key(provider: str, key: str) -> None:
 
     data["encrypted_keys"][provider] = enc
 
+    # Purge any legacy plaintext copies so secrets are never stored unencrypted
+    for legacy_k in (f"{provider}_api_key", f"{provider}_key"):
+        if legacy_k in data:
+            del data[legacy_k]
+    if provider == "custom" and "custom_api_key" in data:
+        del data["custom_api_key"]
+    if data.get("local_llm_provider") == provider and "local_llm_api_key" in data:
+        del data["local_llm_api_key"]
+
     if provider == "gemini":
         data["gemini_api_key"] = enc
         data["gemini_api_keys"] = [enc]
@@ -169,14 +178,14 @@ def store_provider_key(provider: str, key: str) -> None:
 def load_provider_key(provider: str) -> str:
     """Retrieve and decrypt the API key for a specified provider."""
     provider = provider.strip().lower()
+    env_map = {
+        "gemini": "GEMINI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
     path = _config_file_path()
     if not path.is_file():
-        env_map = {
-            "gemini": "GEMINI_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-        }
         env_var = env_map.get(provider)
         if env_var and os.environ.get(env_var):
             return os.environ[env_var].strip()
@@ -203,6 +212,20 @@ def load_provider_key(provider: str) -> str:
         raw = data.get("openai_api_key") or ""
         if isinstance(raw, str) and raw:
             return decrypt_secret(raw)
+    else:
+        for legacy_k in (f"{provider}_api_key", f"{provider}_key", "custom_api_key" if provider == "custom" else None):
+            if legacy_k and legacy_k in data:
+                raw = data.get(legacy_k) or ""
+                if isinstance(raw, str) and raw:
+                    return decrypt_secret(raw)
+        if data.get("local_llm_provider") == provider:
+            raw = data.get("local_llm_api_key") or ""
+            if isinstance(raw, str) and raw:
+                return decrypt_secret(raw)
+
+    env_var = env_map.get(provider)
+    if env_var and os.environ.get(env_var):
+        return os.environ[env_var].strip()
 
     return ""
 
@@ -236,6 +259,14 @@ def delete_provider_key(provider: str) -> bool:
         if "openai_api_key" in data:
             del data["openai_api_key"]
             modified = True
+
+    for legacy_k in (f"{provider}_api_key", f"{provider}_key", "custom_api_key" if provider == "custom" else None):
+        if legacy_k and legacy_k in data:
+            del data[legacy_k]
+            modified = True
+    if data.get("local_llm_provider") == provider and "local_llm_api_key" in data:
+        del data["local_llm_api_key"]
+        modified = True
 
     if modified:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

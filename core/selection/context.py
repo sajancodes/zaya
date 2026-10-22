@@ -16,11 +16,17 @@ class SelectionContext:
     target_app: str = "Desktop"
     target_title: str = ""
     target_pid: int = 0
+    target_hwnd: int = 0
     cached_text: str = ""
 
-    def is_valid(self, ttl_seconds: float = 300.0) -> bool:
-        """Returns True if this selection is fresh within ttl_seconds."""
-        return (time.time() - self.timestamp) <= ttl_seconds
+    def is_valid(self, ttl_seconds: float = 30.0, current_pid: Optional[int] = None) -> bool:
+        """Returns True if this selection is fresh within ttl_seconds and belongs to current foreground app."""
+        if (time.time() - self.timestamp) > ttl_seconds:
+            return False
+        if current_pid is not None and self.target_pid != 0:
+            if current_pid != self.target_pid:
+                return False
+        return True
 
     @property
     def width(self) -> int:
@@ -32,7 +38,7 @@ class SelectionContext:
 
 
 class SelectionManager:
-    """Thread-safe store for the latest active selection context."""
+    """Thread-safe store for the latest active selection context with foreground validation."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -42,10 +48,31 @@ class SelectionManager:
         with self._lock:
             self._current = context
 
-    def get_selection(self, ttl_seconds: float = 300.0) -> Optional[SelectionContext]:
+    def get_selection(
+        self,
+        ttl_seconds: float = 30.0,
+        current_pid: Optional[int] = None,
+        allow_stale: bool = False,
+    ) -> Optional[SelectionContext]:
         with self._lock:
-            if self._current is not None and self._current.is_valid(ttl_seconds):
+            if self._current is None:
+                return None
+
+            if current_pid is None and not allow_stale:
+                try:
+                    from core.gesture.desktop_controller import get_foreground_info
+
+                    info = get_foreground_info()
+                    current_pid = info.get("pid")
+                except Exception:
+                    current_pid = None
+
+            if self._current.is_valid(ttl_seconds=ttl_seconds, current_pid=current_pid):
                 return self._current
+
+            if allow_stale:
+                return self._current
+
             return None
 
     def clear(self) -> None:
