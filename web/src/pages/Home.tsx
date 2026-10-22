@@ -89,31 +89,21 @@ export const Home: React.FC<HomeProps> = ({ navigate, latestVersion = '0.5.0' })
           </div>
 
           <h1
-            style={{
-              fontSize: 'clamp(54px, 8.5vw, 104px)',
-              fontWeight: 800,
-              letterSpacing: '9px',
-              color: '#ebfcff',
-              margin: '0 0 16px 0',
-              fontFamily: "'Inter', sans-serif",
-              textShadow: '0 0 40px rgba(95, 234, 255, 0.35)'
-            }}
-          >
-            ZAYA
-          </h1>
-
-          <div
             className="editorial-title"
             style={{
-              fontSize: 'clamp(28px, 4vw, 44px)',
-              maxWidth: '840px',
-              margin: '0 auto 28px auto',
-              lineHeight: '1.3'
+              fontSize: 'clamp(38px, 5.5vw, 68px)',
+              maxWidth: '940px',
+              margin: '0 auto 24px auto',
+              lineHeight: '1.2',
+              color: '#ebfcff',
+              textShadow: '0 0 35px rgba(95, 234, 255, 0.25)'
             }}
           >
-            Your computer shouldn't just respond.{' '}
-            <span className="editorial-italic">It should understand where you're going.</span>
-          </div>
+            A personal AI system that<br />
+            <span className="editorial-italic" style={{ color: '#5feaff' }}>
+              should understand where you're going.
+            </span>
+          </h1>
 
           <p
             style={{
@@ -141,11 +131,9 @@ export const Home: React.FC<HomeProps> = ({ navigate, latestVersion = '0.5.0' })
               className="btn btn-primary btn-large"
               style={{ gap: '10px' }}
             >
-              <img
-                src="/assets/ruby-icon.png"
-                alt="Ruby Icon"
-                style={{ width: '18px', height: '18px', objectFit: 'contain' }}
-              />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801" />
+              </svg>
               Download Zaya
             </button>
             <button
