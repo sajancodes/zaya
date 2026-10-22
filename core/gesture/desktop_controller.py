@@ -318,10 +318,6 @@ class DesktopController:
         target_x, target_y = self.map_coords(raw_x, raw_y)
         smooth_x, smooth_y = self.smooth_pointer(target_x, target_y)
 
-        # Reset Enter re-arm state whenever gesture is not THUMBS_UP
-        if gesture != "THUMBS_UP":
-            self.enter_armed = True
-
         # Candidate gesture that has NOT passed the stability threshold must NOT cause OS input.
         # Only smooth pointer movement continues during candidate/unstable states.
         if not stable:
@@ -340,9 +336,11 @@ class DesktopController:
             if self.is_dragging:
                 self._end_drag()
             self._end_scroll()
-            # Only stable neutral OPEN_PALM re-arms clicking and clears selection_just_ended
+            # Only stable neutral OPEN_PALM re-arms clicking and enter, and clears selection_just_ended
             self.click_armed = True
             self.selection_just_ended = False
+            self.enter_armed = True
+            self._set_cursor_pos(smooth_x, smooth_y)
             self._set_cursor_pos(smooth_x, smooth_y)
 
         # 2. GESTURE: INDEX_ONLY -> Clean single click (Anti-collapse guarded)
@@ -395,6 +393,7 @@ class DesktopController:
                     wheel_units = -int(dy * self.scroll_multiplier)
                     self._mouse_wheel(wheel_units)
                     self.last_scroll_time = now
+                    self.scroll_baseline_y = curr_y_val  # Incremental update: stop when fist stops moving
 
         # 5. GESTURE: THUMBS_UP -> One-Shot Enter / Submit
         elif gesture == "THUMBS_UP":

@@ -99,6 +99,27 @@ def _restore_windows_clipboard(formats: List[Tuple[int, bytes]]) -> bool:
         return False
 
 
+def _clear_clipboard() -> None:
+    """Empties the system clipboard cleanly on Windows (or via pyperclip fallback)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            if user32.OpenClipboard(None):
+                try:
+                    user32.EmptyClipboard()
+                finally:
+                    user32.CloseClipboard()
+                return
+        except Exception:
+            pass
+    try:
+        import pyperclip
+        pyperclip.copy("")
+    except Exception:
+        pass
+
+
 def _extract_via_uia() -> str:
     """Attempts to retrieve selected text from the focused UI element using UI Automation."""
     if sys.platform != "win32":
@@ -172,11 +193,14 @@ def _extract_via_clipboard() -> str:
         restored = False
         if snapshot:
             restored = _restore_windows_clipboard(snapshot)
-        if not restored and original_text:
-            try:
-                pyperclip.copy(original_text)
-            except Exception:
-                pass
+        if not restored:
+            if original_text:
+                try:
+                    pyperclip.copy(original_text)
+                except Exception:
+                    pass
+            else:
+                _clear_clipboard()
 
         # 6. If clipboard remained sentinel, copy failed (no selectable text in target)
         if not copied or copied == sentinel:

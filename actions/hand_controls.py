@@ -54,11 +54,9 @@ def hand_controls(parameters, **kwargs):
 
         elif action == 'start':
             target_mode = str(mode or 'NAVIGATION')
-            from core.ghost_overlay import passive_overlay_available, show_vision_control_center
+            from core.ghost_overlay import passive_overlay_available
             if target_mode == 'KEYBOARD' and not passive_overlay_available():
                 return ToolResult('failed', 'The desktop overlay is unavailable; hand typing was not enabled.')
-            if passive_overlay_available():
-                show_vision_control_center(mode=target_mode)
             model_path = _resolve_hand_model(parameters.get('model_path'))
             hands.start(model_path, target_mode,
                         settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)

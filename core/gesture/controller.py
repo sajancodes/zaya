@@ -108,13 +108,15 @@ class HandController:
             self.current_gesture = candidate_pose if stable else f"({candidate_pose})"
 
             self.desktop.update_target_info()
-            screen_w, screen_h = self.desktop.screen_w, self.desktop.screen_h
-            hud_w = min(1180, int(screen_w * 0.85))
-            hud_h = min(240, int(screen_h * 0.28))
-            hud_x1 = (screen_w - hud_w) // 2
+            mon_left, mon_top, mon_right, mon_bottom = self.desktop.monitor_rect
+            mon_w = max(800, mon_right - mon_left)
+            mon_h = max(600, mon_bottom - mon_top)
+            hud_w = min(1180, int(mon_w * 0.85))
+            hud_h = min(240, int(mon_h * 0.28))
+            hud_x1 = mon_left + (mon_w - hud_w) // 2
             hud_x2 = hud_x1 + hud_w
-            hud_y1 = 0
-            hud_y2 = hud_h + 10
+            hud_y1 = mon_top + 8
+            hud_y2 = hud_y1 + hud_h
 
             tip = hand.landmarks[8]
             target_px_x, target_px_y = self.desktop.map_coords(tip.x, tip.y)
@@ -154,9 +156,8 @@ class HandController:
                         self.desktop.enter_armed = False
                         self.desktop.last_enter_time = now
                         sent = "Enter"
-                else:
-                    if desktop_pose != "THUMBS_UP":
-                        self.desktop.enter_armed = True
+                elif desktop_pose == "OPEN_PALM" and stable:
+                    self.desktop.enter_armed = True
 
                 packet = {
                     "mode": "virtual_keyboard",

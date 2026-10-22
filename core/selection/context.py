@@ -1,10 +1,35 @@
 """Selection context captures two-finger drag bounding regions and target app metadata."""
 from __future__ import annotations
 
+import sys
 import time
 import threading
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
+
+
+def _is_same_root_window(hwnd1: int, hwnd2: int) -> bool:
+    """Returns True if two HWNDs share the same root/ancestor window on Windows."""
+    if hwnd1 == hwnd2:
+        return True
+    if sys.platform == "win32" and hwnd1 and hwnd2:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            # GA_ROOT = 2, GA_ROOTOWNER = 3
+            root1 = user32.GetAncestor(wintypes.HWND(hwnd1), 2)
+            root2 = user32.GetAncestor(wintypes.HWND(hwnd2), 2)
+            if root1 and root2 and root1 == root2:
+                return True
+            owner1 = user32.GetAncestor(wintypes.HWND(hwnd1), 3)
+            owner2 = user32.GetAncestor(wintypes.HWND(hwnd2), 3)
+            if owner1 and owner2 and owner1 == owner2:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 @dataclass
@@ -19,13 +44,22 @@ class SelectionContext:
     target_hwnd: int = 0
     cached_text: str = ""
 
-    def is_valid(self, ttl_seconds: float = 30.0, current_pid: Optional[int] = None) -> bool:
+    def is_valid(
+        self,
+        ttl_seconds: float = 30.0,
+        current_pid: Optional[int] = None,
+        current_hwnd: Optional[int] = None,
+    ) -> bool:
         """Returns True if this selection is fresh within ttl_seconds and belongs to current foreground app."""
         if (time.time() - self.timestamp) > ttl_seconds:
             return False
         if current_pid is not None and self.target_pid != 0:
             if current_pid != self.target_pid:
                 return False
+        if current_hwnd is not None and self.target_hwnd != 0:
+            if current_hwnd != self.target_hwnd:
+                if not _is_same_root_window(current_hwnd, self.target_hwnd):
+                    return False
         return True
 
     @property
@@ -52,22 +86,26 @@ class SelectionManager:
         self,
         ttl_seconds: float = 30.0,
         current_pid: Optional[int] = None,
+        current_hwnd: Optional[int] = None,
         allow_stale: bool = False,
     ) -> Optional[SelectionContext]:
         with self._lock:
             if self._current is None:
                 return None
 
-            if current_pid is None and not allow_stale:
+            if (current_pid is None or current_hwnd is None) and not allow_stale:
                 try:
                     from core.gesture.desktop_controller import get_foreground_info
 
                     info = get_foreground_info()
-                    current_pid = info.get("pid")
+                    if current_pid is None:
+                        current_pid = info.get("pid")
+                    if current_hwnd is None:
+                        current_hwnd = info.get("hwnd")
                 except Exception:
-                    current_pid = None
+                    pass
 
-            if self._current.is_valid(ttl_seconds=ttl_seconds, current_pid=current_pid):
+            if self._current.is_valid(ttl_seconds=ttl_seconds, current_pid=current_pid, current_hwnd=current_hwnd):
                 return self._current
 
             if allow_stale:

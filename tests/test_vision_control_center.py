@@ -169,11 +169,16 @@ def test_scenario_a_to_e_journey(monkeypatch):
     with patch.object(controller.tracker, 'start', lambda *a, **k: setattr(controller.tracker, 'state', 'ACTIVE')), \
          with_trust(TRUST_LOCAL_OWNER):
 
-        # Scenario A: "start webcam"
+        # Scenario A: "start webcam" (starts silently without popping up Vision Control Center)
         res_a = hand_controls({'action': 'start', 'mode': 'NAVIGATION'})
         assert res_a.status == 'success'
         assert controller.mode == InteractionMode.NAVIGATION
         assert controller.tracker.state == 'ACTIVE'
+        assert len(opened_windows) == 0  # No right menu on start!
+
+        # Explicit "settings" action opens Vision Control Center
+        res_settings = hand_controls({'action': 'settings', 'mode': 'NAVIGATION'})
+        assert res_settings.status == 'success'
         assert 'NAVIGATION' in opened_windows
 
         # Scenario B: "open virtual keyboard" (camera reused!)

@@ -138,7 +138,7 @@ def test_candidate_pose_does_not_click_or_select_or_scroll():
 # ============================================================================
 
 def test_thumbs_up_one_shot_edge_triggered():
-    """THUMBS_UP must fire Enter exactly ONCE and never repeat while held."""
+    """THUMBS_UP must fire Enter exactly ONCE and never repeat while held; only stable OPEN_PALM re-arms."""
     dc = DesktopController(screen_size=(1920, 1080))
     keys = []
     dc._send_key = lambda key: keys.append(key)
@@ -151,12 +151,21 @@ def test_thumbs_up_one_shot_edge_triggered():
     assert len(keys) == 1
     assert keys[0] == "enter"
 
-    # Frames 2-5: Held THUMBS_UP -> must NOT fire again
-    for t in [1.1, 1.2, 1.3, 1.4]:
-        dc.handle_frame(hand, "THUMBS_UP", t, stable=True)
+    # Held THUMBS_UP -> must NOT fire again
+    dc.handle_frame(hand, "THUMBS_UP", 1.1, stable=True)
     assert len(keys) == 1
 
-    # Transition to neutral OPEN_PALM -> re-arms Enter
+    # Accidental / noisy gesture transition (e.g. INDEX_ONLY, PINCH, FIST) -> must NOT re-arm!
+    dc.handle_frame(hand, "INDEX_ONLY", 1.2, stable=True)
+    assert dc.enter_armed is False
+    dc.handle_frame(hand, "FIST", 1.3, stable=True)
+    assert dc.enter_armed is False
+
+    # Second THUMBS_UP without reaching OPEN_PALM -> must NOT trigger Enter!
+    dc.handle_frame(hand, "THUMBS_UP", 1.4, stable=True)
+    assert len(keys) == 1
+
+    # Only stable neutral OPEN_PALM re-arms Enter!
     dc.handle_frame(hand, "OPEN_PALM", 1.5, stable=True)
     assert dc.enter_armed is True
 
@@ -272,13 +281,21 @@ def test_fist_scrolling_dead_zone_and_directional_wheel():
     dc.handle_frame(h3, "FIST", 1.2, stable=True)
     assert len(wheels) > 0
     assert wheels[-1] > 0  # positive wheel clicks for scroll up
+    # Baseline must have updated incrementally to 0.40!
+    assert dc.scroll_baseline_y == pytest.approx(0.40)
 
-    # Step 4: Downward movement outside dead-zone (tip_y=0.55 -> palm 0.65, delta +0.15) -> wheel DOWN
+    # Step 3b: Fist stops moving (held at tip_y=0.30, palm 0.40) -> scrolling stops immediately!
     wheels.clear()
-    h4 = make_hand(1.3, tip_y=0.55)
+    dc.handle_frame(h3, "FIST", 1.26, stable=True)  # > 0.04s later, identical position
+    assert len(wheels) == 0  # No continuous scrolling when stationary!
+
+    # Step 4: Downward movement outside dead-zone (tip_y=0.45 -> palm 0.55, delta +0.15) -> wheel DOWN
+    wheels.clear()
+    h4 = make_hand(1.3, tip_y=0.45)
     dc.handle_frame(h4, "FIST", 1.3, stable=True)
     assert len(wheels) > 0
     assert wheels[-1] < 0  # negative wheel clicks for scroll down
+    assert dc.scroll_baseline_y == pytest.approx(0.55)
 
 
 # ============================================================================
@@ -343,6 +360,33 @@ def test_sentinel_accepts_fresh_copied_text(monkeypatch):
     assert fake_clipboard["text"] == "OriginalData"
 
 
+def test_sentinel_cleared_when_originally_empty(monkeypatch):
+    """When original clipboard was empty and copy fails, sentinel must be cleared, not left behind."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr("core.selection.selected_text._snapshot_windows_clipboard", lambda: [])
+    monkeypatch.setattr("core.selection.selected_text._restore_windows_clipboard", lambda s: False)
+
+    fake_clipboard = {"text": ""}
+
+    def fake_paste():
+        return fake_clipboard["text"]
+
+    def fake_copy(val):
+        fake_clipboard["text"] = val
+
+    import pyperclip
+    monkeypatch.setattr(pyperclip, "paste", fake_paste)
+    monkeypatch.setattr(pyperclip, "copy", fake_copy)
+
+    monkeypatch.setattr("core.selection.selected_text._clear_clipboard", lambda: fake_clipboard.update({"text": ""}))
+    monkeypatch.setattr("actions.ghost_keyboard.send_hotkey", lambda key: True)
+
+    extracted = _extract_via_clipboard()
+    assert extracted == ""
+    # Sentinel MUST NOT be left in clipboard!
+    assert fake_clipboard["text"] == ""
+
+
 # ============================================================================
 # 7. WIN32 CLIPBOARD FORMAT SNAPSHOT & RESTORE
 # ============================================================================
@@ -382,16 +426,21 @@ def test_selection_context_validation_and_ttl():
     )
     mgr.set_selection(ctx)
 
-    # Same PID -> valid
+    # Same PID and same HWND -> valid
     with patch("core.gesture.desktop_controller.get_foreground_info", return_value={"pid": 1234, "hwnd": 5678}):
-        assert ctx.is_valid(current_pid=1234) is True
+        assert ctx.is_valid(current_pid=1234, current_hwnd=5678) is True
         retrieved = mgr.get_selection()
         assert retrieved is not None
         assert retrieved.cached_text == "selected code block"
 
-    # Changed foreground window -> invalid
+    # Same PID but DIFFERENT HWND (switching between windows of the same process) -> invalid!
+    with patch("core.gesture.desktop_controller.get_foreground_info", return_value={"pid": 1234, "hwnd": 9999}):
+        assert ctx.is_valid(current_pid=1234, current_hwnd=9999) is False
+        assert mgr.get_selection() is None
+
+    # Changed foreground window PID -> invalid
     with patch("core.gesture.desktop_controller.get_foreground_info", return_value={"pid": 9999, "hwnd": 8888}):
-        assert ctx.is_valid(current_pid=9999) is False
+        assert ctx.is_valid(current_pid=9999, current_hwnd=8888) is False
         assert mgr.get_selection() is None
 
     # Expired TTL (> 30s) -> invalid
@@ -432,13 +481,25 @@ def test_untrusted_content_classification_and_wrapping():
             with patch("actions.read_selected_text._speak_text", return_value=True):
                 result = read_selected_text({})
                 assert result.status == "success"
-                # Must wrap extracted content as instructions-as-data
+                # Must set top-level untrusted fields on ToolResult
+                assert result.external_content is True
+                assert result.content_is_data_not_instructions is True
+                assert result.trust == "document_content"
+                # And inside data dict
                 assert result.data["content_is_data_not_instructions"] is True
                 assert result.data["response_is_untrusted_data"] is True
                 assert result.data["external_content"] is True
                 assert "UNTRUSTED SCREEN DATA" in result.summary
                 assert "--- END UNTRUSTED DATA ---" in result.summary
                 assert injection_text in result.summary
+
+                # Also verify nested invocation via hand_controls(action='read_text')
+                from actions.hand_controls import hand_controls
+                nested_res = hand_controls({"action": "read_text"})
+                assert nested_res.status == "success"
+                assert nested_res.external_content is True
+                assert nested_res.content_is_data_not_instructions is True
+                assert nested_res.trust == "document_content"
 
 
 # ============================================================================
@@ -487,6 +548,46 @@ def test_air_keyboard_defaults_hidden_and_docking():
     hud.apply(packet)
     assert hud.x() >= 1920
     assert hud.y() >= 0
+
+
+def test_secondary_monitor_keyboard_hit_testing():
+    """HandController must build keyboard hit test box using target monitor_rect."""
+    ctrl = HandController()
+    ctrl.keyboard_visible = True
+    ctrl.mode = InteractionMode.NAVIGATION
+    ctrl.desktop.monitor_rect = (1920, 0, 3840, 1080)
+    ctrl.desktop.target_info = {"monitor_rect": (1920, 0, 3840, 1080)}
+
+    # Hand at center of top region of secondary monitor
+    hand = make_hand(1.0, tip_x=0.5, tip_y=0.15)
+
+    with patch("core.ghost_overlay.update_passive_overlay") as mock_update:
+        ctrl.on_hands((hand,))
+        # Latest packet should show active virtual keyboard inside_keyboard=True
+        assert ctrl.latest_packet.get("mode") == "virtual_keyboard"
+        assert ctrl.latest_packet.get("visible") is True
+        # Relative cursor must be populated inside keys region
+        assert ctrl.latest_packet.get("cursor_rel") is not None
+
+
+def test_hand_controls_start_does_not_open_vision_control_center(monkeypatch):
+    """'Zaya, enable hand controls' must start silently without popping up Vision Control Center."""
+    from actions.hand_controls import hand_controls
+    opened = []
+    monkeypatch.setattr("core.ghost_overlay.show_vision_control_center", lambda mode=None: opened.append(mode) or True)
+    monkeypatch.setattr("core.ghost_overlay.passive_overlay_available", lambda: True)
+
+    with with_trust(TRUST_LOCAL_OWNER):
+        with patch("core.gesture.controller.hands.start") as mock_start:
+            res_start = hand_controls({"action": "start", "mode": "NAVIGATION"})
+            assert res_start.status in ("success", "partial")
+            # Vision Control Center MUST NOT be opened on start!
+            assert len(opened) == 0
+
+            # Only explicit settings action opens Vision Control Center
+            res_settings = hand_controls({"action": "settings", "mode": "NAVIGATION"})
+            assert res_settings.status == "success"
+            assert "NAVIGATION" in opened
 
 
 # ============================================================================

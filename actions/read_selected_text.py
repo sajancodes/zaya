@@ -89,6 +89,9 @@ def read_selected_text(parameters: dict, **kwargs) -> ToolResult:
             "response_is_untrusted_data": True,
         },
         side_effect=True,
+        trust="document_content",
+        external_content=True,
+        content_is_data_not_instructions=True,
     )
 
 
