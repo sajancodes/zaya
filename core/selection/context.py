@@ -18,6 +18,8 @@ def _is_same_root_window(hwnd1: int, hwnd2: int) -> bool:
             from ctypes import wintypes
 
             user32 = ctypes.windll.user32
+            user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+            user32.GetAncestor.restype = wintypes.HWND
             # GA_ROOT = 2, GA_ROOTOWNER = 3
             root1 = user32.GetAncestor(wintypes.HWND(hwnd1), 2)
             root2 = user32.GetAncestor(wintypes.HWND(hwnd2), 2)

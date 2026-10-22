@@ -341,7 +341,6 @@ class DesktopController:
             self.selection_just_ended = False
             self.enter_armed = True
             self._set_cursor_pos(smooth_x, smooth_y)
-            self._set_cursor_pos(smooth_x, smooth_y)
 
         # 2. GESTURE: INDEX_ONLY -> Clean single click (Anti-collapse guarded)
         elif gesture == "INDEX_ONLY":

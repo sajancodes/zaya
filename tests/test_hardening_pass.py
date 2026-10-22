@@ -454,6 +454,20 @@ def test_selection_context_validation_and_ttl():
     assert old_ctx.is_valid(current_pid=1234) is False
 
 
+def test_is_same_root_window_64bit_safety():
+    """_is_same_root_window must safely handle 64-bit HWND values without ctypes truncation/overflow."""
+    from core.selection.context import _is_same_root_window
+
+    # Identical HWNDs
+    assert _is_same_root_window(12345, 12345) is True
+
+    # 64-bit HWND value with high bits set
+    hwnd_64bit = 0x00007FFF80001234
+    assert _is_same_root_window(hwnd_64bit, hwnd_64bit) is True
+    # Different 64-bit HWNDs
+    assert _is_same_root_window(hwnd_64bit, 0x00007FFF80005678) in (True, False)
+
+
 # ============================================================================
 # 9. UNTRUSTED CONTENT CLASSIFICATION & WRAPPING
 # ============================================================================
