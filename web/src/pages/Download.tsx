@@ -41,16 +41,31 @@ export const Download: React.FC<DownloadProps> = ({ navigate }) => {
           }}
         >
           {/* Windows Desktop Card */}
-          <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div className="glass-panel crystal-corner" style={{ padding: '36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <img
+                    src="/assets/ruby-icon.png"
+                    alt="Zaya Desktop Icon"
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '10px',
+                      boxShadow: '0 4px 16px rgba(95, 234, 255, 0.2)',
+                      border: '1px solid rgba(95, 234, 255, 0.3)'
+                    }}
+                  />
+                  <div>
+                    <h2 style={{ fontSize: '22px', color: '#F4FAFF', fontWeight: 600, margin: 0 }}>
+                      Windows Desktop
+                    </h2>
+                    <span style={{ fontSize: '11px', color: '#80CFFF', letterSpacing: '0.5px' }}>Official Application</span>
+                  </div>
+                </div>
                 <span className="badge badge-stable">STABLE · v{windowsRelease.version}</span>
-                <span style={{ fontSize: '12px', color: '#8392A6' }}>{windowsRelease.sizeFormatted}</span>
               </div>
 
-              <h2 style={{ fontSize: '24px', color: '#F4FAFF', fontWeight: 600, marginBottom: '8px' }}>
-                Windows Desktop
-              </h2>
               <p style={{ color: '#8392A6', fontSize: '14px', lineHeight: '1.6', marginBottom: '24px' }}>
                 Complete desktop runtime uniting Gemini Live voice, screen perception, optical hand tracking, and 3D spatial intelligence.
               </p>
@@ -68,10 +83,8 @@ export const Download: React.FC<DownloadProps> = ({ navigate }) => {
                     }).catch(() => {});
                   }}
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801" />
-                  </svg>
-                  Download {windowsRelease.filename}
+                  <img src="/assets/ruby-icon.png" alt="" style={{ width: '18px', height: '18px', marginRight: '6px' }} />
+                  Download {windowsRelease.filename} ({windowsRelease.sizeFormatted})
                 </a>
               </div>
 
@@ -109,16 +122,31 @@ export const Download: React.FC<DownloadProps> = ({ navigate }) => {
           </div>
 
           {/* Android Companion Card */}
-          <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div className="glass-panel crystal-corner" style={{ padding: '36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <img
+                    src="/assets/zaya-logo.png"
+                    alt="Zaya Android Companion"
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '50%',
+                      boxShadow: '0 4px 16px rgba(95, 234, 255, 0.2)',
+                      border: '1px solid rgba(95, 234, 255, 0.3)'
+                    }}
+                  />
+                  <div>
+                    <h2 style={{ fontSize: '22px', color: '#F4FAFF', fontWeight: 600, margin: 0 }}>
+                      Android Companion
+                    </h2>
+                    <span style={{ fontSize: '11px', color: '#80CFFF', letterSpacing: '0.5px' }}>Native Kotlin & Jetpack</span>
+                  </div>
+                </div>
                 <span className="badge badge-stable">STABLE · v{androidRelease.version}</span>
-                <span style={{ fontSize: '12px', color: '#8392A6' }}>{androidRelease.sizeFormatted}</span>
               </div>
 
-              <h2 style={{ fontSize: '24px', color: '#F4FAFF', fontWeight: 600, marginBottom: '8px' }}>
-                Android Companion App
-              </h2>
               <p style={{ color: '#8392A6', fontSize: '14px', lineHeight: '1.6', marginBottom: '24px' }}>
                 Native Kotlin and Jetpack Compose companion. Two-way voice, priority phone ringing (P0/P1), live phone video context, and task views.
               </p>
@@ -136,10 +164,8 @@ export const Download: React.FC<DownloadProps> = ({ navigate }) => {
                     }).catch(() => {});
                   }}
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4483.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5898 8.4239 13.847 8.134 12 8.134c-1.847 0-3.5898.2899-5.1368.8157L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396" />
-                  </svg>
-                  Download {androidRelease.filename}
+                  <img src="/assets/zaya-logo.png" alt="" style={{ width: '18px', height: '18px', borderRadius: '50%', marginRight: '6px' }} />
+                  Download {androidRelease.filename} ({androidRelease.sizeFormatted})
                 </a>
               </div>
 

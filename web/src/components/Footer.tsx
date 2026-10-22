@@ -48,14 +48,16 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
         >
           {/* Brand Col */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <img
+                src="/assets/zaya-logo.png"
+                alt="Zaya Brand Mark"
                 style={{
-                  width: '8px',
-                  height: '8px',
+                  width: '28px',
+                  height: '28px',
                   borderRadius: '50%',
-                  backgroundColor: '#49DFFF',
-                  boxShadow: '0 0 10px #49DFFF'
+                  boxShadow: '0 0 12px rgba(95, 234, 255, 0.4)',
+                  border: '1px solid rgba(95, 234, 255, 0.3)'
                 }}
               />
               <span style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '3px', color: '#F4FAFF' }}>
@@ -186,6 +188,11 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               </li>
             </ul>
           </div>
+        </div>
+
+        {/* Crystal Accent Divider */}
+        <div className="crystal-divider" style={{ margin: '40px 0 30px' }}>
+          <span>◇</span>
         </div>
 
         {/* Bottom Bar with off-screen destiny line */}

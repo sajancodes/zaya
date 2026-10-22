@@ -30,9 +30,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
         position: 'sticky',
         top: 0,
         zIndex: 100,
-        backgroundColor: 'rgba(2, 4, 7, 0.85)',
-        backdropFilter: 'blur(16px)',
-        borderBottom: '1px solid rgba(73, 223, 255, 0.12)',
+        backgroundColor: 'rgba(1, 4, 9, 0.82)',
+        backdropFilter: 'blur(20px)',
+        borderBottom: '1px solid rgba(95, 234, 255, 0.14)',
         height: '68px',
         display: 'flex',
         alignItems: 'center'
@@ -50,7 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           padding: '0 24px'
         }}
       >
-        {/* Brand & Author */}
+        {/* Brand & Author using REAL existing Zaya Logo */}
         <div
           onClick={() => handleNav('/')}
           style={{
@@ -61,21 +61,24 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             userSelect: 'none'
           }}
         >
-          <div
+          <img
+            src="/assets/zaya-logo.png"
+            alt="Zaya Logo"
             style={{
-              width: '10px',
-              height: '10px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
-              backgroundColor: '#49DFFF',
-              boxShadow: '0 0 12px #49DFFF, 0 0 24px rgba(73, 223, 255, 0.6)'
+              border: '1px solid rgba(95, 234, 255, 0.4)',
+              boxShadow: '0 0 12px rgba(95, 234, 255, 0.35)',
+              objectFit: 'cover'
             }}
           />
           <span
             style={{
               fontSize: '20px',
-              fontWeight: 700,
+              fontWeight: 800,
               letterSpacing: '3px',
-              color: '#F4FAFF',
+              color: '#ebfcff',
               fontFamily: "'Inter', sans-serif"
             }}
           >
@@ -84,9 +87,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           <span
             style={{
               fontSize: '11px',
-              color: '#8392A6',
+              color: '#8193a6',
               letterSpacing: '0.5px',
-              borderLeft: '1px solid rgba(73, 223, 255, 0.15)',
+              borderLeft: '1px solid rgba(95, 234, 255, 0.18)',
               paddingLeft: '10px',
               display: 'none',
               ...(window.innerWidth > 640 ? { display: 'inline' } : {})
@@ -114,18 +117,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 style={{
                   fontSize: '13px',
                   fontWeight: isActive ? 600 : 400,
-                  color: isActive ? '#49DFFF' : '#8392A6',
+                  color: isActive ? '#5feaff' : '#8193a6',
                   cursor: 'pointer',
                   letterSpacing: '0.3px',
-                  transition: 'color 0.15s ease',
+                  transition: 'color 0.2s ease',
                   position: 'relative',
                   padding: '6px 0'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.color = '#F4FAFF';
+                  if (!isActive) e.currentTarget.style.color = '#ebfcff';
                 }}
                 onMouseLeave={(e) => {
-                  if (!isActive) e.currentTarget.style.color = '#8392A6';
+                  if (!isActive) e.currentTarget.style.color = '#8193a6';
                 }}
               >
                 {link.label}
@@ -137,8 +140,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                       left: 0,
                       right: 0,
                       height: '2px',
-                      backgroundColor: '#49DFFF',
-                      boxShadow: '0 0 8px #49DFFF'
+                      backgroundColor: '#5feaff',
+                      boxShadow: '0 0 8px #5feaff'
                     }}
                   />
                 )}
@@ -156,22 +159,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                background: 'rgba(73, 223, 255, 0.06)',
-                border: '1px solid rgba(73, 223, 255, 0.18)',
+                background: 'rgba(3, 10, 18, 0.65)',
+                border: '1px solid rgba(95, 234, 255, 0.18)',
                 borderRadius: '8px',
                 padding: '6px 12px',
-                color: '#8392A6',
+                color: '#8193a6',
                 fontSize: '12px',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(73, 223, 255, 0.4)';
-                e.currentTarget.style.color = '#F4FAFF';
+                e.currentTarget.style.borderColor = 'rgba(95, 234, 255, 0.45)';
+                e.currentTarget.style.color = '#ebfcff';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(73, 223, 255, 0.18)';
-                e.currentTarget.style.color = '#8392A6';
+                e.currentTarget.style.borderColor = 'rgba(95, 234, 255, 0.18)';
+                e.currentTarget.style.color = '#8193a6';
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -181,11 +184,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               <span>Search</span>
               <kbd
                 style={{
-                  backgroundColor: 'rgba(2, 4, 7, 0.8)',
+                  backgroundColor: 'rgba(1, 4, 9, 0.8)',
                   padding: '2px 5px',
                   borderRadius: '4px',
                   fontSize: '10px',
-                  border: '1px solid rgba(73, 223, 255, 0.15)'
+                  border: '1px solid rgba(95, 234, 255, 0.15)',
+                  color: '#5feaff'
                 }}
               >
                 Ctrl+K
@@ -195,27 +199,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
 
           <button
             onClick={() => handleNav('/download')}
+            className="btn btn-primary"
             style={{
-              backgroundColor: '#49DFFF',
-              color: '#020407',
-              border: 'none',
-              borderRadius: '8px',
               padding: '8px 18px',
               fontSize: '13px',
               fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 0 20px rgba(73, 223, 255, 0.35)',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = '0 0 25px rgba(73, 223, 255, 0.6)';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = '0 0 20px rgba(73, 223, 255, 0.35)';
-              e.currentTarget.style.transform = 'none';
+              gap: '8px'
             }}
           >
+            <img
+              src="/assets/ruby-icon.png"
+              alt="Ruby Icon"
+              style={{ width: '16px', height: '16px', objectFit: 'contain' }}
+            />
             Download
           </button>
 
@@ -227,7 +223,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               display: 'none',
               background: 'transparent',
               border: 'none',
-              color: '#F4FAFF',
+              color: '#ebfcff',
               fontSize: '22px',
               cursor: 'pointer',
               padding: '4px'
@@ -246,8 +242,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             top: '68px',
             left: 0,
             right: 0,
-            backgroundColor: '#050b14',
-            borderBottom: '1px solid rgba(73, 223, 255, 0.2)',
+            backgroundColor: '#020813',
+            borderBottom: '1px solid rgba(95, 234, 255, 0.2)',
             padding: '20px 24px',
             display: 'flex',
             flexDirection: 'column',
@@ -261,7 +257,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               onClick={() => handleNav(link.path)}
               style={{
                 fontSize: '15px',
-                color: currentPath === link.path ? '#49DFFF' : '#F4FAFF',
+                color: currentPath === link.path ? '#5feaff' : '#ebfcff',
                 padding: '6px 0',
                 cursor: 'pointer'
               }}
@@ -269,8 +265,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               {link.label}
             </span>
           ))}
-          <div style={{ paddingTop: '10px', borderTop: '1px solid rgba(73, 223, 255, 0.1)' }}>
-            <span style={{ fontSize: '11px', color: '#8392A6' }}>
+          <div style={{ paddingTop: '10px', borderTop: '1px solid rgba(95, 234, 255, 0.1)' }}>
+            <span style={{ fontSize: '11px', color: '#8193a6' }}>
               Created and developed by Sajan Rai
             </span>
           </div>
