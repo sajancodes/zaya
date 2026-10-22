@@ -63,9 +63,8 @@ def encrypt_secret(plaintext: str) -> str:
             encrypted_bytes = ctypes.string_at(out_blob.pbData, out_blob.cbData)
             ctypes.windll.kernel32.LocalFree(out_blob.pbData)
             return "dpapi:" + base64.b64encode(encrypted_bytes).decode("ascii")
-        except Exception:
-            # Fallback to local obfuscation if DPAPI fails unexpectedly
-            pass
+        except Exception as exc:
+            raise RuntimeError(f"Windows DPAPI encryption failed: {exc}") from exc
 
     return "b64:" + base64.b64encode(raw_bytes).decode("ascii")
 

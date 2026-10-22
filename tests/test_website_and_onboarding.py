@@ -106,21 +106,24 @@ def test_telemetry_installation_info_creation_and_preservation(tmp_path, monkeyp
     info1 = get_or_create_installation_info()
     assert "installation_id" in info1
     assert len(info1["installation_id"]) == 36  # UUIDv4 format
-    assert info1["telemetry_enabled"] is True
+    # By default on fresh install, telemetry is disabled until explicit user consent
+    assert info1["telemetry_enabled"] is False
 
     # Calling again preserves same UUID
     info2 = get_or_create_installation_info()
     assert info2["installation_id"] == info1["installation_id"]
 
     # Toggle preference
-    set_telemetry_enabled(False)
-    assert is_telemetry_enabled() is False
     set_telemetry_enabled(True)
     assert is_telemetry_enabled() is True
+    set_telemetry_enabled(False)
+    assert is_telemetry_enabled() is False
 
 
 def test_telemetry_reporting(tmp_path, monkeypatch):
     monkeypatch.setattr("core.telemetry.get_user_data_dir", lambda: tmp_path)
+    # Enable telemetry for reporting tests
+    set_telemetry_enabled(True)
 
     with patch("core.telemetry._post_json", return_value=True) as mock_post:
         assert report_install_event("https://test.zaya.codes") is True
@@ -241,28 +244,77 @@ def test_api_download_event(client):
 
 
 def test_api_releases_endpoints(client):
+    # Upsert releases for both Windows and Android at same version (tests composite key uniqueness)
+    db.upsert_release(
+        version="0.5.5",
+        platform="windows",
+        filename="ZayaSetup.exe",
+        url="https://github.com/sajancodes/zaya-companion-releases/releases/download/v0.5.5/ZayaSetup.exe",
+        sha256="aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+        size=45000000,
+        release_notes="Windows release notes",
+    )
+    db.upsert_release(
+        version="0.5.5",
+        platform="android",
+        filename="Zaya-Companion.apk",
+        url="https://github.com/sajancodes/zaya-companion-releases/releases/download/v0.5.5/Zaya-Companion.apk",
+        sha256="112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00",
+        size=23000000,
+        release_notes="Android companion notes",
+    )
+
     resp = client.get("/api/releases")
     assert resp.status_code == 200
     releases = resp.json()
     assert isinstance(releases, list)
-    assert len(releases) >= 1
+    assert len(releases) == 2
 
-    latest = client.get("/api/releases/latest?platform=windows")
-    assert latest.status_code == 200
-    assert latest.json()["platform"] == "windows"
+    latest_win = client.get("/api/releases/latest?platform=windows")
+    assert latest_win.status_code == 200
+    assert latest_win.json()["platform"] == "windows"
+    assert latest_win.json()["version"] == "0.5.5"
+
+    latest_droid = client.get("/api/releases/latest?platform=android")
+    assert latest_droid.status_code == 200
+    assert latest_droid.json()["platform"] == "android"
+    assert latest_droid.json()["version"] == "0.5.5"
 
 
-def test_admin_metrics_authentication(client):
-    # Unauthenticated access to metrics rejected
+def test_admin_metrics_authentication(client, monkeypatch):
+    # 1. Without strong ADMIN_PASSWORD configured, /admin is disabled (503 Service Unavailable)
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    resp_disabled = client.get("/api/admin/metrics")
+    assert resp_disabled.status_code == 503
+
+    # Disallowed default password must also fail
+    monkeypatch.setenv("ADMIN_PASSWORD", "ZayaOwner2026!")
+    resp_disallowed = client.get("/api/admin/metrics")
+    assert resp_disallowed.status_code == 503
+
+    # 2. Configure strong secret (minimum 12 chars)
+    strong_pw = "SuperSecureOwnerSecret2026!#%"
+    monkeypatch.setenv("ADMIN_USER", "owner")
+    monkeypatch.setenv("ADMIN_PASSWORD", strong_pw)
+
+    # Unauthenticated access to metrics rejected (401)
     resp_unauth = client.get("/api/admin/metrics")
     assert resp_unauth.status_code == 401
 
-    # Login with valid credentials
-    resp_login = client.post("/api/admin/login", json={"username": "owner", "password": "ZayaOwner2026!"})
-    assert resp_login.status_code == 200
+    # Login with invalid password fails (401)
+    resp_bad = client.post("/api/admin/login", json={"username": "owner", "password": "wrongpassword"})
+    assert resp_bad.status_code == 401
 
-    # Authenticated metrics access
-    resp_metrics = client.get("/api/admin/metrics")
+    # Login with valid credentials succeeds (200)
+    resp_login = client.post("https://testserver/api/admin/login", json={"username": "owner", "password": strong_pw})
+    assert resp_login.status_code == 200
+    # Cookie must be marked secure
+    set_cookie = resp_login.headers.get("set-cookie", "")
+    assert "HttpOnly" in set_cookie
+    assert "Secure" in set_cookie
+
+    # Authenticated metrics access over HTTPS client preserves Secure cookie
+    resp_metrics = client.get("https://testserver/api/admin/metrics")
     assert resp_metrics.status_code == 200
     data = resp_metrics.json()
     assert "downloads" in data

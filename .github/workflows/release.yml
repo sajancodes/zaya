@@ -51,11 +51,16 @@ jobs:
           try:
               with urllib.request.urlopen(url, timeout=30) as response:
                   previous = json.load(response).get('version_code', 0)
-          except Exception:
-              previous = 0
+          except urllib.error.HTTPError as error:
+              if error.code == 404:
+                  previous = 0
+              else:
+                  raise RuntimeError(f"Failed to query public releases: HTTP {error.code}") from error
+          except Exception as error:
+              raise RuntimeError(f"Network error verifying release version: {error}") from error
           code = max(10001, int(previous) + 1)
           name = f"0.5.{code - 10000}"
-          tag = f"android-{name}"
+          tag = f"v{name}"
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version_code={code}\n")
               f.write(f"version_name={name}\n")
@@ -95,8 +100,17 @@ jobs:
           npm ci --no-audit --no-fund || npm install --no-audit --no-fund
           npm run build
 
+      - name: Generate version.json for build
+        shell: powershell
+        run: |
+          python -c "from core.version import write_version_file; write_version_file('version.json', '${{ needs.version.outputs.version_name }}', int('${{ needs.version.outputs.version_code }}'), '${{ github.event.inputs.channel || 'stable' }}')"
+
       - name: Package Zaya desktop application with PyInstaller
         shell: powershell
+        env:
+          ZAYA_VERSION: ${{ needs.version.outputs.version_name }}
+          ZAYA_BUILD: ${{ needs.version.outputs.version_code }}
+          ZAYA_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
           python -m PyInstaller packaging/windows/zaya-hand-worker.spec --noconfirm --distpath dist/windows/worker
           python -m PyInstaller packaging/windows/zaya.spec --noconfirm --distpath dist/windows
@@ -105,13 +119,19 @@ jobs:
       - name: Compile Inno Setup installer and generate desktop-update.json
         shell: powershell
         run: |
-          python tools/prepare_windows_release.py --app-dir dist/windows/Zaya --output dist/windows
+          python tools/prepare_windows_release.py `
+            --app-dir dist/windows/Zaya `
+            --output dist/windows `
+            --version ${{ needs.version.outputs.version_name }} `
+            --build ${{ needs.version.outputs.version_code }} `
+            --channel ${{ github.event.inputs.channel || 'stable' }}
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
           path: |
+            dist/windows/ZayaSetup.exe
             dist/windows/Zaya-Setup.exe
             dist/windows/desktop-update.json
             setup.txt
@@ -185,7 +205,16 @@ jobs:
     name: Aggregate & Publish Release
     runs-on: ubuntu-latest
     needs: [version, build_windows, build_android]
-    if: always() && (needs.build_windows.result == 'success' || needs.build_android.result == 'success')
+    if: |
+      always() &&
+      (
+        ((github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all') &&
+         needs.build_windows.result == 'success' && needs.build_android.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'windows' &&
+         needs.build_windows.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'android' &&
+         needs.build_android.result == 'success')
+      )
     steps:
       - uses: actions/checkout@v4
 
@@ -193,15 +222,15 @@ jobs:
         run: mkdir -p dist/release
 
       - name: Download Windows artifacts
+        if: needs.build_windows.result == 'success'
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: windows-release
           path: dist/release
 
       - name: Download Android artifacts
+        if: needs.build_android.result == 'success'
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: android-release
           path: dist/release
@@ -217,7 +246,7 @@ jobs:
           release_dir = 'dist/release'
           hashes = []
           for fname in sorted(os.listdir(release_dir)):
-              if fname in ('SHA256SUMS.txt', 'notes.md', 'Zaya-Companion.aab'):
+              if fname in ('SHA256SUMS.txt', 'notes.md', 'unified-notes.md', 'Zaya-Companion.aab'):
                   continue
               fpath = os.path.join(release_dir, fname)
               if os.path.isfile(fpath):
@@ -239,7 +268,7 @@ jobs:
           Unified production distribution for Windows desktop and Android Zaya Companion.
 
           ### Windows Desktop
-          - Installer: \`Zaya-Setup.exe\`
+          - Installer: \`ZayaSetup.exe\` (mirror: \`Zaya-Setup.exe\`)
           - User guide: \`setup.txt\`
           - Update manifest: \`desktop-update.json\`
 
@@ -247,8 +276,8 @@ jobs:
           - Package: \`Zaya-Companion.apk\`
           - Update manifest: \`update.json\`
 
-          ### Checksums
-          See \`SHA256SUMS.txt\` for file integrity verification.
+          ### Integrity & Verification
+          All release assets are published with SHA-256 digests in \`SHA256SUMS.txt\`.
           EOF
           if [ -f dist/release/notes.md ]; then
               cat dist/release/notes.md >> dist/release/unified-notes.md
@@ -259,17 +288,28 @@ jobs:
           GH_TOKEN: ${{ secrets.ZAYA_RELEASE_TOKEN }}
         run: |
           tag="${{ needs.version.outputs.release_tag }}"
-          echo "Publishing release $tag to sajancodes/zaya-companion-releases..."
+          channel="${{ github.event.inputs.channel || 'stable' }}"
+          echo "Publishing release $tag to sajancodes/zaya-companion-releases (channel: $channel)..."
           cd dist/release
           assets=()
-          for f in Zaya-Setup.exe Zaya-Companion.apk desktop-update.json update.json setup.txt SHA256SUMS.txt; do
+          for f in ZayaSetup.exe Zaya-Setup.exe Zaya-Companion.apk desktop-update.json update.json setup.txt SHA256SUMS.txt; do
               if [ -f "$f" ]; then
                   assets+=("$f")
               fi
           done
+
+          # Only mark as latest if stable channel AND both Windows & Android are present
+          if [ "$channel" = "beta" ]; then
+              FLAG="--prerelease"
+          elif [ -f "ZayaSetup.exe" ] && [ -f "Zaya-Companion.apk" ]; then
+              FLAG="--latest"
+          else
+              FLAG="--latest=false"
+          fi
+
           gh release create "$tag" \
             --repo sajancodes/zaya-companion-releases \
             --title "Zaya $tag" \
             --notes-file unified-notes.md \
-            --latest \
+            $FLAG \
             "${assets[@]}"

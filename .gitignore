@@ -105,3 +105,4 @@ web/node_modules/
 web/*.db*
 web/*.tmp
 !.env.example
+installation.json

@@ -11,6 +11,7 @@ Serves:
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
@@ -22,7 +23,14 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from web.auth import create_session, revoke_session, validate_session, verify_admin_credentials
+from web.auth import (
+    create_session,
+    is_admin_enabled,
+    is_login_rate_limited,
+    revoke_session,
+    validate_session,
+    verify_admin_credentials,
+)
 from web.database import (
     get_all_releases,
     get_analytics_metrics,
@@ -31,6 +39,7 @@ from web.database import (
     record_download,
     record_heartbeat,
     record_install,
+    sync_releases_from_github,
 )
 from web.telemetry_service import is_rate_limited, validate_telemetry_payload
 
@@ -41,26 +50,44 @@ WEB_ROOT = Path(__file__).resolve().parent
 DIST_DIR = WEB_ROOT / "dist"
 STATIC_DIR = WEB_ROOT / "static"
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    logger.info("Zaya database initialized in WAL mode.")
+    # Attempt non-blocking release sync from GitHub
+    import threading
+    threading.Thread(target=sync_releases_from_github, daemon=True, name="ZayaReleaseSync").start()
+    yield
+
+
 app = FastAPI(
     title="Zaya Public Distribution API",
     description="Official distribution, telemetry, and release APIs for Zaya by Sajan Rai.",
     version="0.5.0",
+    lifespan=lifespan,
 )
 
-# CORS setup for local dev support
+# CORS restricted to official production origin and local development hosts
+ALLOWED_ORIGINS = [
+    "https://zaya.sajan.codes",
+    "https://sajan.codes",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+extra_origins = os.environ.get("ALLOWED_ORIGINS", "")
+if extra_origins:
+    ALLOWED_ORIGINS.extend([o.strip() for o in extra_origins.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
-
-# Initialize database on startup
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    logger.info("Zaya database initialized in WAL mode.")
 
 
 # ---------------------------------------------------------------------------
@@ -171,15 +198,30 @@ async def api_releases_all():
 # Admin Authentication & Analytics Dashboard Endpoints
 # ---------------------------------------------------------------------------
 @app.post("/api/admin/login")
-async def api_admin_login(payload: AdminLoginPayload, response: Response):
+async def api_admin_login(payload: AdminLoginPayload, request: Request, response: Response):
+    client_ip = request.client.host if request.client else "unknown"
+    if is_login_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please wait 5 minutes before trying again.",
+        )
+
+    if not is_admin_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin panel is disabled until an explicit strong ADMIN_PASSWORD (minimum 12 characters) is configured in the server environment.",
+        )
+
     if not verify_admin_credentials(payload.username, payload.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     token = create_session(payload.username)
+    secure_cookie = os.environ.get("SECURE_COOKIE", "true").lower() != "false"
     response.set_cookie(
         key="zaya_admin_session",
         value=token,
         httponly=True,
+        secure=secure_cookie,
         max_age=7 * 86400,
         samesite="lax",
     )
@@ -199,6 +241,12 @@ async def api_admin_metrics(
     zaya_admin_session: Optional[str] = Cookie(None),
     request: Request = None,
 ):
+    if not is_admin_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin panel is disabled until an explicit strong ADMIN_PASSWORD is configured in the server environment.",
+        )
+
     # Check session cookie or Bearer token header
     token = zaya_admin_session
     auth_header = request.headers.get("Authorization") if request else None

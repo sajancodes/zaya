@@ -148,7 +148,14 @@ def find_or_download_hand_model(progress_callback: Optional[Callable[[int, int],
     ]
     for c in candidates:
         if c.is_file() and c.stat().st_size <= MAX_MODEL_SIZE:
-            return c
+            if verify_file_sha256(c, OFFICIAL_HAND_MODEL_SHA256):
+                return c
+            # Discard corrupted model in user data cache
+            if c == get_model_dir() / "hand_landmarker.task":
+                try:
+                    c.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     # Target destination
     destination = get_model_dir() / "hand_landmarker.task"

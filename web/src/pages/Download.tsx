@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface DownloadProps {
   navigate: (path: string) => void;
@@ -9,23 +9,47 @@ interface DownloadProps {
 export const Download: React.FC<DownloadProps> = ({
   navigate,
   windowsVersion = '0.5.0',
-  androidVersion = '0.4.6',
+  androidVersion = '0.5.0',
 }) => {
+  const [winVer, setWinVer] = useState(windowsVersion);
+  const [winSize, setWinSize] = useState('~48 MB');
+  const [droidVer, setDroidVer] = useState(androidVersion);
+  const [droidSize, setDroidSize] = useState('~24 MB');
+
+  useEffect(() => {
+    // Dynamically retrieve live release metadata
+    fetch('/api/releases/latest?platform=windows')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.version) {
+          setWinVer(data.version);
+          if (data.size && data.size > 0) {
+            setWinSize(`~${(data.size / (1024 * 1024)).toFixed(1)} MB`);
+          }
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/releases/latest?platform=android')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.version) {
+          setDroidVer(data.version);
+          if (data.size && data.size > 0) {
+            setDroidSize(`~${(data.size / (1024 * 1024)).toFixed(1)} MB`);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleWindowsDownload = () => {
-    fetch('/api/downloads/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: 'windows', version: windowsVersion }),
-    }).catch(() => {});
+    // Direct navigation triggers single server-side download event
     window.location.href = '/download/windows';
   };
 
   const handleAndroidDownload = () => {
-    fetch('/api/downloads/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: 'android', version: androidVersion }),
-    }).catch(() => {});
+    // Direct navigation triggers single server-side download event
     window.location.href = '/download/android';
   };
 
@@ -36,7 +60,7 @@ export const Download: React.FC<DownloadProps> = ({
           <div className="hero-tag">Official Releases</div>
           <h1 className="section-title">Download Zaya</h1>
           <p className="section-desc">
-            Choose your platform below. All official binaries are cryptographically signed and hash-verified.
+            Choose your platform below. All official releases are verified against published SHA-256 checksums.
           </p>
         </div>
 
@@ -65,9 +89,9 @@ export const Download: React.FC<DownloadProps> = ({
 
               <ul style={{ listStyle: 'none', marginBottom: '28px', fontSize: '13px', color: 'var(--text-muted)' }}>
                 <li style={{ marginBottom: '6px' }}>• Windows 10 / 11 (64-bit)</li>
-                <li style={{ marginBottom: '6px' }}>• Per-user installation (no admin UAC required)</li>
+                <li style={{ marginBottom: '6px' }}>• Per-user installation in %LOCALAPPDATA%\Programs\Zaya</li>
                 <li style={{ marginBottom: '6px' }}>• Local DPAPI encrypted API key storage</li>
-                <li>• In-app auto-updater included</li>
+                <li>• In-app auto-updater and published SHA-256 digests</li>
               </ul>
             </div>
 
@@ -83,8 +107,8 @@ export const Download: React.FC<DownloadProps> = ({
                 Download ZayaSetup.exe
               </button>
               <div className="download-meta">
-                <span>Version: {windowsVersion}</span>
-                <span>Size: ~48 MB</span>
+                <span>Version: {winVer}</span>
+                <span>Size: {winSize}</span>
               </div>
             </div>
           </div>
@@ -105,8 +129,8 @@ export const Download: React.FC<DownloadProps> = ({
 
               <ul style={{ listStyle: 'none', marginBottom: '28px', fontSize: '13px', color: 'var(--text-muted)' }}>
                 <li style={{ marginBottom: '6px' }}>• Android 8.0+ (API 26+)</li>
+                <li style={{ marginBottom: '6px' }}>• Signed with developer release keystore</li>
                 <li style={{ marginBottom: '6px' }}>• Local Wi-Fi / secure tunnel sync</li>
-                <li style={{ marginBottom: '6px' }}>• No credentials stored on device</li>
                 <li>• Foreground service call alerts</li>
               </ul>
             </div>
@@ -124,11 +148,11 @@ export const Download: React.FC<DownloadProps> = ({
                 style={{ width: '100%', padding: '10px 16px' }}
                 onClick={handleAndroidDownload}
               >
-                Download Official APK (v{androidVersion})
+                Download Official APK (v{droidVer})
               </button>
               <div className="download-meta">
-                <span>Version: {androidVersion}</span>
-                <span>Size: ~24 MB</span>
+                <span>Version: {droidVer}</span>
+                <span>Size: {droidSize}</span>
               </div>
             </div>
           </div>

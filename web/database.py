@@ -87,14 +87,16 @@ def init_db(db_path: Optional[Path] = None) -> None:
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS releases (
-                    version TEXT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT NOT NULL,
                     platform TEXT NOT NULL,
                     filename TEXT NOT NULL,
                     url TEXT NOT NULL,
                     sha256 TEXT NOT NULL,
                     size INTEGER NOT NULL,
                     release_notes TEXT,
-                    published_at INTEGER NOT NULL
+                    published_at INTEGER NOT NULL,
+                    UNIQUE(version, platform)
                 );
             """)
 
@@ -106,23 +108,6 @@ def init_db(db_path: Optional[Path] = None) -> None:
                     expires_at INTEGER NOT NULL
                 );
             """)
-
-            # Seed initial release metadata if empty
-            cursor = conn.execute("SELECT COUNT(*) AS count FROM releases")
-            if cursor.fetchone()["count"] == 0:
-                conn.execute("""
-                    INSERT INTO releases (version, platform, filename, url, sha256, size, release_notes, published_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """, (
-                    "0.5.0",
-                    "windows",
-                    "ZayaSetup.exe",
-                    "https://github.com/sajancodes/zaya-companion-releases/releases/download/v0.5.0/ZayaSetup.exe",
-                    "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
-                    48500000,
-                    "Zaya 0.5.0 Production Release:\n- Vision Control Center with optical tracking\n- Depth-invariant virtual keyboard\n- Spatial 3D workspace with Three.js renderer\n- Windows DPAPI local secret vault\n- Background auto-updater",
-                    int(time.time()),
-                ))
     finally:
         conn.close()
 
@@ -219,6 +204,80 @@ def get_latest_release(platform: str = "windows") -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def upsert_release(
+    version: str,
+    platform: str,
+    filename: str,
+    url: str,
+    sha256: str,
+    size: int,
+    release_notes: str = "",
+    published_at: Optional[int] = None,
+) -> None:
+    """Insert or update a release manifest row."""
+    now = published_at or int(time.time())
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute("""
+                INSERT INTO releases (version, platform, filename, url, sha256, size, release_notes, published_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(version, platform) DO UPDATE SET
+                    filename = excluded.filename,
+                    url = excluded.url,
+                    sha256 = excluded.sha256,
+                    size = excluded.size,
+                    release_notes = excluded.release_notes,
+                    published_at = excluded.published_at;
+            """, (version, platform.lower(), filename, url, sha256, int(size), release_notes, now))
+    finally:
+        conn.close()
+
+
+def sync_releases_from_github() -> None:
+    """Synchronize official release metadata from published GitHub release manifests."""
+    import json
+    import urllib.request
+
+    # Windows manifest
+    win_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/desktop-update.json"
+    try:
+        req = urllib.request.Request(win_url, headers={"User-Agent": "Zaya-Web-Sync"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.load(resp)
+            if isinstance(data, dict) and "version" in data and "sha256" in data:
+                upsert_release(
+                    version=str(data["version"]),
+                    platform="windows",
+                    filename=str(data.get("filename", "ZayaSetup.exe")),
+                    url=str(data.get("url", f"https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/{data.get('filename', 'ZayaSetup.exe')}")),
+                    sha256=str(data["sha256"]),
+                    size=int(data.get("size", 0)),
+                    release_notes=f"Zaya v{data['version']} Windows Production Release",
+                )
+    except Exception as e:
+        logger.debug(f"Could not sync Windows releases from GitHub: {e}")
+
+    # Android manifest
+    droid_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/update.json"
+    try:
+        req = urllib.request.Request(droid_url, headers={"User-Agent": "Zaya-Web-Sync"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.load(resp)
+            if isinstance(data, dict) and "version_name" in data and "sha256" in data:
+                upsert_release(
+                    version=str(data["version_name"]),
+                    platform="android",
+                    filename="Zaya-Companion.apk",
+                    url=str(data.get("download_url", "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/Zaya-Companion.apk")),
+                    sha256=str(data["sha256"]),
+                    size=int(data.get("size_bytes", 0)),
+                    release_notes=str(data.get("release_notes", f"Zaya Companion v{data['version_name']}")),
+                )
+    except Exception as e:
+        logger.debug(f"Could not sync Android releases from GitHub: {e}")
 
 
 def get_all_releases() -> List[Dict[str, Any]]:

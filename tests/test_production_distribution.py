@@ -330,3 +330,85 @@ def test_android_release_preparation(tmp_path):
     assert "sha256" in manifest
     assert len(manifest["sha256"]) == 64
     assert manifest["size"] == len(dummy_apk.read_bytes())
+
+
+# ---------------------------------------------------------------------------
+# 8. Distribution Bug Fix Regression Tests
+# ---------------------------------------------------------------------------
+
+def test_hand_worker_spec_has_console_true():
+    spec_path = Path(__file__).resolve().parents[1] / "packaging" / "windows" / "zaya-hand-worker.spec"
+    assert spec_path.is_file()
+    content = spec_path.read_text(encoding="utf-8")
+    assert "console=True" in content, "ZayaHandWorker.exe must use console=True for functional stdin/stdout pipes"
+
+
+def test_cached_model_corrupted_is_rejected(tmp_path, monkeypatch):
+    import hashlib
+    from unittest.mock import MagicMock, patch
+    from core.runtime_paths import find_or_download_hand_model
+
+    monkeypatch.setattr("core.runtime_paths.get_model_dir", lambda: tmp_path)
+    monkeypatch.setattr("core.runtime_paths.get_app_root", lambda: tmp_path / "app")
+    monkeypatch.setattr("core.runtime_paths.get_resource_dir", lambda: tmp_path / "res")
+
+    valid_payload = b"Valid Official Model Content 12345"
+    valid_hash = hashlib.sha256(valid_payload).hexdigest()
+    monkeypatch.setattr("core.runtime_paths.OFFICIAL_HAND_MODEL_SHA256", valid_hash)
+
+    # Place a corrupted cached file in model dir
+    corrupt_file = tmp_path / "hand_landmarker.task"
+    corrupt_file.write_bytes(b"Corrupted Tampered Content")
+
+    mock_resp = MagicMock()
+    mock_resp.headers = {"Content-Length": str(len(valid_payload))}
+    mock_resp.read.side_effect = [valid_payload, b""]
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        # find_or_download_hand_model should detect the corrupted hash, discard it, and re-download clean
+        result_path = find_or_download_hand_model()
+        assert result_path.is_file()
+        assert result_path.read_bytes() == valid_payload
+
+
+def test_dpapi_failure_raises_on_windows(monkeypatch):
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows-specific DPAPI test")
+
+    from core.security.key_vault import encrypt_secret
+    import ctypes
+
+    # Mock CryptProtectData returning 0 (failure)
+    monkeypatch.setattr(ctypes.windll.crypt32, "CryptProtectData", lambda *args: 0)
+
+    with pytest.raises(RuntimeError, match="Windows DPAPI encryption failed"):
+        encrypt_secret("test-secret-key-12345")
+
+
+def test_admin_password_and_rate_limiting_guards(monkeypatch):
+    from web.auth import is_admin_enabled, is_login_rate_limited, DISALLOWED_PASSWORDS
+
+    # Empty / unset
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    assert is_admin_enabled() is False
+
+    # Disallowed passwords
+    for bad_pw in DISALLOWED_PASSWORDS:
+        monkeypatch.setenv("ADMIN_PASSWORD", bad_pw)
+        assert is_admin_enabled() is False
+
+    # Short password (<12 chars)
+    monkeypatch.setenv("ADMIN_PASSWORD", "short1234")
+    assert is_admin_enabled() is False
+
+    # Strong password
+    monkeypatch.setenv("ADMIN_PASSWORD", "SecureOwnerPassphrase2026!#")
+    assert is_admin_enabled() is True
+
+    # Rate limiting: client IP gets rate limited after 5 attempts
+    ip = "192.0.2.99"
+    for _ in range(5):
+        assert is_login_rate_limited(ip) is False
+    assert is_login_rate_limited(ip) is True

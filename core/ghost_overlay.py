@@ -83,6 +83,10 @@ def install_ghost_overlay(command_callback, parent=None):
                     with self.pending_lock:
                         latest, self.pending = self.pending, None
                     if latest is not None:
+                        if self.hand_settings is not None and self.hand_settings.isVisible():
+                            if self.passive is not None and self.passive.isVisible():
+                                self.passive.hide()
+                            return
                         if self.passive is None:
                             from core.gesture.keyboard_overlay import PassiveOverlay
                             self.passive = PassiveOverlay()

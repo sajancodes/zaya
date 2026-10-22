@@ -34,6 +34,13 @@ class HandTracker:
         if self.worker and self.worker.is_alive():
             raise RuntimeError('Stop the current camera before starting another.')
         if not Path(model_path).is_file():
+            if str(model_path) == str(DEFAULT_MODEL):
+                try:
+                    from core.runtime_paths import find_or_download_hand_model
+                    model_path = find_or_download_hand_model()
+                except Exception:
+                    pass
+        if not Path(model_path).is_file():
             raise ValueError('Hand Landmarker model not found')
         if Path(model_path).stat().st_size>20_000_000 or not 0<=int(device)<=31:
             raise ValueError('Hand model or camera device exceeds limits.')
@@ -131,10 +138,10 @@ class HandTracker:
                     ok, frame = camera.read()
                     if not ok:
                         raise RuntimeError('Camera stopped returning frames.')
-                    self.latest_frame=frame
                     if mirror:
-                        frame = cv2.flip(frame,1)
-                    rgb = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+                        frame = cv2.flip(frame, 1)
+                    self.latest_frame = frame
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     result = detector.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB,data=rgb),int(at*1000))
                     hands = []
                     for i, landmarks in enumerate(result.hand_landmarks):

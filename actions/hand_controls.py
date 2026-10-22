@@ -2,6 +2,18 @@ from core.execution_policy import require_owner
 from core.tool_result import ToolResult
 
 
+def _resolve_hand_model(explicit_path=None) -> str:
+    from pathlib import Path
+    if explicit_path:
+        return str(explicit_path)
+    try:
+        from core.runtime_paths import find_or_download_hand_model
+        return str(find_or_download_hand_model())
+    except Exception:
+        from core.gesture.hand_tracker import DEFAULT_MODEL
+        return str(DEFAULT_MODEL)
+
+
 def hand_controls(parameters, **kwargs):
     require_owner()
     from core.gesture.controller import hands
@@ -31,9 +43,9 @@ def hand_controls(parameters, **kwargs):
                 show_vision_control_center(mode=mode)
             if action == 'show':
                 if hands.tracker.state != 'ACTIVE':
-                    from core.gesture.hand_tracker import DEFAULT_MODEL
                     start_mode = mode or 'NAVIGATION'
-                    hands.start(str(parameters.get('model_path') or DEFAULT_MODEL), start_mode,
+                    model_path = _resolve_hand_model(parameters.get('model_path'))
+                    hands.start(model_path, start_mode,
                                 settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)
                 elif mode:
                     hands.set_mode(mode, settings.sensitivity)
@@ -45,8 +57,8 @@ def hand_controls(parameters, **kwargs):
                 return ToolResult('failed', 'The desktop overlay is unavailable; hand typing was not enabled.')
             if passive_overlay_available():
                 show_vision_control_center(mode=target_mode)
-            from core.gesture.hand_tracker import DEFAULT_MODEL
-            hands.start(str(parameters.get('model_path') or DEFAULT_MODEL), target_mode,
+            model_path = _resolve_hand_model(parameters.get('model_path'))
+            hands.start(model_path, target_mode,
                         settings.device, settings.fps, settings.mirror, settings.confidence, settings.sensitivity)
 
         elif action == 'set_mode':

@@ -71,7 +71,7 @@ def get_or_create_installation_info() -> Dict[str, Any]:
         "installed_version": VERSION,
         "current_version": VERSION,
         "installed_at": int(time.time()),
-        "telemetry_enabled": True,
+        "telemetry_enabled": False,
         "install_reported": False,
         "last_heartbeat": 0,
     }
@@ -85,7 +85,7 @@ def get_or_create_installation_info() -> Dict[str, Any]:
 def is_telemetry_enabled() -> bool:
     """Return whether the user has opted in to anonymous analytics."""
     info = get_or_create_installation_info()
-    return bool(info.get("telemetry_enabled", True))
+    return bool(info.get("telemetry_enabled", False))
 
 
 def set_telemetry_enabled(enabled: bool) -> None:

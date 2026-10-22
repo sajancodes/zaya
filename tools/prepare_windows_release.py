@@ -43,6 +43,7 @@ def prepare_windows_release(
     output_dir: str | Path,
     version: str,
     build: int,
+    channel: str = "stable",
     iscc_path: str | Path | None = None,
     cert_path: str | Path | None = None,
     cert_password: str | None = None,
@@ -99,39 +100,36 @@ def prepare_windows_release(
     if not installer.is_file():
         installer_alt = output_dir / "Zaya-Setup.exe"
         if installer_alt.is_file():
-            installer = installer_alt
+            shutil.copyfile(installer_alt, installer)
 
     if not installer.is_file():
         raise FileNotFoundError(f"Installer was not created: {installer}")
 
-    # Ensure both ZayaSetup.exe and Zaya-Setup.exe are available in output_dir
-    if installer.name == "ZayaSetup.exe":
-        shutil.copyfile(installer, output_dir / "Zaya-Setup.exe")
-    else:
-        shutil.copyfile(installer, output_dir / "ZayaSetup.exe")
-
-    # Sign the final installer if certificate provided
+    # 1. Sign the primary installer first if certificate provided
     if cert_path and Path(cert_path).is_file():
         signtool = shutil.which("signtool.exe") or shutil.which("signtool")
         if signtool:
-            print(f"Signing installer {installer.name}...")
+            print(f"Signing canonical installer {installer.name}...")
             cmd_inst = [signtool, "sign", "/f", str(cert_path), "/fd", "SHA256", "/tr", "http://timestamp.digicert.com", "/td", "SHA256"]
             if cert_password:
                 cmd_inst.extend(["/p", cert_password])
             cmd_inst.append(str(installer))
             subprocess.run(cmd_inst, check=True)
 
+    # 2. Mirror the signed installer to the backward-compatible alias Zaya-Setup.exe
+    shutil.copyfile(installer, output_dir / "Zaya-Setup.exe")
+
     installer_hash = calculate_sha256(installer)
     installer_size = installer.stat().st_size
 
-    # Write desktop-update.json
+    # Write desktop-update.json pointing to canonical installer
     update_manifest = {
         "schema": 1,
-        "channel": "stable",
+        "channel": channel,
         "version": version,
         "build": int(build),
-        "filename": "Zaya-Setup.exe",
-        "url": "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/Zaya-Setup.exe",
+        "filename": "ZayaSetup.exe",
+        "url": "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/ZayaSetup.exe",
         "sha256": installer_hash,
         "size": installer_size,
     }
@@ -144,7 +142,7 @@ def prepare_windows_release(
     if setup_txt.is_file():
         shutil.copy2(setup_txt, output_dir / "setup.txt")
 
-    print(f"Windows release prepared: {installer.name} ({installer_size} bytes, SHA-256: {installer_hash})")
+    print(f"Windows release prepared: {installer.name} ({installer_size} bytes, SHA-256: {installer_hash}, channel: {channel})")
     return update_manifest
 
 
@@ -156,6 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, help="Destination directory for installer and manifest.")
     parser.add_argument("--version", default=VERSION, help="Semantic version string.")
     parser.add_argument("--build", type=int, default=BUILD, help="Integer build code.")
+    parser.add_argument("--channel", default="stable", choices=["stable", "beta"], help="Release channel.")
     parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
     parser.add_argument("--cert", default=None, help="Optional PFX certificate path.")
     parser.add_argument("--cert-password", default=None, help="Password for PFX certificate.")
@@ -166,6 +165,7 @@ if __name__ == "__main__":
         output_dir=args.output,
         version=args.version,
         build=args.build,
+        channel=args.channel,
         iscc_path=args.iscc,
         cert_path=args.cert,
         cert_password=args.cert_password,
