@@ -108,7 +108,7 @@ class HandController:
                 ls[1] = requested.value
                 self.last_start = tuple(ls)
 
-    def start(self, model_path, mode, device=0, fps=24, mirror=True,confidence=.65,sensitivity=1., timeout=8.0):
+    def start(self, model_path, mode, device=0, fps=24, mirror=True,confidence=.65,sensitivity=1., timeout=12.0):
         requested = InteractionMode(mode)
         if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD,InteractionMode.SPATIAL,InteractionMode.SELECTION):
             raise ValueError('Choose a supported interaction mode.')

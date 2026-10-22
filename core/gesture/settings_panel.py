@@ -234,12 +234,14 @@ class PreviewThread(QThread):
 
     def run(self):
         from .controller import hands
+        target_interval = 1 / 12
         while self.running and not self.isInterruptionRequested():
             if hands.tracker.state == 'ACTIVE':
+                started = time.monotonic()
                 frame = hands.tracker.capture_frame(timeout=0.25)
                 if frame:
                     self.frame_ready.emit(frame)
-                time.sleep(0.09)
+                time.sleep(max(0.01, target_interval - (time.monotonic() - started)))
             else:
                 time.sleep(0.25)
 
@@ -486,6 +488,7 @@ class HandSettingsPanel(QDialog):
 
         # Preview background thread
         self.preview_thread = None
+        self._last_camera_state = 'OFF'
         self._ensure_preview_thread()
 
         # Telemetry refresh timer
@@ -518,6 +521,14 @@ class HandSettingsPanel(QDialog):
         self._stop_preview_thread()
         if self.timer is not None:
             self.timer.stop()
+        # Closing the fullscreen UI must revoke typing even though the camera
+        # may stay warm in NAVIGATION for the next hand-control request.
+        try:
+            from .controller import hands
+            if hands.tracker.state == 'ACTIVE':
+                hands.set_mode('NAVIGATION')
+        except (ImportError, RuntimeError, ValueError):
+            pass
         super().closeEvent(event)
 
     def keyPressEvent(self, event):
@@ -626,7 +637,16 @@ class HandSettingsPanel(QDialog):
             strip += f"    [Error: {inj_err}]"
         self.telemetry_strip.setText(strip)
 
-        effective_mode = cur_mode if cur_mode != 'DISABLED' else 'NAVIGATION'
+        # A stop/error after a live session must revoke the keyboard view; a
+        # manual mode selection while the camera is simply off may stay open.
+        if cam in ('OFF', 'ERROR') and self._last_camera_state in ('ACTIVE', 'STARTING', 'PAUSED'):
+            if self.mode.currentText() != 'NAVIGATION':
+                self.mode.blockSignals(True)
+                self.mode.setCurrentText('NAVIGATION')
+                self.mode.blockSignals(False)
+        self._last_camera_state = cam
+
+        effective_mode = cur_mode if cur_mode != 'DISABLED' else self.mode.currentText()
         self._update_mode_buttons(effective_mode)
         self.keyboard_canvas.setVisible(effective_mode == 'KEYBOARD')
 

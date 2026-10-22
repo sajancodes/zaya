@@ -5,6 +5,7 @@ import json
 import subprocess
 import base64
 import uuid
+import collections
 from pathlib import Path
 from .hand_model import normalize
 from .smoothing import LandmarkSmoother
@@ -27,6 +28,7 @@ class HandTracker:
         self.frame_event=threading.Event()
         self.pending_frame=''
         self.frame_result=None
+        self._accept_active=False
 
     def start(self, model_path, device=0, fps=24, mirror=True,confidence=.65):
         if self.worker and self.worker.is_alive():
@@ -37,16 +39,20 @@ class HandTracker:
             raise ValueError('Hand model or camera device exceeds limits.')
         self.stop_event.clear()
         self.active_event.clear()
+        self._accept_active=True
         self.device=int(device)
         self.state, self.error = 'STARTING', ''
         self.worker = threading.Thread(target=self._run, args=(model_path,int(device),max(10,min(30,int(fps))),bool(mirror),float(confidence)),daemon=True,name='ZayaHands')
         self.worker.start()
 
-    def wait_active(self, timeout=8.0):
+    def wait_active(self, timeout=12.0):
         if self.state in ('ACTIVE', 'ERROR'):
             return self.state == 'ACTIVE'
         ok = self.active_event.wait(timeout)
         if not ok and self.state == 'STARTING':
+            # Reap the stalled worker synchronously, then leave a truthful
+            # terminal error for the UI. A late ACTIVE packet is ignored.
+            self.stop()
             self.error = f'Camera startup timed out after {timeout}s.'
             self.state = 'ERROR'
             self.active_event.set()
@@ -54,6 +60,7 @@ class HandTracker:
         return self.state == 'ACTIVE'
 
     def stop(self):
+        self._accept_active=False
         self.stop_event.set()
         self.active_event.set()
         if self.child and self.child.poll() is None:
@@ -92,6 +99,8 @@ class HandTracker:
         self.frame_event.set()
 
     def _run(self, model_path, device, fps, mirror,confidence=.65):
+        if os.environ.get('ZAYA_HAND_CHILD') == '1':
+            self._accept_active = True
         from core.runtime_paths import find_hand_worker
         runtime = find_hand_worker()
         if runtime and runtime.is_file() and os.environ.get('ZAYA_HAND_CHILD')!='1':
@@ -113,9 +122,10 @@ class HandTracker:
                 if not camera.isOpened():
                     raise RuntimeError('Camera is unavailable or in use.')
                 smooth, previous = {}, {}
-                self.state = 'ACTIVE'
-                self.active_event.set()
-                self.callback(())
+                if self._accept_active:
+                    self.state = 'ACTIVE'
+                    self.active_event.set()
+                    self.callback(())
                 while not self.stop_event.is_set():
                     at = time.monotonic()
                     ok, frame = camera.read()
@@ -163,15 +173,21 @@ class HandTracker:
                 cmd = [str(runtime), '-u', '-m', 'core.gesture.worker', str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]
             self.child=subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[2]),
                 stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',bufsize=1,creationflags=flags)
+            # Drain stderr so a chatty camera backend (e.g. vendor virtual cameras)
+            # cannot fill the pipe and stall the worker before it reports ACTIVE.
+            stderr_tail = collections.deque(maxlen=40)
+            child = self.child
+            def drain_stderr():
+                try:
+                    for line in child.stderr:
+                        stderr_tail.append(line.rstrip())
+                except Exception:
+                    pass
+            threading.Thread(target=drain_stderr, daemon=True, name='ZayaHandWorkerErr').start()
             while not self.stop_event.is_set():
                 line=self.child.stdout.readline(1_500_001)
                 if not line:
-                    err = ''
-                    if self.child and self.child.stderr:
-                        try:
-                            err = self.child.stderr.read().strip()
-                        except Exception:
-                            pass
+                    err = '\n'.join(stderr_tail).strip() if stderr_tail else ''
                     if not self.stop_event.is_set():
                         msg = f'Hand worker exited before tracking completed. {err}'.strip() if err else 'Hand worker exited before tracking completed.'
                         raise RuntimeError(msg)
@@ -189,7 +205,10 @@ class HandTracker:
                     raise RuntimeError('Hand landmark message exceeds limits.')
                 if data.get('state')=='ERROR':
                     raise RuntimeError(data.get('error','Hand worker failed.'))
-                self.state=data.get('state','STARTING')
+                new_state=data.get('state','STARTING')
+                if new_state=='ACTIVE' and not self._accept_active:
+                    continue
+                self.state=new_state
                 if self.state in ('ACTIVE','ERROR'):
                     self.active_event.set()
                 from .hand_model import Point
@@ -216,7 +235,7 @@ class HandTracker:
                         except Exception:
                             pass
             self.callback(())
-            if self.state!='ERROR':
+            if self.state!='ERROR' and not self.stop_event.is_set():
                 self.state='OFF'
 
     def jpeg_snapshot(self):

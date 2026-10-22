@@ -114,7 +114,7 @@ def test_vision_control_center_ui():
     app.processEvents()
 
     # Window title check
-    assert 'Vision & Hand Control' in panel.windowTitle()
+    assert panel.windowTitle() == 'ZAYA · VIRTUAL KEYBOARD'
 
     # Mode buttons exist
     assert len(panel.mode_buttons) == 4
@@ -240,4 +240,80 @@ def test_preview_and_keyboard_canvas_paint():
 
     kb.set_packet({'state': 'locked', 'key': 'H', 'sent': 'H', 'modifiers': []})
     kb.repaint()
+
+
+def test_preview_thread_restarts_after_window_reopen():
+    from PyQt6.QtWidgets import QApplication
+    from core.gesture.settings_panel import HandSettingsPanel
+    app = QApplication.instance() or QApplication([])
+
+    panel = HandSettingsPanel()
+    panel.show()
+    app.processEvents()
+    first = panel.preview_thread
+    assert first is not None and first.isRunning()
+
+    panel.close()
+    app.processEvents()
+    assert panel.preview_thread is None
+
+    panel.show()
+    app.processEvents()
+    second = panel.preview_thread
+    assert second is not None and second.isRunning()
+    assert second is not first
+
+    panel.close()
+    app.processEvents()
+
+
+def test_active_worker_capture_reaches_preview_signal(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from PyQt6.QtWidgets import QApplication
+    from core.gesture.settings_panel import PreviewThread
+    app = QApplication.instance() or QApplication([])
+
+    tracker = SimpleNamespace(state='ACTIVE', capture_frame=lambda timeout=2: b'fake-jpeg-frame')
+    monkeypatch.setattr('core.gesture.controller.hands.tracker', tracker)
+
+    thread = PreviewThread()
+    received = []
+    thread.frame_ready.connect(received.append)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 2
+        while not received and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+    finally:
+        thread.stop()
+    assert received and received[0] == b'fake-jpeg-frame'
+
+
+def test_missing_model_reports_explicit_message(tmp_path):
+    tracker = HandTracker(lambda hands: None)
+    with pytest.raises(ValueError, match='Hand Landmarker model not found'):
+        tracker.start(str(tmp_path / 'missing.task'))
+    assert tracker.state == 'OFF'
+
+
+def test_closing_vision_window_revokes_keyboard_injection(monkeypatch):
+    from PyQt6.QtWidgets import QApplication
+    from core.gesture.settings_panel import HandSettingsPanel
+    from core.gesture.controller import hands
+
+    app = QApplication.instance() or QApplication([])
+    calls = []
+    monkeypatch.setattr(hands.tracker, 'state', 'ACTIVE')
+    monkeypatch.setattr(hands, 'set_mode', lambda mode, sensitivity=None: calls.append(mode))
+
+    panel = HandSettingsPanel()
+    panel.show()
+    app.processEvents()
+    panel.close()
+    app.processEvents()
+
+    assert calls == ['NAVIGATION']
+    assert panel.preview_thread is None
 
