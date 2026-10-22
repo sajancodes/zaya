@@ -153,3 +153,90 @@ def test_vision_control_center_ui():
 
     panel.close()
     app.processEvents()
+
+
+def test_scenario_a_to_e_journey(monkeypatch):
+    """Verifies end-to-end flow across Scenarios A through E."""
+    from actions.hand_controls import hand_controls
+    controller = HandController()
+    opened_windows = []
+
+    monkeypatch.setattr('core.gesture.controller.hands', controller)
+    monkeypatch.setattr('core.ghost_overlay.passive_overlay_available', lambda: True)
+    monkeypatch.setattr('core.ghost_overlay.show_vision_control_center', lambda mode=None: opened_windows.append(mode) or True)
+
+    with patch.object(controller.tracker, 'start', lambda *a, **k: setattr(controller.tracker, 'state', 'ACTIVE')), \
+         with_trust(TRUST_LOCAL_OWNER):
+
+        # Scenario A: "start webcam"
+        res_a = hand_controls({'action': 'start', 'mode': 'NAVIGATION'})
+        assert res_a.status == 'success'
+        assert controller.mode == InteractionMode.NAVIGATION
+        assert controller.tracker.state == 'ACTIVE'
+        assert 'NAVIGATION' in opened_windows
+
+        # Scenario B: "open virtual keyboard" (camera reused!)
+        with patch.object(controller.tracker, 'stop') as mock_stop_b, \
+             patch.object(controller.tracker, 'start') as mock_start_b:
+            res_b = hand_controls({'action': 'start', 'mode': 'KEYBOARD'})
+            assert res_b.status == 'success'
+            assert controller.mode == InteractionMode.KEYBOARD
+            assert controller.tracker.state == 'ACTIVE'
+            mock_stop_b.assert_not_called()
+            mock_start_b.assert_not_called()
+
+        # Scenario C: "hide virtual keyboard"
+        controller.modifiers.add('ctrl')
+        res_c = hand_controls({'action': 'set_mode', 'mode': 'NAVIGATION'})
+        assert res_c.status == 'success'
+        assert controller.mode == InteractionMode.NAVIGATION
+        assert len(controller.modifiers) == 0
+        assert controller.tracker.state == 'ACTIVE'
+
+        # Scenario D: "start spatial controls" (camera reused!)
+        res_d = hand_controls({'action': 'set_mode', 'mode': 'SPATIAL'})
+        assert res_d.status == 'success'
+        assert controller.mode == InteractionMode.SPATIAL
+        assert controller.tracker.state == 'ACTIVE'
+
+        # Scenario E: "stop webcam"
+        res_e = hand_controls({'action': 'stop'})
+        assert res_e.status == 'success'
+        assert controller.mode == InteractionMode.DISABLED
+        assert controller.tracker.state == 'OFF'
+
+
+def test_preview_and_keyboard_canvas_paint():
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QImage, QPixmap
+    from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+    from core.gesture.settings_panel import PreviewCanvas, VirtualKeyboardCanvas
+    app = QApplication.instance() or QApplication([])
+
+    # 1. PreviewCanvas rendering with and without frame
+    canvas = PreviewCanvas()
+    canvas.set_telemetry('OFF', (), 'NONE', 0.0)
+    canvas.repaint()
+
+    # Create dummy JPEG bytes
+    img = QImage(320, 240, QImage.Format.Format_RGB32)
+    img.fill(0xff3344)
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, 'JPG')
+    jpeg_bytes = bytes(ba)
+
+    canvas.set_telemetry('ACTIVE', (), 'NONE', 0.0)
+    canvas.update_frame(jpeg_bytes)
+    assert canvas.pixmap is not None
+    canvas.repaint()
+
+    # 2. VirtualKeyboardCanvas rendering states (armed, locked, latched modifier)
+    kb = VirtualKeyboardCanvas()
+    kb.set_packet({'state': 'armed', 'key': 'H', 'modifiers': ['shift']})
+    kb.repaint()
+
+    kb.set_packet({'state': 'locked', 'key': 'H', 'sent': 'H', 'modifiers': []})
+    kb.repaint()
+
