@@ -169,7 +169,7 @@ class DesktopUpdater:
             except Exception:
                 pass
 
-    def check(self, force: Boolean = False) -> Optional[DesktopUpdateManifest]:
+    def check(self, force: bool = False) -> Optional[DesktopUpdateManifest]:
         """Check for updates synchronously (call from background thread)."""
         now = time.monotonic()
         if not force and (now - self.last_check_time < 3600):

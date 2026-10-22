@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
+import { SearchModal } from './components/SearchModal';
 import { Home } from './pages/Home';
 import { Download } from './pages/Download';
 import { Features } from './pages/Features';
@@ -15,6 +16,7 @@ import { Admin } from './pages/Admin';
 
 export const App: React.FC = () => {
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/');
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
 
   useEffect(() => {
     const onPopState = () => {
@@ -22,6 +24,18 @@ export const App: React.FC = () => {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Global Ctrl+K / Cmd+K listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const navigate = (path: string) => {
@@ -41,8 +55,7 @@ export const App: React.FC = () => {
       return <Features />;
     }
     if (currentPath.startsWith('/docs')) {
-      const parts = currentPath.split('/').filter(Boolean);
-      const topic = parts[1] || 'getting-started';
+      const topic = currentPath.replace(/^\/docs\/?/, '') || 'getting-started';
       return <Docs topic={topic} navigate={navigate} />;
     }
     if (currentPath === '/releases') {
@@ -72,12 +85,19 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Navbar currentPath={currentPath} navigate={navigate} />
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#020407' }}>
+      <Navbar currentPath={currentPath} navigate={navigate} onOpenSearch={() => setIsSearchOpen(true)} />
       <main style={{ flex: 1 }}>
         {renderRoute()}
       </main>
       <Footer navigate={navigate} />
+
+      {/* Global Search Modal */}
+      <SearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        navigate={navigate}
+      />
     </div>
   );
 };

@@ -1,115 +1,337 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { FEATURES, FEATURE_CATEGORIES, FeatureItem } from '../data/features';
 
 export const Features: React.FC = () => {
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeFeature, setActiveFeature] = useState<FeatureItem | null>(null);
+
+  const filteredFeatures = FEATURES.filter((feat) => {
+    const matchesCategory = selectedCategory === 'All' || feat.category.toLowerCase() === selectedCategory.toLowerCase();
+    const matchesSearch =
+      feat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      feat.shortDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      feat.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      feat.dependencies.some((d) => d.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesCategory && matchesSearch;
+  });
+
+  const getStatusBadgeClass = (status: string) => {
+    switch (status) {
+      case 'STABLE': return 'badge-stable';
+      case 'BETA': return 'badge-beta';
+      case 'EXPERIMENTAL': return 'badge-experimental';
+      default: return 'badge-planned';
+    }
+  };
+
+  const getPrivacyBadgeClass = (privacy: string) => {
+    return privacy === 'LOCAL' ? 'badge-local' : 'badge-cloud';
+  };
+
   return (
-    <section className="section" style={{ paddingTop: '50px' }}>
+    <section className="section" style={{ minHeight: '100vh', paddingTop: '60px' }}>
       <div className="container">
-        <div className="section-header">
-          <div className="hero-tag">Capabilities</div>
-          <h1 className="section-title">Architected for Genuine Autonomy</h1>
-          <p className="section-desc">
-            Every feature in Zaya is designed with deep OS integration, strict privacy boundaries, and isolated execution.
+        {/* Header */}
+        <div style={{ textAlign: 'center', maxWidth: '780px', margin: '0 auto 40px auto' }}>
+          <div className="section-label">Feature Directory</div>
+          <h1 className="editorial-title" style={{ fontSize: '48px', marginBottom: '16px' }}>
+            Complete Capability Encyclopedia
+          </h1>
+          <p style={{ color: '#8392A6', fontSize: '16px', lineHeight: '1.7' }}>
+            Inspect every native tool, sensory pipeline, model integration, and operating system actuator implemented in Zaya.
           </p>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '40px', maxWidth: '900px', margin: '0 auto' }}>
-          {/* Voice */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎙️</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Conversational Voice & Live Streaming
-            </h2>
-            <p className="card-text">
-              Zaya connects directly to Gemini Live bidirectional WebSocket audio streams. Speak naturally, interrupt anytime, and hear instant responses.
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Push-to-talk chord and local wake-word ("Hey Jarvis" / "Zaya") gating</li>
-              <li>• Acoustic echo cancellation and device selection for input/output</li>
-              <li>• Proactive morning briefing and reminders integration</li>
-            </ul>
+        {/* Search & Category Filter */}
+        <div
+          style={{
+            maxWidth: '1000px',
+            margin: '0 auto 40px auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}
+        >
+          {/* Search Box */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: 'rgba(8, 20, 35, 0.6)',
+              border: '1px solid rgba(73, 223, 255, 0.2)',
+              borderRadius: '10px',
+              padding: '12px 18px',
+              gap: '12px'
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#49DFFF" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search by capability, dependency, or keywords..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: '#F4FAFF',
+                fontSize: '15px',
+                fontFamily: "'Inter', sans-serif"
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#8392A6',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            )}
           </div>
 
-          {/* Vision */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>👁️</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Vision Control Center & Screen Perception
-            </h2>
-            <p className="card-text">
-              Provides screen awareness without saving clutter. Zaya tracks active application windows, monitors dialogs, inspects code errors, and translates visual contexts into structured action arguments.
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Windows Native OCR via direct stdin byte streaming (no temporary PNGs on disk)</li>
-              <li>• Region-of-interest differential frame change detection</li>
-              <li>• Camera stays completely <b>OFF</b> at normal startup; optical perception is 100% opt-in</li>
-            </ul>
-          </div>
-
-          {/* Hand tracking & keyboard */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🖐️ ⌨️</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Optical Hand Tracking & Virtual Keyboard
-            </h2>
-            <p className="card-text">
-              Operate your computer in mid-air. Uses official Google MediaPipe Hand Landmarker weights running inside an isolated child worker (<code>ZayaHandWorker.exe</code>).
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Palm-relative depth normalization: typing depth threshold adapts automatically as your hand moves closer or further from the webcam</li>
-              <li>• Forward-pointing index finger poke latching with strict retraction hysteresis preventing accidental double-key presses</li>
-              <li>• Security safeguard: refuses to inject keystrokes into Zaya's own window or credential dialogs</li>
-            </ul>
-          </div>
-
-          {/* Spatial 3D */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧊</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Spatial 3D Workspace
-            </h2>
-            <p className="card-text">
-              Generate, visualize, and interact with complex 3D mechanical and electronic schematics in an isolated Three.js web environment.
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Procedural generators for inline engines, turbines, gearboxes, motherboards, and battery packs</li>
-              <li>• Semantic component explosion: disassemble parts radially along their functional mechanical axes</li>
-              <li>• Custom cutting plane slicing, spatial part annotations, and undo/redo transaction history</li>
-            </ul>
-          </div>
-
-          {/* Android Companion */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📱</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Android Companion Integration
-            </h2>
-            <p className="card-text">
-              Extend Zaya to your smartphone. The companion application connects over your home Wi-Fi network or secure tunnel to your laptop runtime.
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Incoming cellular call caller ID lookup and voice call answering on behalf of the owner</li>
-              <li>• Mobile notification pass-along and voice command routing</li>
-              <li>• No API keys or conversation history preloaded onto the phone</li>
-            </ul>
-          </div>
-
-          {/* Security & WhatsApp */}
-          <div className="card" style={{ padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🛡️</div>
-            <h2 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '10px' }}>
-              Security, DPAPI Key Vault & WhatsApp Gate
-            </h2>
-            <p className="card-text">
-              Built with an owner-centric security architecture. External web requests and contacts cannot trigger privileged commands.
-            </p>
-            <ul style={{ margin: '16px 0 0 20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <li>• Windows DPAPI local key encryption: API keys cannot be read by another Windows account or exported to another machine</li>
-              <li>• WhatsApp integration: replies use current owner activity (current song/project); full chat history is never sent to models</li>
-              <li>• Real confirmation gate: system commands, deletions, and file modifications require explicit owner authorization</li>
-            </ul>
+          {/* Category Tabs Scroll */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              overflowX: 'auto',
+              paddingBottom: '8px',
+              scrollbarWidth: 'thin'
+            }}
+          >
+            {FEATURE_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  whiteSpace: 'nowrap',
+                  padding: '6px 14px',
+                  borderRadius: '16px',
+                  fontSize: '11px',
+                  letterSpacing: '0.5px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  cursor: 'pointer',
+                  border: selectedCategory === cat ? '1px solid #49DFFF' : '1px solid rgba(73, 223, 255, 0.15)',
+                  backgroundColor: selectedCategory === cat ? 'rgba(73, 223, 255, 0.15)' : 'transparent',
+                  color: selectedCategory === cat ? '#49DFFF' : '#8392A6',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* Results Counter */}
+        <div style={{ maxWidth: '1000px', margin: '0 auto 20px auto', fontSize: '13px', color: '#8392A6' }}>
+          Showing <strong>{filteredFeatures.length}</strong> capabilities in <strong>{selectedCategory}</strong>
+        </div>
+
+        {/* Feature Cards Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
+            gap: '20px',
+            maxWidth: '1000px',
+            margin: '0 auto'
+          }}
+        >
+          {filteredFeatures.map((feat) => (
+            <div
+              key={feat.id}
+              onClick={() => setActiveFeature(feat)}
+              className="glass-panel"
+              style={{
+                padding: '24px',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div>
+                {/* Badges Bar */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  <span className={`badge ${getStatusBadgeClass(feat.status)}`}>
+                    {feat.status}
+                  </span>
+                  <span className={`badge ${getPrivacyBadgeClass(feat.privacy)}`}>
+                    {feat.privacy}
+                  </span>
+                  <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: '#8392A6', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    {feat.platform}
+                  </span>
+                </div>
+
+                <h3 style={{ fontSize: '16px', color: '#F4FAFF', fontWeight: 600, marginBottom: '8px' }}>
+                  {feat.name}
+                </h3>
+                <p style={{ margin: 0, fontSize: '13px', color: '#8392A6', lineHeight: '1.6', marginBottom: '16px' }}>
+                  {feat.shortDescription}
+                </p>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '11px', color: 'rgba(73, 223, 255, 0.7)', fontFamily: "'JetBrains Mono', monospace", borderTop: '1px solid rgba(73, 223, 255, 0.1)', paddingTop: '10px' }}>
+                  Deps: {feat.dependencies.join(', ')}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* Feature Detail Modal */}
+      {activeFeature && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(2, 4, 7, 0.85)',
+            backdropFilter: 'blur(12px)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+          onClick={() => setActiveFeature(null)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '580px',
+              backgroundColor: '#050b14',
+              border: '1px solid rgba(73, 223, 255, 0.3)',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.9), 0 0 40px rgba(73, 223, 255, 0.15)',
+              borderRadius: '16px',
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: '24px',
+                borderBottom: '1px solid rgba(73, 223, 255, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div>
+                <span style={{ fontSize: '11px', color: '#49DFFF', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  {activeFeature.category}
+                </span>
+                <h3 style={{ margin: 0, color: '#F4FAFF', fontSize: '20px', fontWeight: 600 }}>
+                  {activeFeature.name}
+                </h3>
+              </div>
+              <button
+                onClick={() => setActiveFeature(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#8392A6',
+                  fontSize: '20px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <h4 style={{ color: '#DDFBFF', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+                  Technical Architecture
+                </h4>
+                <p style={{ margin: 0, color: '#F4FAFF', fontSize: '14px', lineHeight: '1.6' }}>
+                  {activeFeature.detailedDescription}
+                </p>
+              </div>
+
+              {activeFeature.highlights && (
+                <div>
+                  <h4 style={{ color: '#DDFBFF', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+                    Key Highlights
+                  </h4>
+                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#8392A6', fontSize: '13px', lineHeight: '1.6' }}>
+                    {activeFeature.highlights.map((h) => (
+                      <li key={h}>{h}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <h4 style={{ color: '#DDFBFF', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+                  Runtime & System Dependencies
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {activeFeature.dependencies.map((dep) => (
+                    <code
+                      key={dep}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(73, 223, 255, 0.08)',
+                        border: '1px solid rgba(73, 223, 255, 0.2)',
+                        color: '#49DFFF',
+                        fontSize: '12px'
+                      }}
+                    >
+                      {dep}
+                    </code>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '16px 24px',
+                backgroundColor: '#020407',
+                borderTop: '1px solid rgba(73, 223, 255, 0.1)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px'
+              }}
+            >
+              {activeFeature.docsLink && (
+                <a
+                  href={activeFeature.docsLink}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: 'rgba(73, 223, 255, 0.15)',
+                    border: '1px solid #49DFFF',
+                    borderRadius: '6px',
+                    color: '#49DFFF',
+                    fontSize: '13px',
+                    fontWeight: 500
+                  }}
+                >
+                  View Documentation →
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

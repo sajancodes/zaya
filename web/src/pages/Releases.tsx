@@ -1,119 +1,180 @@
-import React, { useEffect, useState } from 'react';
-import { ReleaseInfo } from '../types';
+import React, { useState } from 'react';
+import { RELEASES_DATA, ReleaseItem } from '../data/releases';
 
 export const Releases: React.FC = () => {
-  const [releases, setReleases] = useState<ReleaseInfo[]>([
-    {
-      version: '0.5.0',
-      platform: 'windows',
-      filename: 'ZayaSetup.exe',
-      url: 'https://github.com/sajancodes/zaya-companion-releases/releases/download/v0.5.0/ZayaSetup.exe',
-      sha256: 'fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1',
-      size: 48500000,
-      release_notes: `Zaya 0.5.0 Production Release:
-• Vision Control Center with optical tracking
-• Depth-invariant virtual keyboard mid-air typing
-• Spatial 3D workspace with Three.js renderer
-• Windows DPAPI local secret vault
-• In-app background auto-updater`,
-      published_at: 1729580000,
-    },
-    {
-      version: '0.4.6',
-      platform: 'android',
-      filename: 'Zaya-Companion.apk',
-      url: 'https://github.com/sajancodes/zaya-companion-releases/releases/download/android-0.4.6/Zaya-Companion.apk',
-      sha256: 'e89c6295efb867c2105e4d293d07e6e5a6a6fa34d580ce6ffcf06d4493ecfa25',
-      size: 24200000,
-      release_notes: `Zaya Companion 0.4.6:
-• Play Store install-source detection
-• Dual-mode release tag compatibility
-• Foreground service audio streaming stability
-• Low-latency cellular call caller ID lookup`,
-      published_at: 1729480000,
-    },
-  ]);
+  const [selectedPlatform, setSelectedPlatform] = useState<'ALL' | 'windows' | 'android'>('ALL');
+  const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch('/api/releases')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setReleases(data);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const filteredReleases = RELEASES_DATA.filter((r) => {
+    if (selectedPlatform === 'ALL') return true;
+    return r.platform === selectedPlatform;
+  });
+
+  const handleCopy = (sha: string) => {
+    navigator.clipboard.writeText(sha);
+    setCopiedSha(sha);
+    setTimeout(() => setCopiedSha(null), 2000);
+  };
 
   return (
-    <section className="section" style={{ paddingTop: '50px' }}>
-      <div className="container" style={{ maxWidth: '860px' }}>
-        <div className="section-header">
-          <div className="hero-tag">Changelog</div>
-          <h1 className="section-title">Releases & Patch Notes</h1>
-          <p className="section-desc">
-            Track updates, improvements, and fixes across Zaya desktop and companion versions.
+    <section className="section" style={{ minHeight: '100vh', paddingTop: '60px' }}>
+      <div className="container" style={{ maxWidth: '920px' }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', maxWidth: '780px', margin: '0 auto 50px auto' }}>
+          <div className="section-label">Official Releases</div>
+          <h1 className="editorial-title" style={{ fontSize: '48px', marginBottom: '16px' }}>
+            Changelogs & Version History
+          </h1>
+          <p style={{ color: '#8392A6', fontSize: '16px', lineHeight: '1.7' }}>
+            Granular build notes, architectural enhancements, security disclosures, and verified SHA-256 binary checksums.
           </p>
+
+          {/* Platform Filters */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '24px' }}>
+            {(['ALL', 'windows', 'android'] as const).map((plat) => (
+              <button
+                key={plat}
+                onClick={() => setSelectedPlatform(plat)}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: '16px',
+                  fontSize: '11px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  cursor: 'pointer',
+                  border: selectedPlatform === plat ? '1px solid #49DFFF' : '1px solid rgba(73, 223, 255, 0.15)',
+                  backgroundColor: selectedPlatform === plat ? 'rgba(73, 223, 255, 0.15)' : 'transparent',
+                  color: selectedPlatform === plat ? '#49DFFF' : '#8392A6'
+                }}
+              >
+                {plat === 'ALL' ? 'All Platforms' : plat}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {/* Releases Stream */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {releases.map((rel) => (
-            <div key={`${rel.platform}-${rel.version}`} className="card" style={{ padding: '32px' }}>
+          {filteredReleases.map((rel: ReleaseItem) => (
+            <article
+              key={`${rel.platform}-${rel.version}`}
+              className="glass-panel"
+              style={{ padding: '36px' }}
+            >
+              {/* Release Header */}
               <div
                 style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '12px',
                   flexWrap: 'wrap',
-                  gap: '8px',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  borderBottom: '1px solid rgba(73, 223, 255, 0.12)',
+                  paddingBottom: '20px',
+                  marginBottom: '24px'
                 }}
               >
                 <div>
-                  <h2 style={{ fontSize: '24px', color: '#ffffff', display: 'inline' }}>
-                    Zaya v{rel.version}
-                  </h2>
-                  <span
-                    style={{
-                      marginLeft: '10px',
-                      background: 'rgba(0, 212, 255, 0.12)',
-                      color: 'var(--accent-cyan)',
-                      padding: '3px 8px',
-                      borderRadius: '4px',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {rel.platform}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <h2 style={{ fontSize: '24px', color: '#F4FAFF', fontWeight: 600, margin: 0 }}>
+                      Zaya v{rel.version}
+                    </h2>
+                    <span className="badge badge-stable">{rel.channel}</span>
+                    <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: '#8392A6', border: '1px solid rgba(255,255,255,0.1)' }}>
+                      {rel.platformName}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#8392A6' }}>
+                    Published on {rel.date} · {rel.sizeFormatted}
+                  </div>
                 </div>
-                <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  {new Date(rel.published_at * 1000).toLocaleDateString()}
-                </span>
-              </div>
 
-              <div
-                style={{
-                  whiteSpace: 'pre-line',
-                  color: 'var(--text-secondary)',
-                  fontSize: '14px',
-                  lineHeight: '1.6',
-                  marginBottom: '20px',
-                }}
-              >
-                {rel.release_notes}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <a href={rel.url} className="btn btn-primary" style={{ fontSize: '13px', padding: '8px 16px' }}>
+                <a
+                  href={rel.downloadUrl}
+                  className="btn btn-primary"
+                  style={{ fontSize: '13px', padding: '10px 20px' }}
+                >
                   Download {rel.filename}
                 </a>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  SHA-256: {rel.sha256 ? `${rel.sha256.slice(0, 16)}...${rel.sha256.slice(-8)}` : 'Verified'}
+              </div>
+
+              {/* Highlights */}
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '13px', color: '#DDFBFF', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+                  Release Highlights
+                </h3>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {rel.highlights.map((h, i) => (
+                    <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', color: '#DDFBFF' }}>
+                      <span style={{ color: '#49DFFF' }}>•</span>
+                      {h}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Full Changelog */}
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '13px', color: '#DDFBFF', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+                  Detailed Changes
+                </h3>
+                <ul style={{ paddingLeft: '20px', margin: 0, color: '#8392A6', fontSize: '13px', lineHeight: '1.6' }}>
+                  {rel.fullChangelog.map((c, i) => (
+                    <li key={i} style={{ marginBottom: '4px' }}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Known Issues */}
+              {rel.knownIssues && rel.knownIssues.length > 0 && (
+                <div
+                  style={{
+                    padding: '16px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    marginBottom: '24px'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#fbbf24', marginBottom: '6px' }}>
+                    Known Operational Considerations:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, color: '#d1d5db', fontSize: '12px' }}>
+                    {rel.knownIssues.map((issue, idx) => (
+                      <li key={idx}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Binary Verification Bar */}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  backgroundColor: '#020407',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(73, 223, 255, 0.1)',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  fontSize: '11px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: '#8392A6' }}>SHA-256:</span>
+                  <code style={{ color: '#49DFFF', fontSize: '10px' }}>{rel.sha256}</code>
+                </div>
+                <span
+                  onClick={() => handleCopy(rel.sha256)}
+                  style={{ color: '#49DFFF', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  {copiedSha === rel.sha256 ? '✓ Copied' : 'Copy Hash'}
                 </span>
               </div>
-            </div>
+            </article>
           ))}
         </div>
       </div>
