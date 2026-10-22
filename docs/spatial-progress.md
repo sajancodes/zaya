@@ -66,6 +66,12 @@ owner-gated and opt-in. Missing optional dependencies never gate normal startup.
   isolated from the app's OpenCV. The fixed hidden child entry point uses bounded
   JSON hand data, releases the camera on parent EOF/stop and cannot run commands.
   Actual model inference on a blank synthetic image succeeded; no camera was opened.
+- Integrated Vision Control Center (`Zaya · Vision & Hand Control`) with bounded
+  8–12 FPS webcam preview, 21-landmark skeleton overlay with toggle, full virtual
+  keyboard in KEYBOARD mode, and non-restarting mode switching across NAVIGATION,
+  KEYBOARD, SPATIAL, and SELECTION. Startup state propagation resolves indefinite
+  STARTING with startup timeout and immediate ACTIVE signaling. Natural language
+  commands route virtual keyboard and webcam actions.
 
 Build renderer: `cd spatial_renderer; npm ci; npm run build`.
 Use `spatial_workspace action=open`, then `action=build generator=inline_engine

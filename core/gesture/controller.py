@@ -16,6 +16,9 @@ class HandController:
         from .spatial_controller import SpatialController
         self.spatial = SpatialController()
         self.last_start=None
+        self.latest_hands = ()
+        self.current_gesture = 'NONE'
+        self.latest_packet = {}
 
     def _inject(self, key):
         if self.mode != InteractionMode.KEYBOARD:
@@ -44,17 +47,27 @@ class HandController:
     def on_hands(self, hands):
         from core.ghost_overlay import update_passive_overlay
         with self.lock:
+            self.latest_hands = tuple(hands)
             if not hands:
                 self.modifiers.clear()
+                self.current_gesture = 'NONE'
             events=self.engine.update(hands,hands[0].timestamp if hands else 0)
             hand = hands[0] if hands else None
+            if hand:
+                self.current_gesture = self.engine.states.get(hand.hand_id, ('NONE', 0, False))[0]
             if self.mode == InteractionMode.KEYBOARD:
                 sent = self.keyboard.update(hand)
-                update_passive_overlay({'mode':'virtual_keyboard','visible':True,
+                packet = {'mode':'virtual_keyboard','visible':True,
                     'state':self.keyboard.state,'key':self.keyboard.key.id if self.keyboard.key else '',
-                    'sent':sent or '', 'error':self.keyboard.error, 'modifiers':sorted(self.modifiers)})
+                    'sent':sent or '', 'error':self.keyboard.error, 'modifiers':sorted(self.modifiers),
+                    'hovered':self.keyboard.key.id if self.keyboard.key else '',
+                    'selected_part':getattr(self.spatial,'selected_part','')}
+                self.latest_packet = packet
+                update_passive_overlay(packet)
             else:
                 self.keyboard.reset()
+                self.latest_packet = {'mode':self.mode.value,'visible':False,
+                    'selected_part':getattr(self.spatial,'selected_part','')}
                 if self.mode in (InteractionMode.SPATIAL,InteractionMode.SELECTION):
                     self.spatial.update(hands,events,self.engine,self.mode==InteractionMode.SELECTION)
 
@@ -66,16 +79,44 @@ class HandController:
             self.keyboard.reset()
             self.engine.states.clear();self.engine.pokes.clear();self.engine.previous.clear()
             self.engine.rotations.clear();self.engine.two=None
+            self.latest_hands = ()
+            self.current_gesture = 'NONE'
+            self.latest_packet = {}
         self.tracker.stop()
         from core.ghost_overlay import update_passive_overlay
         update_passive_overlay({'visible':False,'mode':'virtual_keyboard'})
 
-    def start(self, model_path, mode, device=0, fps=24, mirror=True,confidence=.65,sensitivity=1.):
+    def set_mode(self, mode, sensitivity=None):
         requested = InteractionMode(mode)
         if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD,InteractionMode.SPATIAL,InteractionMode.SELECTION):
             raise ValueError('Choose a supported interaction mode.')
-        self.stop()
         with self.lock:
+            old_mode = self.mode
+            if old_mode == requested:
+                return
+            if old_mode == InteractionMode.KEYBOARD:
+                self.modifiers.clear()
+                self.keyboard.reset()
+                from core.ghost_overlay import update_passive_overlay
+                update_passive_overlay({'visible':False,'mode':'virtual_keyboard'})
+            if requested == InteractionMode.KEYBOARD and sensitivity is not None:
+                from .calibration import Calibration
+                self.keyboard.config=Calibration(press=.2/sensitivity,release=.07/sensitivity,min_velocity=.8/sensitivity)
+            self.mode = requested
+            if self.last_start:
+                ls = list(self.last_start)
+                ls[1] = requested.value
+                self.last_start = tuple(ls)
+
+    def start(self, model_path, mode, device=0, fps=24, mirror=True,confidence=.65,sensitivity=1., timeout=8.0):
+        requested = InteractionMode(mode)
+        if requested not in (InteractionMode.NAVIGATION,InteractionMode.KEYBOARD,InteractionMode.SPATIAL,InteractionMode.SELECTION):
+            raise ValueError('Choose a supported interaction mode.')
+        with self.lock:
+            if self.tracker.state == 'ACTIVE' and self.last_start and self.last_start[2] == int(device):
+                self.set_mode(requested, sensitivity)
+                return
+            self.stop()
             self.mode = requested
             from .calibration import Calibration
             self.keyboard.config=Calibration(press=.2/sensitivity,release=.07/sensitivity,min_velocity=.8/sensitivity)
@@ -85,6 +126,8 @@ class HandController:
             except Exception:
                 self.mode = InteractionMode.DISABLED
                 raise
+        if timeout:
+            self.tracker.wait_active(timeout)
 
     def pause(self):
         self.stop();self.tracker.state='PAUSED'
@@ -97,8 +140,13 @@ class HandController:
         self.start(self.last_start[0],self.last_start[1],settings.device,settings.fps,settings.mirror,settings.confidence,settings.sensitivity)
 
     def status(self):
-        return {'mode':self.mode.value,'camera':self.tracker.state,'error':self.tracker.error,
-                'keyboard':self.keyboard.state,'injection_error':self.keyboard.error}
+        with self.lock:
+            return {'mode':self.mode.value,'camera':self.tracker.state,'error':self.tracker.error,
+                    'keyboard':self.keyboard.state,'injection_error':self.keyboard.error,
+                    'gesture':self.current_gesture,'hands_count':len(self.latest_hands),
+                    'hovered':self.keyboard.key.id if self.keyboard.key else '',
+                    'modifiers':sorted(self.modifiers),
+                    'selected_part':getattr(self.spatial,'selected_part','')}
 
 
 hands = HandController()

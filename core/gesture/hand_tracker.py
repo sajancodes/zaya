@@ -18,6 +18,7 @@ class HandTracker:
         self.callback = callback
         self.state, self.error = 'OFF', ''
         self.stop_event = threading.Event()
+        self.active_event = threading.Event()
         self.worker = None
         self.child = None
         self.device=0
@@ -35,13 +36,26 @@ class HandTracker:
         if Path(model_path).stat().st_size>20_000_000 or not 0<=int(device)<=31:
             raise ValueError('Hand model or camera device exceeds limits.')
         self.stop_event.clear()
+        self.active_event.clear()
         self.device=int(device)
         self.state, self.error = 'STARTING', ''
         self.worker = threading.Thread(target=self._run, args=(model_path,int(device),max(10,min(30,int(fps))),bool(mirror),float(confidence)),daemon=True,name='ZayaHands')
         self.worker.start()
 
+    def wait_active(self, timeout=8.0):
+        if self.state in ('ACTIVE', 'ERROR'):
+            return self.state == 'ACTIVE'
+        ok = self.active_event.wait(timeout)
+        if not ok and self.state == 'STARTING':
+            self.error = f'Camera startup timed out after {timeout}s.'
+            self.state = 'ERROR'
+            self.active_event.set()
+            return False
+        return self.state == 'ACTIVE'
+
     def stop(self):
         self.stop_event.set()
+        self.active_event.set()
         if self.child and self.child.poll() is None:
             try:
                 self.child.stdin.write('stop\n');self.child.stdin.flush()
@@ -76,6 +90,8 @@ class HandTracker:
                     raise RuntimeError('Camera is unavailable or in use.')
                 smooth, previous = {}, {}
                 self.state = 'ACTIVE'
+                self.active_event.set()
+                self.callback(())
                 while not self.stop_event.is_set():
                     at = time.monotonic()
                     ok, frame = camera.read()
@@ -119,12 +135,19 @@ class HandTracker:
             flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
             self.child=subprocess.Popen([str(runtime),'-u','-m','core.gesture.worker',str(Path(model_path).resolve()),
                 str(device),str(fps),'1' if mirror else '0',str(confidence)],cwd=str(Path(__file__).resolve().parents[2]),
-                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=flags)
+                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=flags)
             while not self.stop_event.is_set():
                 line=self.child.stdout.readline(1_500_001)
                 if not line:
+                    err = ''
+                    if self.child and self.child.stderr:
+                        try:
+                            err = self.child.stderr.read().strip()
+                        except Exception:
+                            pass
                     if not self.stop_event.is_set():
-                        raise RuntimeError('Hand worker exited before tracking completed.')
+                        msg = f'Hand worker exited before tracking completed. {err}'.strip() if err else 'Hand worker exited before tracking completed.'
+                        raise RuntimeError(msg)
                     break
                 if len(line)>1_500_000:
                     raise RuntimeError('Hand worker message exceeds limits.')
@@ -140,6 +163,8 @@ class HandTracker:
                 if data.get('state')=='ERROR':
                     raise RuntimeError(data.get('error','Hand worker failed.'))
                 self.state=data.get('state','STARTING')
+                if self.state in ('ACTIVE','ERROR'):
+                    self.active_event.set()
                 from .hand_model import Point
                 hands=[]
                 for item in data.get('hands',[])[:2]:
@@ -150,14 +175,19 @@ class HandTracker:
                 self.callback(tuple(hands))
         except Exception as error:
             self.state,self.error='ERROR',f'{type(error).__name__}: {error}'[:300]
+            self.active_event.set()
         finally:
+            self.active_event.set()
             if self.child:
                 if self.child.poll() is None:
                     self.child.terminate()
                 self.child.wait(timeout=5)
-                for stream in (self.child.stdin,self.child.stdout):
+                for stream in (self.child.stdin,self.child.stdout,self.child.stderr):
                     if stream:
-                        stream.close()
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
             self.callback(())
             if self.state!='ERROR':
                 self.state='OFF'

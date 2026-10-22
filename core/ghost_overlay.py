@@ -75,6 +75,8 @@ def install_ghost_overlay(command_callback, parent=None):
                     if self.hand_settings is None:
                         from core.gesture.settings_panel import HandSettingsPanel
                         self.hand_settings=HandSettingsPanel(parent)
+                    if packet.get('mode') and hasattr(self.hand_settings, 'set_mode_ui'):
+                        self.hand_settings.set_mode_ui(packet['mode'])
                     self.hand_settings.show();self.hand_settings.raise_();self.hand_settings.activateWindow()
                     return
                 if packet.get('passive_flush'):
@@ -137,7 +139,10 @@ def update_passive_overlay(packet):
         _bridge.queue_passive(packet)
 
 
-def show_hand_settings():
+def show_hand_settings(mode=None):
     if _bridge is None:return False
-    _bridge.requested.emit({'hand_settings':True,'done':threading.Event()})
+    _bridge.requested.emit({'hand_settings':True,'mode':mode,'done':threading.Event()})
     return True
+
+
+show_vision_control_center = show_hand_settings
