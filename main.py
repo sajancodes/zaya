@@ -2862,6 +2862,12 @@ def main():
             except OSError as error:
                 ui.write_log(f'ERR: Phone wake launcher unavailable: {error}')
         threading.Thread(target=prepare_phone_wake, daemon=True, name='phone-wake-setup').start()
+        try:
+            from core.telemetry import telemetry_client
+            telemetry_client.start()
+        except Exception:
+            pass
+
         stopping = threading.Event()
 
         worker = threading.Thread(target=_run_desktop_agent, args=(ui, stopping), daemon=True)

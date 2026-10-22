@@ -276,7 +276,7 @@ def test_inno_setup_script_structure():
     # Key security & non-admin install requirements
     assert "PrivilegesRequired=lowest" in content
     assert "{localappdata}\\Programs" in content
-    assert "OutputBaseFilename=Zaya-Setup" in content
+    assert ("OutputBaseFilename=ZayaSetup" in content) or ("OutputBaseFilename=Zaya-Setup" in content)
     assert "ArchitecturesInstallIn64BitMode=x64compatible" in content or "x64" in content
 
     # Clean uninstall preserving user data

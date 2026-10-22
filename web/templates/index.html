@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-tag">Spatial Intelligence · Autonomous Assistant</div>
+    <h1 class="hero-title">Your Personal AI Assistant.<br>Spatial. Private. Autonomous.</h1>
+    <p class="hero-subtitle">
+      Zaya unites real-time conversational voice, desktop screen perception, optical hand tracking, 
+      depth-invariant virtual keyboard typing, and an interactive 3D spatial workspace into a single private desktop application.
+    </p>
+
+    <div class="hero-actions">
+      <a href="/download/windows" class="btn btn-primary btn-large">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+        Download for Windows
+      </a>
+      <a href="/download" class="btn btn-secondary btn-large">
+        Explore Platforms
+      </a>
+    </div>
+
+    <div class="hero-badges">
+      <span>✓ Windows 10/11 (64-bit)</span>
+      <span>✓ Android Companion App</span>
+      <span>✓ Local DPAPI Key Encryption</span>
+      <span>✓ Latest: Zaya v{{ latest_version | default("0.5.0") }}</span>
+    </div>
+  </div>
+</section>
+
+<!-- Core Capabilities Grid -->
+<section class="section" style="background-color: var(--bg-surface); border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle);">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">Built for Real Desktop Intelligence</h2>
+      <p class="section-desc">Not a chat wrapper. Zaya runs deep operating system tools, perception pipelines, and local neural workers.</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <div class="card-icon">🎙️</div>
+        <h3 class="card-title">Real-Time Voice Stream</h3>
+        <p class="card-text">Direct conversational voice powered by Gemini Live audio streaming. Interruptible, low-latency responses with wake-word and push-to-talk support.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">👁️</div>
+        <h3 class="card-title">Vision Control Center</h3>
+        <p class="card-text">Continuous desktop screen perception and OCR with zero screenshot clutter. Understands active windows, monitors dialogs, and inspects errors.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🖐️</div>
+        <h3 class="card-title">Optical Hand Tracking</h3>
+        <p class="card-text">Isolated MediaPipe hand landmark inference in a dedicated child worker. Real-time 21-point tracking running at 30 FPS without blocking the UI.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">⌨️</div>
+        <h3 class="card-title">Virtual Gesture Keyboard</h3>
+        <p class="card-text">Mid-air typing with palm-relative depth invariance. Deliberate poke latching, key retract hysteresis, and strict security guards preventing self-entry.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🧊</div>
+        <h3 class="card-title">Spatial 3D Workspace</h3>
+        <p class="card-text">Interactive Three.js 3D mechanical schematics. Inspect components, trigger semantic component explosion, annotate parts, and slice cross-sections.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">📱</div>
+        <h3 class="card-title">Android Companion</h3>
+        <p class="card-text">Continuous phone connectivity over local Wi-Fi or encrypted tunnel. Mirrors cellular calls, performs caller ID lookup, and supports mobile voice control.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Call to Action Banner -->
+<section class="section" style="text-align: center;">
+  <div class="container">
+    <h2 class="section-title">Get Started with Zaya</h2>
+    <p class="section-desc" style="margin-bottom: 32px;">Download ZayaSetup.exe, follow the first-run onboarding wizard, and connect your Google AI Studio key.</p>
+    <a href="/download" class="btn btn-primary btn-large">Download Now</a>
+  </div>
+</section>
+{% endblock %}

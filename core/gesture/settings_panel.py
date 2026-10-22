@@ -1,4 +1,4 @@
-"""Zaya · Vision & Hand Control Center.
+"""Zaya · Vision & Virtual Keyboard Control Center.
 Created and developed by Sajan Rai for Zaya.
 
 Integrated webcam preview, MediaPipe landmark overlay, and full virtual keyboard.
@@ -8,7 +8,7 @@ from __future__ import annotations
 import threading
 import time
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QThread
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QFont
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton, QLabel,
@@ -23,7 +23,7 @@ class PreviewCanvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(380, 285)
+        self.setMinimumSize(420, 320)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.pixmap: QPixmap | None = None
         self.show_landmarks = True
@@ -31,6 +31,7 @@ class PreviewCanvas(QWidget):
         self.gesture = 'NONE'
         self.confidence = 0.0
         self.camera_state = 'OFF'
+        self.camera_error = ''
 
     def update_frame(self, jpeg_bytes: bytes):
         if jpeg_bytes:
@@ -39,26 +40,33 @@ class PreviewCanvas(QWidget):
                 self.pixmap = pix
                 self.update()
 
-    def set_telemetry(self, camera_state: str, hands: tuple, gesture: str, confidence: float):
+    def set_telemetry(self, camera_state: str, hands: tuple, gesture: str, confidence: float, error: str = ''):
         self.camera_state = camera_state
         self.hands = hands
         self.gesture = gesture
         self.confidence = confidence
+        self.camera_error = error
         self.update()
 
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor('#140f1a'))
+        painter.fillRect(self.rect(), QColor('#050A0D'))
 
         if self.camera_state != 'ACTIVE' or self.pixmap is None:
-            painter.setPen(QColor('#9d88a8'))
+            painter.setPen(QColor('#00B8D4'))
             font = painter.font()
-            font.setPointSize(11)
+            font.setPointSize(12)
             painter.setFont(font)
-            msg = 'Camera OFF' if self.camera_state == 'OFF' else (
-                f'Camera: {self.camera_state}' if self.camera_state != 'ACTIVE' else 'Waiting for camera frame...'
-            )
+            if self.camera_state == 'ERROR':
+                painter.setPen(QColor('#ff5252'))
+                msg = f"CAMERA ERROR\n{self.camera_error or 'Camera failed to start.'}"
+            elif self.camera_state == 'ACTIVE':
+                msg = 'Waiting for camera frame...'
+            elif self.camera_state == 'STARTING':
+                msg = 'Camera STARTING...'
+            else:
+                msg = 'Camera OFF'
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, msg)
             return
 
@@ -74,57 +82,63 @@ class PreviewCanvas(QWidget):
             return
 
         CONNECTIONS = [
-            (0, 1), (1, 2), (2, 3), (3, 4),        # Thumb
-            (0, 5), (5, 6), (6, 7), (7, 8),        # Index
-            (0, 9), (9, 10), (10, 11), (11, 12),   # Middle
-            (0, 13), (13, 14), (14, 15), (15, 16), # Ring
-            (0, 17), (17, 18), (18, 19), (19, 20), # Pinky
-            (5, 9), (9, 13), (13, 17), (0, 17)     # Palm
+            (0, 1), (1, 2), (2, 3), (3, 4),
+            (0, 5), (5, 6), (6, 7), (7, 8),
+            (0, 9), (9, 10), (10, 11), (11, 12),
+            (0, 13), (13, 14), (14, 15), (15, 16),
+            (0, 17), (17, 18), (18, 19), (19, 20),
+            (5, 9), (9, 13), (13, 17), (0, 17)
         ]
 
         for hand in self.hands:
             pts = [QPointF(dx + p.x * dw, dy + p.y * dh) for p in hand.landmarks]
 
-            # Connections
-            painter.setPen(QPen(QColor(224, 130, 173, 210), 2))
+            # Connections (cyan)
+            painter.setPen(QPen(QColor(0, 229, 255, 200), 2))
             for a, b in CONNECTIONS:
                 if a < len(pts) and b < len(pts):
                     painter.drawLine(pts[a], pts[b])
 
-            # Landmark dots
+            # Landmark dots (cyan/white)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor('#f6c9dc')))
+            painter.setBrush(QBrush(QColor(0, 229, 255, 220)))
             for i, pt in enumerate(pts):
                 if i not in (4, 8, 12, 16, 20):
                     painter.drawEllipse(pt, 3, 3)
                 else:
                     painter.drawEllipse(pt, 4.5, 4.5)
 
-            # Palm center
+            # Palm center (white/cyan)
             if hasattr(hand, 'palm_center'):
                 pcx = dx + hand.palm_center.x * dw
                 pcy = dy + hand.palm_center.y * dh
-                painter.setBrush(QBrush(QColor('#ffd166')))
+                painter.setBrush(QBrush(QColor(255, 255, 255, 230)))
                 painter.drawEllipse(QPointF(pcx, pcy), 5, 5)
+                painter.setPen(QPen(QColor(0, 229, 255, 180), 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(QPointF(pcx, pcy), 9, 9)
 
-            # Highlight index fingertip (landmark 8)
+            # Index fingertip (bright cyan glow)
             if len(pts) > 8:
                 tip = pts[8]
-                painter.setBrush(QBrush(QColor(255, 64, 129, 90)))
-                painter.drawEllipse(tip, 11, 11)
-                painter.setBrush(QBrush(QColor('#ff4081')))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(0, 229, 255, 60)))
+                painter.drawEllipse(tip, 16, 16)
+                painter.setBrush(QBrush(QColor(0, 229, 255, 120)))
+                painter.drawEllipse(tip, 10, 10)
+                painter.setBrush(QBrush(QColor(0, 229, 255, 255)))
                 painter.drawEllipse(tip, 5.5, 5.5)
-                painter.setBrush(QBrush(QColor('#ffffff')))
+                painter.setBrush(QBrush(QColor(255, 255, 255, 240)))
                 painter.drawEllipse(tip, 2, 2)
 
-            # Info tag
+            # Handedness / gesture / confidence tag
             if pts:
                 wrist = pts[0]
                 badge = f"{hand.handedness} · {self.gesture} ({int(hand.confidence*100)}%)"
                 painter.setPen(QColor('#ffffff'))
-                painter.setBrush(QBrush(QColor(25, 18, 30, 210)))
-                rect = QRectF(wrist.x() - 55, min(dh + dy - 22, wrist.y() + 8), 125, 18)
-                painter.drawRoundedRect(rect, 3, 3)
+                painter.setBrush(QBrush(QColor(5, 10, 13, 210)))
+                rect = QRectF(wrist.x() - 60, min(dh + dy - 24, wrist.y() + 8), 135, 20)
+                painter.drawRoundedRect(rect, 4, 4)
                 font = painter.font()
                 font.setPointSize(8)
                 painter.setFont(font)
@@ -136,9 +150,9 @@ class VirtualKeyboardCanvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(160)
-        self.setMaximumHeight(210)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(200)
+        self.setMaximumHeight(340)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.keys = keyboard_layout()
         self.packet = {}
 
@@ -149,7 +163,7 @@ class VirtualKeyboardCanvas(QWidget):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor('#18131e'))
+        painter.fillRect(self.rect(), QColor('#071014'))
 
         state = self.packet.get('state', 'idle')
         hovered_id = self.packet.get('key') or self.packet.get('hovered')
@@ -157,9 +171,9 @@ class VirtualKeyboardCanvas(QWidget):
 
         w = self.width()
         h = self.height()
-        pad = 3
-        top_offset = 4
-        avail_h = h - top_offset - 6
+        pad = 4
+        top_offset = 6
+        avail_h = h - top_offset - 8
 
         for key in self.keys:
             kx, ky, kw, kh = key.bounds
@@ -173,28 +187,34 @@ class VirtualKeyboardCanvas(QWidget):
             is_latched = (key.output.lower() in latched_mods)
 
             if is_hovered:
-                if state == 'armed':
-                    bg = QColor('#993d6d')
-                    border = QColor('#ff85c0')
-                elif state == 'locked':
-                    bg = QColor('#ba4e86')
+                if state == 'locked':
+                    bg = QColor(0, 229, 255, 180)
                     border = QColor('#ffffff')
+                elif state == 'armed':
+                    bg = QColor(0, 229, 255, 120)
+                    border = QColor('#00E5FF')
+                elif state == 'candidate':
+                    bg = QColor(0, 184, 212, 70)
+                    border = QColor('#00B8D4')
                 else:
-                    bg = QColor('#5e3860')
-                    border = QColor('#cf7ba9')
+                    bg = QColor(0, 229, 255, 35)
+                    border = QColor('#00B8D4')
                 text_col = QColor('#ffffff')
+                pen_width = 2.0
             elif is_latched:
-                bg = QColor('#6b3653')
-                border = QColor('#e082ad')
-                text_col = QColor('#ffe6f2')
+                bg = QColor(0, 184, 212, 80)
+                border = QColor('#00E5FF')
+                text_col = QColor('#E0F7FA')
+                pen_width = 1.6
             else:
-                bg = QColor('#271f2d')
-                border = QColor('#3e3047')
-                text_col = QColor('#e5ccdb')
+                bg = QColor(7, 16, 20, 200)
+                border = QColor(0, 184, 212, 90)
+                text_col = QColor('#B2EBF2')
+                pen_width = 1.0
 
-            painter.setPen(QPen(border, 1.2))
+            painter.setPen(QPen(border, pen_width))
             painter.setBrush(QBrush(bg))
-            painter.drawRoundedRect(rect, 4, 4)
+            painter.drawRoundedRect(rect, 5, 5)
 
             painter.setPen(text_col)
             font = painter.font()
@@ -214,73 +234,81 @@ class PreviewThread(QThread):
 
     def run(self):
         from .controller import hands
-        while self.running:
+        while self.running and not self.isInterruptionRequested():
             if hands.tracker.state == 'ACTIVE':
                 frame = hands.tracker.capture_frame(timeout=0.25)
                 if frame:
                     self.frame_ready.emit(frame)
-                time.sleep(0.09)  # ~11 FPS
+                time.sleep(0.09)
             else:
                 time.sleep(0.25)
 
     def stop(self):
         self.running = False
-        self.wait(1000)
+        self.requestInterruption()
+        if self.isRunning():
+            self.wait(1500)
 
 
 class HandSettingsPanel(QDialog):
-    """Zaya · Vision & Hand Control center."""
+    """Zaya · Virtual Keyboard / Vision Control Center."""
     completed = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Zaya · Vision & Hand Control')
-        self.resize(760, 680)
-        self.setMinimumSize(680, 580)
+        self.setWindowTitle('ZAYA · VIRTUAL KEYBOARD')
+        self.resize(1280, 800)
+        self.setMinimumSize(900, 640)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1420;
-                color: #f6c9dc;
+                background-color: #071014;
+                color: #E0F7FA;
                 font-family: 'Segoe UI', sans-serif;
             }
             QLabel {
-                color: #e5cbda;
+                color: #B2EBF2;
+            }
+            QFrame#panel {
+                background-color: rgba(11, 21, 26, 0.72);
+                border: 1px solid rgba(0, 184, 212, 0.45);
+                border-radius: 10px;
             }
             QPushButton {
-                background-color: #2b2131;
-                color: #f6c9dc;
-                border: 1px solid #4a3854;
-                border-radius: 4px;
+                background-color: rgba(7, 16, 20, 0.85);
+                color: #B2EBF2;
+                border: 1px solid rgba(0, 184, 212, 0.5);
+                border-radius: 6px;
                 padding: 6px 14px;
                 font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #3b2c44;
-                border-color: #7b4160;
+                background-color: rgba(0, 229, 255, 0.12);
+                border-color: #00E5FF;
+                color: #E0F7FA;
             }
             QPushButton:pressed {
-                background-color: #4f365c;
+                background-color: rgba(0, 229, 255, 0.22);
             }
             QSpinBox, QDoubleSpinBox, QComboBox {
-                background-color: #221927;
-                color: #f6c9dc;
-                border: 1px solid #45344f;
+                background-color: rgba(7, 16, 20, 0.85);
+                color: #E0F7FA;
+                border: 1px solid rgba(0, 184, 212, 0.5);
                 border-radius: 4px;
                 padding: 3px 6px;
             }
             QCheckBox {
-                color: #e5cbda;
+                color: #B2EBF2;
             }
             QCheckBox::indicator {
                 width: 15px;
                 height: 15px;
-                background-color: #221927;
-                border: 1px solid #523e5e;
+                background-color: rgba(7, 16, 20, 0.85);
+                border: 1px solid rgba(0, 184, 212, 0.5);
                 border-radius: 3px;
             }
             QCheckBox::indicator:checked {
-                background-color: #7b4160;
-                border-color: #ba6090;
+                background-color: #00B8D4;
+                border-color: #00E5FF;
             }
         """)
 
@@ -293,35 +321,48 @@ class HandSettingsPanel(QDialog):
         root_layout.setContentsMargins(14, 14, 14, 14)
         root_layout.setSpacing(10)
 
-        # Header Title
-        title_label = QLabel('ZAYA · VISION & HAND CONTROL')
-        title_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #f6c9dc; letter-spacing: 1px;")
-        root_layout.addWidget(title_label)
+        # Header
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(12)
+        title_label = QLabel('ZAYA · VIRTUAL KEYBOARD')
+        title_label.setStyleSheet("font-size: 20px; font-weight: 700; color: #00E5FF; letter-spacing: 2px;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
 
-        # Top section: Preview on Left, Telemetry & Settings on Right
-        top_layout = QHBoxLayout()
-        top_layout.setSpacing(12)
+        self.lbl_status_pill = QLabel('OFF')
+        self.lbl_status_pill.setStyleSheet("color: #9ca3af; font-weight: 700; padding: 4px 10px; border: 1px solid rgba(0,184,212,0.4); border-radius: 10px;")
+        header_layout.addWidget(self.lbl_status_pill)
+
+        close_btn = QPushButton('× Close')
+        close_btn.setStyleSheet("background-color: rgba(255, 82, 82, 0.12); color: #ff8a80; border: 1px solid rgba(255, 82, 82, 0.5); font-weight: 700;")
+        close_btn.clicked.connect(self.close)
+        header_layout.addWidget(close_btn)
+        root_layout.addLayout(header_layout)
+
+        # Main area: camera (left, large) + telemetry (right)
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(12)
 
         # Left: Live Preview container
         preview_container = QVBoxLayout()
+        preview_container.setSpacing(6)
         self.preview = PreviewCanvas(self)
-        preview_container.addWidget(self.preview)
+        preview_container.addWidget(self.preview, 1)
 
-        # Show landmarks checkbox
         self.cb_landmarks = QCheckBox('Show landmarks')
         self.cb_landmarks.setChecked(True)
         self.cb_landmarks.toggled.connect(self._toggle_landmarks)
         preview_container.addWidget(self.cb_landmarks)
-        top_layout.addLayout(preview_container, 3)
+        main_layout.addLayout(preview_container, 7)
 
         # Right: Telemetry & Config Card
         right_card = QFrame(self)
-        right_card.setStyleSheet("background-color: #221a29; border: 1px solid #3b2d45; border-radius: 6px; padding: 10px;")
+        right_card.setObjectName('panel')
         right_layout = QVBoxLayout(right_card)
         right_layout.setSpacing(6)
 
         telemetry_title = QLabel('SYSTEM TELEMETRY')
-        telemetry_title.setStyleSheet("font-weight: bold; color: #ba7aa3; font-size: 11px;")
+        telemetry_title.setStyleSheet("font-weight: 700; color: #00B8D4; font-size: 11px; letter-spacing: 1px;")
         right_layout.addWidget(telemetry_title)
 
         self.lbl_camera = QLabel('Camera: OFF')
@@ -331,20 +372,22 @@ class HandSettingsPanel(QDialog):
         self.lbl_gesture = QLabel('Gesture: —')
         self.lbl_confidence = QLabel('Confidence: —')
         self.lbl_mode = QLabel('Mode: NAVIGATION')
+        self.lbl_hovered = QLabel('Hovered: —')
+        self.lbl_last = QLabel('Last sent: —')
+        self.lbl_modifiers = QLabel('Modifiers: —')
 
-        for lbl in (self.lbl_camera, self.lbl_device, self.lbl_fps, self.lbl_hands, self.lbl_gesture, self.lbl_confidence, self.lbl_mode):
+        for lbl in (self.lbl_camera, self.lbl_device, self.lbl_fps, self.lbl_hands, self.lbl_gesture, self.lbl_confidence, self.lbl_mode, self.lbl_hovered, self.lbl_last, self.lbl_modifiers):
             right_layout.addWidget(lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #3b2d45;")
+        sep.setStyleSheet("color: rgba(0,184,212,0.3);")
         right_layout.addWidget(sep)
 
         settings_title = QLabel('CAMERA CONFIG')
-        settings_title.setStyleSheet("font-weight: bold; color: #ba7aa3; font-size: 11px;")
+        settings_title.setStyleSheet("font-weight: 700; color: #00B8D4; font-size: 11px; letter-spacing: 1px;")
         right_layout.addWidget(settings_title)
 
-        # Form controls
         form = QFormLayout()
         form.setSpacing(6)
         self.mode = QComboBox()
@@ -378,8 +421,8 @@ class HandSettingsPanel(QDialog):
 
         right_layout.addLayout(form)
         right_layout.addStretch()
-        top_layout.addWidget(right_card, 2)
-        root_layout.addLayout(top_layout, 1)
+        main_layout.addWidget(right_card, 3)
+        root_layout.addLayout(main_layout, 6)
 
         # Mode Selection Bar
         mode_bar = QHBoxLayout()
@@ -395,17 +438,17 @@ class HandSettingsPanel(QDialog):
         # Virtual Keyboard Section (visible only in KEYBOARD mode)
         self.keyboard_canvas = VirtualKeyboardCanvas(self)
         self.keyboard_canvas.setVisible(False)
-        root_layout.addWidget(self.keyboard_canvas)
+        root_layout.addWidget(self.keyboard_canvas, 3)
 
         # Telemetry Status Strip
         self.telemetry_strip = QLabel('Gesture: —    Keyboard: IDLE    Hovered: —    Last sent: —    Modifiers: —    Selected part: —')
-        self.telemetry_strip.setStyleSheet("background-color: #211927; border: 1px solid #3c2e47; border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px;")
+        self.telemetry_strip.setStyleSheet("background-color: rgba(7,16,20,0.85); border: 1px solid rgba(0,184,212,0.4); border-radius: 6px; padding: 6px; font-family: monospace; font-size: 11px; color: #B2EBF2;")
         root_layout.addWidget(self.telemetry_strip)
 
         # General status message
         self.status = QLabel('Camera off until enabled. Safe generic default is NAVIGATION.')
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("color: #bfa6b8; font-size: 11px;")
+        self.status.setStyleSheet("color: #9ca3af; font-size: 11px;")
         root_layout.addWidget(self.status)
 
         # Action Buttons Row
@@ -413,7 +456,7 @@ class HandSettingsPanel(QDialog):
         actions_row.setSpacing(8)
 
         self.start_button = QPushButton('Start')
-        self.start_button.setStyleSheet("background-color: #4b263b; border-color: #8b3c66; font-weight: bold;")
+        self.start_button.setStyleSheet("background-color: rgba(0, 229, 255, 0.15); border-color: #00E5FF; font-weight: 700; color: #E0F7FA;")
         self.start_button.clicked.connect(self.start)
         actions_row.addWidget(self.start_button)
 
@@ -426,12 +469,11 @@ class HandSettingsPanel(QDialog):
         actions_row.addWidget(resume_btn)
 
         stop_btn = QPushButton('Stop')
-        stop_btn.setStyleSheet("background-color: #3b1e2a; border-color: #7b2a3d; color: #ff9fb2;")
+        stop_btn.setStyleSheet("background-color: rgba(255, 82, 82, 0.12); border-color: rgba(255,82,82,0.5); color: #ff8a80;")
         stop_btn.clicked.connect(lambda: self.run({'action': 'stop'}))
         actions_row.addWidget(stop_btn)
 
         workspace_btn = QPushButton('Open 3D Workspace')
-        workspace_btn.setStyleSheet("background-color: #1e2c3b; border-color: #3d5f85; color: #bde0fe;")
         workspace_btn.clicked.connect(self.open_workspace)
         actions_row.addWidget(workspace_btn)
 
@@ -443,14 +485,46 @@ class HandSettingsPanel(QDialog):
         self.mode.currentTextChanged.connect(self.switch_mode)
 
         # Preview background thread
-        self.preview_thread = PreviewThread(self)
-        self.preview_thread.frame_ready.connect(self.preview.update_frame)
-        self.preview_thread.start()
+        self.preview_thread = None
+        self._ensure_preview_thread()
 
         # Telemetry refresh timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(50)
+
+    def _ensure_preview_thread(self):
+        if self.preview_thread is not None and self.preview_thread.isRunning():
+            return
+        thread = PreviewThread(self)
+        thread.frame_ready.connect(self.preview.update_frame)
+        self.preview_thread = thread
+        thread.start()
+
+    def _stop_preview_thread(self):
+        thread = self.preview_thread
+        self.preview_thread = None
+        if thread is not None:
+            thread.stop()
+            thread.deleteLater()
+
+    def showEvent(self, event):
+        self._ensure_preview_thread()
+        if not self.timer.isActive():
+            self.timer.start(50)
+        super().showEvent(event)
+
+    def closeEvent(self, event):
+        self._stop_preview_thread()
+        if self.timer is not None:
+            self.timer.stop()
+        super().closeEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            return
+        super().keyPressEvent(event)
 
     def _toggle_landmarks(self, checked: bool):
         self.preview.show_landmarks = checked
@@ -471,9 +545,9 @@ class HandSettingsPanel(QDialog):
     def _update_mode_buttons(self, active_mode: str):
         for name, btn in self.mode_buttons.items():
             if name == active_mode:
-                btn.setStyleSheet("background-color: #7b4160; color: #ffffff; font-weight: bold; border: 1px solid #c9659a; border-radius: 4px; padding: 6px 12px;")
+                btn.setStyleSheet("background-color: rgba(0, 229, 255, 0.22); color: #E0F7FA; font-weight: 700; border: 1px solid #00E5FF; border-radius: 6px; padding: 6px 12px;")
             else:
-                btn.setStyleSheet("background-color: #2b2131; color: #e5cbda; border: 1px solid #4a3854; border-radius: 4px; padding: 6px 12px;")
+                btn.setStyleSheet("background-color: rgba(7, 16, 20, 0.85); color: #B2EBF2; border: 1px solid rgba(0, 184, 212, 0.5); border-radius: 6px; padding: 6px 12px;")
 
     def start(self):
         self.run({
@@ -530,10 +604,13 @@ class HandSettingsPanel(QDialog):
         self.lbl_fps.setText(f"FPS: {self.fps.value()}")
         self.lbl_hands.setText(f"Hands: {len(hands_list)}")
         self.lbl_gesture.setText(f"Gesture: {gesture}")
-        self.lbl_confidence.setText(f"Confidence: {confidence:.2f}" if hands_list else "Confidence: —")
+        self.lbl_confidence.setText(f"Confidence: {confidence:.0%}" if hands_list else "Confidence: —")
         self.lbl_mode.setText(f"Mode: {cur_mode}")
+        self.lbl_hovered.setText(f"Hovered: {st.get('hovered') or '—'}")
+        self.lbl_last.setText(f"Last sent: {getattr(hands, 'latest_packet', {}).get('sent') or '—'}")
+        self.lbl_modifiers.setText(f"Modifiers: {' + '.join(st.get('modifiers', [])) or '—'}")
 
-        self.preview.set_telemetry(cam, hands_list, gesture, confidence)
+        self.preview.set_telemetry(cam, hands_list, gesture, confidence, err)
 
         packet = getattr(hands, 'latest_packet', {})
         self.keyboard_canvas.set_packet(packet)
@@ -549,18 +626,30 @@ class HandSettingsPanel(QDialog):
             strip += f"    [Error: {inj_err}]"
         self.telemetry_strip.setText(strip)
 
-        effective_mode = cur_mode if cur_mode != 'DISABLED' else self.mode.currentText()
+        effective_mode = cur_mode if cur_mode != 'DISABLED' else 'NAVIGATION'
         self._update_mode_buttons(effective_mode)
         self.keyboard_canvas.setVisible(effective_mode == 'KEYBOARD')
 
         if cam == 'ACTIVE':
+            self.lbl_status_pill.setText('ACTIVE ●')
+            self.lbl_status_pill.setStyleSheet("color: #4ade80; font-weight: 700; padding: 4px 10px; border: 1px solid #4ade80; border-radius: 10px;")
             self.status.setText(f"Camera ACTIVE · Mode {cur_mode}")
+            self.status.setStyleSheet("color: #9ca3af; font-size: 11px;")
         elif cam == 'ERROR':
-            self.status.setText(f"Camera ERROR · {err}")
-
-    def closeEvent(self, event):
-        self.preview_thread.stop()
-        super().closeEvent(event)
+            self.lbl_status_pill.setText('ERROR')
+            self.lbl_status_pill.setStyleSheet("color: #ef4444; font-weight: 700; padding: 4px 10px; border: 1px solid #ef4444; border-radius: 10px;")
+            self.status.setText(f"CAMERA ERROR · {err}")
+            self.status.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 700;")
+        elif cam == 'STARTING':
+            self.lbl_status_pill.setText('STARTING')
+            self.lbl_status_pill.setStyleSheet("color: #f59e0b; font-weight: 700; padding: 4px 10px; border: 1px solid #f59e0b; border-radius: 10px;")
+            self.status.setText("Camera STARTING...")
+            self.status.setStyleSheet("color: #f59e0b; font-size: 11px;")
+        else:
+            self.lbl_status_pill.setText('OFF')
+            self.lbl_status_pill.setStyleSheet("color: #9ca3af; font-weight: 700; padding: 4px 10px; border: 1px solid rgba(0,184,212,0.4); border-radius: 10px;")
+            self.status.setText("Camera off until enabled. Safe generic default is NAVIGATION.")
+            self.status.setStyleSheet("color: #9ca3af; font-size: 11px;")
 
 
 VisionControlCenter = HandSettingsPanel

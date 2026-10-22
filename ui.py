@@ -5830,20 +5830,47 @@ class MainWindow(QMainWindow):
     def _show_setup(self):
         if getattr(self, '_desktop_mode', False):
             self.showNormal()
-        ov = SetupOverlay(self.centralWidget())
-        from core.gemini_keys import parse_keys
-        saved = _read_full_config()
-        ov._key_input.setText(', '.join(parse_keys(saved.get('gemini_api_keys') or saved.get('gemini_api_key', ''))))
-        cw = self.centralWidget()
-        ow, oh = 460, 390
-        ov.setGeometry(
-            (cw.width()  - ow) // 2,
-            (cw.height() - oh) // 2,
-            ow, oh,
-        )
-        ov.done.connect(self._on_setup_done)
-        ov.show()
-        self._overlay = ov
+        try:
+            from core.onboarding.wizard import OnboardingWizard
+            cw = self.centralWidget()
+            ow, oh = 580, 520
+            wizard = OnboardingWizard(cw)
+            wizard.setGeometry(
+                (cw.width()  - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh,
+            )
+            wizard.completed.connect(self._on_onboarding_completed)
+            wizard.show()
+            self._overlay = wizard
+        except Exception as err:
+            self._log_sig.emit(f"WARN: Onboarding wizard fallback: {err}")
+            ov = SetupOverlay(self.centralWidget())
+            from core.gemini_keys import parse_keys
+            saved = _read_full_config()
+            ov._key_input.setText(', '.join(parse_keys(saved.get('gemini_api_keys') or saved.get('gemini_api_key', ''))))
+            cw = self.centralWidget()
+            ow, oh = 460, 390
+            ov.setGeometry(
+                (cw.width()  - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh,
+            )
+            ov.done.connect(self._on_setup_done)
+            ov.show()
+            self._overlay = ov
+
+    def _on_onboarding_completed(self):
+        self._ready = True
+        self._ready_event.set()
+        if self._overlay:
+            self._overlay.hide()
+            self._overlay = None
+        self._apply_state("LISTENING")
+        self._assistant_name = "Zaya"
+        self._log.append_log(f"SYS: Initialised. {self._assistant_name} online.")
+        if self.on_credentials_change:
+            self.on_credentials_change()
 
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)

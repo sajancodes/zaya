@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section" style="padding-top: 50px;">
+  <div class="container">
+    <div class="section-header">
+      <div class="hero-tag">Official Releases</div>
+      <h1 class="section-title">Download Zaya</h1>
+      <p class="section-desc">Choose your platform below. All official binaries are cryptographically signed and hash-verified.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 32px; max-width: 900px; margin: 0 auto 60px;">
+      
+      <!-- Windows Card -->
+      <div class="download-card primary">
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <span style="font-size: 24px;">🪟 Windows</span>
+            <span style="background: rgba(0, 212, 255, 0.15); color: var(--accent-cyan); padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">STABLE</span>
+          </div>
+          <h2 style="font-size: 22px; color: #ffffff; margin-bottom: 8px;">Zaya for Windows</h2>
+          <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">
+            Full desktop application with real-time voice, Vision Control Center, optical hand tracking, and 3D spatial workspace.
+          </p>
+
+          <ul style="list-style: none; margin-bottom: 28px; font-size: 13px; color: var(--text-muted);">
+            <li style="margin-bottom: 6px;">• Windows 10 / 11 (64-bit)</li>
+            <li style="margin-bottom: 6px;">• Per-user installation (no admin UAC required)</li>
+            <li style="margin-bottom: 6px;">• Local DPAPI encrypted API key storage</li>
+            <li>• Auto-updater included</li>
+          </ul>
+        </div>
+
+        <div>
+          <a href="/download/windows" class="btn btn-primary" style="width: 100%; text-align: center; justify-content: center; padding: 14px 20px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            Download ZayaSetup.exe
+          </a>
+          <div class="download-meta">
+            <span>Version: {{ windows_release.version | default("0.5.0") }}</span>
+            <span>Size: ~48 MB</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Android Card -->
+      <div class="download-card">
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <span style="font-size: 24px;">📱 Android</span>
+            <span style="background: rgba(0, 255, 136, 0.15); color: var(--accent-green); padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">COMPANION</span>
+          </div>
+          <h2 style="font-size: 22px; color: #ffffff; margin-bottom: 8px;">Zaya Companion</h2>
+          <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">
+            Pairs your smartphone to your laptop runtime for mobile conversational voice, cellular call answering, and notification sync.
+          </p>
+
+          <ul style="list-style: none; margin-bottom: 28px; font-size: 13px; color: var(--text-muted);">
+            <li style="margin-bottom: 6px;">• Android 8.0+ (API 26+)</li>
+            <li style="margin-bottom: 6px;">• Local Wi-Fi / secure tunnel sync</li>
+            <li style="margin-bottom: 6px;">• No credentials stored on device</li>
+            <li>• Foreground service call alerts</li>
+          </ul>
+        </div>
+
+        <div>
+          <button class="btn btn-secondary" style="width: 100%; margin-bottom: 10px; opacity: 0.65; cursor: not-allowed;" title="Google Play Store review track pending">
+            Google Play — Coming Soon
+          </button>
+          <a href="/download/android" class="btn btn-secondary" style="width: 100%; text-align: center; justify-content: center;">
+            Download Official APK (v{{ android_release.version | default("0.4.6") }})
+          </a>
+          <div class="download-meta">
+            <span>Version: {{ android_release.version | default("0.4.6") }}</span>
+            <span>Size: ~24 MB</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Installation Verification Callout -->
+    <div style="max-width: 900px; margin: 0 auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 24px;">
+      <h3 style="color: #ffffff; font-size: 16px; margin-bottom: 10px;">Security & Hash Verification</h3>
+      <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+        To verify that your downloaded <code>ZayaSetup.exe</code> matches the official distribution byte-for-byte, run in PowerShell:
+      </p>
+      <div class="code-block" style="margin: 0;">Get-FileHash -Algorithm SHA256 .\ZayaSetup.exe</div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-top: 10px;">
+        Official SHA-256 digests are published in <a href="/releases">Releases</a> and <a href="https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/SHA256SUMS.txt">SHA256SUMS.txt</a>.
+      </p>
+    </div>
+
+  </div>
+</section>
+{% endblock %}

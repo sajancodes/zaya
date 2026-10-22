@@ -23,15 +23,14 @@ def _text(value: Any, default: str) -> str:
 
 
 def _default_config_path() -> Path:
-    """Absolute path to the app's own api_keys.json.
-
-    The old default was Path("config/api_keys.json") - relative to the
-    CURRENT WORKING DIRECTORY. Launched from anywhere but the project root
-    the registry silently found no config, registered every provider with
-    no credentials, and the router raised "No available or healthy
-    providers". memory.config_manager already resolves the same file
-    against the project root; this does the same.
-    """
+    """Absolute path to the app's own api_keys.json."""
+    try:
+        from core.runtime_paths import get_config_dir
+        cfg = get_config_dir() / "api_keys.json"
+        if cfg.is_file():
+            return cfg
+    except Exception:
+        pass
     project_root = Path(__file__).resolve().parent.parent.parent
     return project_root / "config" / "api_keys.json"
 
@@ -134,13 +133,16 @@ class ProviderRegistry:
             str(p).strip().lower() for p in raw_fallbacks if str(p).strip()
         ]
 
+        from core.security.key_vault import decrypt_secret
+        enc_map = data.get("encrypted_keys", {}) if isinstance(data.get("encrypted_keys"), dict) else {}
+
         # 1. Gemini
         gemini_keys = []
-        raw_keys = data.get("gemini_api_keys") or data.get("gemini_api_key") or data.get("api_key") or os.environ.get("GEMINI_API_KEY", "")
+        raw_keys = enc_map.get("gemini") or data.get("gemini_api_keys") or data.get("gemini_api_key") or data.get("api_key") or os.environ.get("GEMINI_API_KEY", "")
         if isinstance(raw_keys, list):
-            gemini_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+            gemini_keys = [decrypt_secret(str(k)).strip() for k in raw_keys if str(k).strip()]
         elif isinstance(raw_keys, str) and raw_keys.strip():
-            gemini_keys = [k.strip() for k in raw_keys.replace("\n", ",").split(",") if k.strip()]
+            gemini_keys = [decrypt_secret(k).strip() for k in raw_keys.replace("\n", ",").split(",") if k.strip()]
 
         self.register(ProviderConfig(
             name="gemini",
@@ -153,8 +155,8 @@ class ProviderRegistry:
         ))
 
         # 2. OpenAI
-        openai_key = data.get("openai_api_key") or data.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
-        openai_keys = [openai_key] if isinstance(openai_key, str) and openai_key.strip() else []
+        openai_key = enc_map.get("openai") or data.get("openai_api_key") or data.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
+        openai_keys = [decrypt_secret(str(openai_key)).strip()] if isinstance(openai_key, str) and openai_key.strip() else []
         self.register(ProviderConfig(
             name="openai",
             provider_type="openai",

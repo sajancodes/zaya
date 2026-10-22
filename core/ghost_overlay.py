@@ -77,7 +77,7 @@ def install_ghost_overlay(command_callback, parent=None):
                         self.hand_settings=HandSettingsPanel(parent)
                     if packet.get('mode') and hasattr(self.hand_settings, 'set_mode_ui'):
                         self.hand_settings.set_mode_ui(packet['mode'])
-                    self.hand_settings.show();self.hand_settings.raise_();self.hand_settings.activateWindow()
+                    self.hand_settings.showFullScreen();self.hand_settings.raise_();self.hand_settings.activateWindow()
                     return
                 if packet.get('passive_flush'):
                     with self.pending_lock:

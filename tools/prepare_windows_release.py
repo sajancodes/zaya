@@ -78,7 +78,7 @@ def prepare_windows_release(
     # Locate ISCC compiler
     compiler = Path(iscc_path) if iscc_path else find_iscc()
     if not compiler or not compiler.is_file():
-        raise RuntimeError("Inno Setup 6 compiler (ISCC.exe) not found. Install Inno Setup 6 to compile Zaya-Setup.exe.")
+        raise RuntimeError("Inno Setup 6 compiler (ISCC.exe) not found. Install Inno Setup 6 to compile ZayaSetup.exe.")
 
     iss_script = Path(__file__).resolve().parents[1] / "packaging" / "windows" / "Zaya.iss"
     if not iss_script.is_file():
@@ -95,9 +95,20 @@ def prepare_windows_release(
     ]
     subprocess.run(iscc_cmd, check=True)
 
-    installer = output_dir / "Zaya-Setup.exe"
+    installer = output_dir / "ZayaSetup.exe"
+    if not installer.is_file():
+        installer_alt = output_dir / "Zaya-Setup.exe"
+        if installer_alt.is_file():
+            installer = installer_alt
+
     if not installer.is_file():
         raise FileNotFoundError(f"Installer was not created: {installer}")
+
+    # Ensure both ZayaSetup.exe and Zaya-Setup.exe are available in output_dir
+    if installer.name == "ZayaSetup.exe":
+        shutil.copyfile(installer, output_dir / "Zaya-Setup.exe")
+    else:
+        shutil.copyfile(installer, output_dir / "ZayaSetup.exe")
 
     # Sign the final installer if certificate provided
     if cert_path and Path(cert_path).is_file():
@@ -133,21 +144,23 @@ def prepare_windows_release(
     if setup_txt.is_file():
         shutil.copy2(setup_txt, output_dir / "setup.txt")
 
-    print(f"Prepared Windows release: {installer.name} ({installer_size} bytes, sha256: {installer_hash})")
+    print(f"Windows release prepared: {installer.name} ({installer_size} bytes, SHA-256: {installer_hash})")
     return update_manifest
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Prepare Windows Zaya-Setup.exe and update manifest.")
-    parser.add_argument("--app-dir", required=True, help="Path to dist/windows/Zaya directory")
-    parser.add_argument("--output", required=True, help="Path to output distribution directory")
-    parser.add_argument("--version", default="0.5.0", help="Release version (e.g. 0.5.0)")
-    parser.add_argument("--build", type=int, default=10007, help="Monotonic build number")
-    parser.add_argument("--iscc", default=None, help="Path to ISCC.exe compiler")
-    parser.add_argument("--cert", default=None, help="Path to Authenticode code-signing PFX")
-    parser.add_argument("--cert-password", default=None, help="Password for Authenticode certificate")
+    from core.version import VERSION, BUILD
 
+    parser = argparse.ArgumentParser(description="Build Inno Setup installer and update metadata.")
+    parser.add_argument("--app-dir", required=True, help="Path to PyInstaller Zaya onedir output.")
+    parser.add_argument("--output", required=True, help="Destination directory for installer and manifest.")
+    parser.add_argument("--version", default=VERSION, help="Semantic version string.")
+    parser.add_argument("--build", type=int, default=BUILD, help="Integer build code.")
+    parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
+    parser.add_argument("--cert", default=None, help="Optional PFX certificate path.")
+    parser.add_argument("--cert-password", default=None, help="Password for PFX certificate.")
     args = parser.parse_args()
+
     prepare_windows_release(
         app_dir=args.app_dir,
         output_dir=args.output,

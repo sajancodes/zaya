@@ -65,8 +65,9 @@ def test_leaving_keyboard_revokes_typing_and_clears_modifiers():
     assert controller.keyboard.state == 'idle'
 
 
-def test_hand_controls_action_routing(monkeypatch):
+def test_hand_controls_action_routing(monkeypatch, tmp_path):
     from actions.hand_controls import hand_controls
+    monkeypatch.setattr('core.gesture.settings.PATH', tmp_path / 'hand_controls.json')
     controller = HandController()
     controller.tracker.state = 'ACTIVE'
     controller.last_start = ('dummy_model', 'NAVIGATION', 0, 24, True, 0.65, 1.0)

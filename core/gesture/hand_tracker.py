@@ -32,7 +32,7 @@ class HandTracker:
         if self.worker and self.worker.is_alive():
             raise RuntimeError('Stop the current camera before starting another.')
         if not Path(model_path).is_file():
-            raise ValueError('Install the MediaPipe Hand Landmarker .task model and supply its local path.')
+            raise ValueError('Hand Landmarker model not found')
         if Path(model_path).stat().st_size>20_000_000 or not 0<=int(device)<=31:
             raise ValueError('Hand model or camera device exceeds limits.')
         self.stop_event.clear()
@@ -64,9 +64,32 @@ class HandTracker:
         if self.worker:
             self.worker.join(3)
             if self.worker.is_alive() and self.child and self.child.poll() is None:
-                self.child.terminate();self.worker.join(1)
-        if not self.worker or not self.worker.is_alive():
-            self.state = 'OFF'
+                try:
+                    self.child.terminate()
+                except OSError:
+                    pass
+                self.worker.join(1)
+        if self.child is not None and self.child.poll() is None:
+            try:
+                self.child.terminate()
+                self.child.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    self.child.kill()
+                except OSError:
+                    pass
+        if self.child is not None:
+            for stream in (self.child.stdin, self.child.stdout, self.child.stderr):
+                if stream:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+        self.child = None
+        self.state = 'OFF'
+        self.error = ''
+        self.latest_frame = None
+        self.frame_event.set()
 
     def _run(self, model_path, device, fps, mirror,confidence=.65):
         from core.runtime_paths import find_hand_worker
@@ -139,7 +162,7 @@ class HandTracker:
             else:
                 cmd = [str(runtime), '-u', '-m', 'core.gesture.worker', str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]
             self.child=subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[2]),
-                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=flags)
+                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',bufsize=1,creationflags=flags)
             while not self.stop_event.is_set():
                 line=self.child.stdout.readline(1_500_001)
                 if not line:

@@ -11,7 +11,7 @@
 
 #define MyAppName "Zaya"
 #define MyAppPublisher "Sajan Rai"
-#define MyAppURL "https://github.com/sajancodes/zaya"
+#define MyAppURL "https://zaya.sajan.codes"
 #define MyAppExeName "Zaya.exe"
 #define SourceAppDir "..\..\dist\windows\Zaya"
 
@@ -27,7 +27,7 @@ AppUpdatesURL=https://github.com/sajancodes/zaya-companion-releases
 DefaultDirName={localappdata}\Programs\Zaya
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputBaseFilename=Zaya-Setup
+OutputBaseFilename=ZayaSetup
 OutputDir=..\..\dist\windows
 SetupIconFile=..\..\config\jarvis.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
