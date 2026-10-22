@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Callable
 
 from core import audit
+from core.event_bus import bus
 from core.execution_policy import (
     TRUST_AUTHENTICATED_REMOTE_OWNER,
     TRUST_LOCAL_OWNER,
@@ -234,7 +235,7 @@ class MissionStep:
 class Mission:
     id: str
     goal: str
-    status: str = "planning"  # planning, running, completed, completed_unverified, failed, blocked, cancelled, waiting_confirmation, paused, interrupted
+    status: str = "planning"  # planning, running, completed, completed_unverified, failed, blocked, cancelled, waiting_confirmation, waiting_clarification, waiting_external, paused, interrupted
     trust_level: str = TRUST_LOCAL_OWNER
     steps: list[dict[str, Any]] = field(default_factory=list)
     checks: list[str] = field(default_factory=list)
@@ -281,6 +282,21 @@ class MissionSupervisor:
         self._cancel_events: dict[str, threading.Event] = {}
         self._load()
 
+    @staticmethod
+    def _emit_progress(mission: Mission, stage: str, detail: str = "") -> None:
+        try:
+            bus.publish(
+                "mission.progress",
+                mission_id=mission.id,
+                goal=mission.goal,
+                status=mission.status,
+                stage=stage,
+                detail=str(detail)[:500],
+                step=mission.current_step,
+            )
+        except Exception:
+            pass
+
     def _load(self) -> None:
         with self._lock:
             if not self._path.exists():
@@ -301,9 +317,9 @@ class MissionSupervisor:
                         if m.status in ("running", "planning"):
                             m.status = "interrupted"
                             m.error = "Mission interrupted by system restart. Resume explicitly via continue."
-                        elif m.status == "waiting_confirmation":
+                        elif m.status in ("waiting_confirmation", "waiting_clarification", "waiting_external"):
                             m.status = "paused"
-                            m.error = "Pending confirmation preserved on restart. Approve or deny to continue."
+                            m.error = "Pending owner decision or external operation preserved on restart. Continue explicitly."
                         self._missions[m.id] = m
             except Exception as e:
                 logger.error("Corrupt or invalid missions.json at %s: %s", self._path, e)
@@ -328,8 +344,10 @@ class MissionSupervisor:
         if len(self._missions) <= keep:
             return
 
-        unfinished = {mid: m for mid, m in self._missions.items() if m.status in ("running", "planning", "interrupted", "paused", "waiting_confirmation")}
-        terminal = [m for m in self._missions.values() if m.status not in ("running", "planning", "interrupted", "paused", "waiting_confirmation")]
+        unfinished_states = ("running", "planning", "interrupted", "paused", "waiting_confirmation",
+                             "waiting_clarification", "waiting_external")
+        unfinished = {mid: m for mid, m in self._missions.items() if m.status in unfinished_states}
+        terminal = [m for m in self._missions.values() if m.status not in unfinished_states]
         terminal.sort(key=lambda m: m.created_at, reverse=True)
 
         keep_count = max(0, keep - len(unfinished))
@@ -429,6 +447,7 @@ class MissionSupervisor:
             self._cancel_events[mission_id] = cancel_event
             self._save()
 
+        self._emit_progress(mission, "started", f"{len(mission.steps)} planned steps")
         self._spawn_worker(mission_id, cancel_event, caller_trust)
         return mission
 
@@ -439,7 +458,9 @@ class MissionSupervisor:
         # Run one iteration of worker logic
         with self._lock:
             mission = self._missions.get(mission_id)
-            if not mission or mission.status in ("paused", "waiting_confirmation", "interrupted", "failed", "cancelled", "completed", "completed_unverified"):
+            if not mission or mission.status in ("paused", "waiting_confirmation", "waiting_clarification",
+                                                 "waiting_external", "interrupted", "failed", "cancelled",
+                                                 "completed", "completed_unverified"):
                 return
             step_to_run = None
             for s in mission.steps:
@@ -490,25 +511,65 @@ class MissionSupervisor:
                         "tool": tool_name,
                         "parameters": params,
                         "runtime_task_id": result.data.get('runtime_task_id'),
+                        "kind": "confirmation",
                     }
                     mission.updated_at = self._clock()
                     self._save()
+                    self._emit_progress(mission, "waiting_confirmation", result.summary)
             return
 
-        success = (result.status == "success")
+        status = str(result.status or "failed")
         result_text = str(result.summary or result.data or "")[:2000]
-        error_text = str(result.summary or "Tool execution failed")[:1000] if not success else ""
+        error_text = str(result.summary or "Tool execution failed")[:1000] if status == "failed" else ""
+
+        if status == "ambiguous":
+            with self._lock:
+                mission = self._missions.get(mission_id)
+                if mission:
+                    step_to_run["status"] = "pending"
+                    mission.status = "waiting_clarification"
+                    mission.pending_confirmation = {
+                        "step_id": step_id, "tool": tool_name,
+                        "parameters": params, "kind": "clarification",
+                    }
+                    mission.error = result.summary
+                    mission.updated_at = self._clock()
+                    self._save()
+                    self._emit_progress(mission, "waiting_clarification", result.summary)
+            return
+
+        if status == "started":
+            with self._lock:
+                mission = self._missions.get(mission_id)
+                if mission:
+                    for s in mission.steps:
+                        if s["id"] == step_id:
+                            s["status"] = "started"
+                            s["result"] = result_text
+                            s["error"] = ""
+                    mission.status = "waiting_external"
+                    mission.summary = f"Started: {result.summary}"
+                    mission.pending_confirmation = {
+                        "step_id": step_id, "tool": tool_name,
+                        "parameters": params, "kind": "external",
+                    }
+                    mission.updated_at = self._clock()
+                    self._save()
+                    self._emit_progress(mission, "started_external", result.summary)
+            return
 
         with self._lock:
             mission = self._missions.get(mission_id)
             if mission:
+                success = status == "success"
+                unverified = status == "partial"
                 for s in mission.steps:
                     if s["id"] == step_id:
-                        s["status"] = "completed" if success else "failed"
+                        s["status"] = "completed" if success else ("unverified" if unverified else "failed")
                         s["result"] = result_text
                         s["error"] = error_text
                 mission.updated_at = self._clock()
-                if not success:
+                if not success and not unverified:
                     if result.retryable and not result.side_effect and step_to_run.get('attempts', 0) < MAX_STEP_ATTEMPTS:
                         step_to_run["status"] = "pending"
                         step_to_run["error"] = f"Retryable error: {error_text}"
@@ -516,6 +577,8 @@ class MissionSupervisor:
                         mission.status = "failed"
                         mission.error = error_text
                 self._save()
+                self._emit_progress(mission, "step_complete" if success else "step_unverified",
+                                    f"{step_id}: {result.summary}")
 
     def _spawn_worker(self, mission_id: str, cancel_event: threading.Event, caller_trust: str) -> None:
         th = threading.Thread(
@@ -540,7 +603,9 @@ class MissionSupervisor:
                         mission.updated_at = self._clock()
                         self._save()
                         return
-                    if mission.status in ("paused", "waiting_confirmation", "interrupted", "failed", "cancelled", "completed", "completed_unverified"):
+                    if mission.status in ("paused", "waiting_confirmation", "waiting_clarification",
+                                          "waiting_external", "interrupted", "failed", "cancelled",
+                                          "completed", "completed_unverified"):
                         return
 
                 step_to_run = None
@@ -596,27 +661,71 @@ class MissionSupervisor:
                                 "tool": tool_name,
                                 "parameters": params,
                                 "runtime_task_id": result.data.get('runtime_task_id'),
+                                "kind": "confirmation",
                             }
                             mission.updated_at = self._clock()
                             self._save()
+                            self._emit_progress(mission, "waiting_confirmation", result.summary)
                     return
 
-                # Treat tool result as untrusted evidence
-                success = (result.status == "success")
+                # Treat tool output as untrusted evidence, not as an instruction.
+                status = str(result.status or "failed")
                 result_text = str(result.summary or result.data or "")[:2000]
-                error_text = str(result.summary or "Tool execution failed")[:1000] if not success else ""
+                error_text = str(result.summary or "Tool execution failed")[:1000] if status == "failed" else ""
+
+                if status == "ambiguous":
+                    with self._lock:
+                        mission = self._missions.get(mission_id)
+                        if mission:
+                            step_to_run["status"] = "pending"
+                            mission.status = "waiting_clarification"
+                            mission.pending_confirmation = {
+                                "step_id": step_id,
+                                "tool": tool_name,
+                                "parameters": params,
+                                "kind": "clarification",
+                            }
+                            mission.error = result.summary
+                            mission.updated_at = self._clock()
+                            self._save()
+                            self._emit_progress(mission, "waiting_clarification", result.summary)
+                    return
+
+                if status == "started":
+                    with self._lock:
+                        mission = self._missions.get(mission_id)
+                        if mission:
+                            for s in mission.steps:
+                                if s["id"] == step_id:
+                                    s["status"] = "started"
+                                    s["result"] = result_text
+                                    s["error"] = ""
+                            mission.status = "waiting_external"
+                            mission.summary = f"Started: {result.summary}"
+                            mission.pending_confirmation = {
+                                "step_id": step_id,
+                                "tool": tool_name,
+                                "parameters": params,
+                                "kind": "external",
+                            }
+                            mission.updated_at = self._clock()
+                            self._save()
+                            self._emit_progress(mission, "started_external", result.summary)
+                    return
 
                 with self._lock:
                     mission = self._missions.get(mission_id)
                     if mission:
+                        success = status == "success"
+                        unverified = status == "partial"
                         for s in mission.steps:
                             if s["id"] == step_id:
-                                s["status"] = "completed" if success else "failed"
+                                s["status"] = "completed" if success else ("unverified" if unverified else "failed")
                                 s["result"] = result_text
                                 s["error"] = error_text
                         mission.updated_at = self._clock()
 
-                        if not success:
+                        if not success and not unverified:
                             # Check retryability
                             if result.retryable and not result.side_effect and step_to_run.get('attempts', 0) < MAX_STEP_ATTEMPTS:
                                 step_to_run["status"] = "pending"
@@ -625,8 +734,12 @@ class MissionSupervisor:
                                 mission.status = "failed"
                                 mission.error = error_text
                                 self._save()
+                                self._emit_progress(mission, "failed", error_text)
                                 return
                         self._save()
+                        self._emit_progress(
+                            mission, "step_complete" if success else "step_unverified",
+                            f"{step_id}: {result.summary}")
 
         finally:
             trust_context.reset(token)
@@ -676,7 +789,9 @@ class MissionSupervisor:
                 operator.execute(
                     name=tool_name,
                     invoke=_invoke,
+                    request_id=f"mission-{uuid.uuid4().hex[:10]}",
                     goal=goal,
+                    arguments=dict(params or {}),
                     trust_level=trust_level,
                 )
             )
@@ -716,20 +831,24 @@ class MissionSupervisor:
             if not mission:
                 return
 
-            all_steps_ok = all(s.get("status") == "completed" for s in mission.steps)
+            step_statuses = [str(s.get("status") or "") for s in mission.steps]
+            all_steps_ok = all(value in {"completed", "unverified"} for value in step_statuses)
+            has_unverified = any(value == "unverified" for value in step_statuses)
             if all_steps_ok:
-                if verification_passed:
+                if verification_passed and not has_unverified:
                     mission.status = "completed"
                     mission.summary = f"Execution succeeded and verified: {verif_detail}"
                 else:
                     mission.status = "completed_unverified"
-                    mission.summary = f"Execution succeeded but verification inconclusive: {verif_detail}"
+                    reason = "one or more steps only reported dispatch" if has_unverified else verif_detail
+                    mission.summary = f"Execution finished without full proof: {reason}"
             else:
                 mission.status = "failed"
                 mission.summary = "One or more steps failed execution."
 
             mission.updated_at = self._clock()
             self._save()
+            self._emit_progress(mission, "finished", mission.summary)
 
     def _verify_checks(self, mission: Mission) -> tuple[bool, str]:
         """Verify real deterministic outcomes from checks."""
@@ -858,10 +977,118 @@ class MissionSupervisor:
                 mission.updated_at = self._clock()
                 self._save()
 
-            elif mission.status in ("interrupted", "paused"):
+            elif mission.status == "waiting_clarification":
+                if not approved:
+                    mission.status = "cancelled"
+                    mission.error = "Clarification was not provided; mission cancelled."
+                    mission.updated_at = self._clock()
+                    self._save()
+                    return ToolResult("success", f"Mission {mission_id} cancelled.",
+                                      {"mission": mission.public()}, side_effect=True)
+                pending = mission.pending_confirmation or {}
+                for step in mission.steps:
+                    if step["id"] == pending.get("step_id") and step.get("status") == "pending":
+                        step["error"] = "Owner continued after clarification."
+                mission.pending_confirmation = None
                 mission.status = "running"
                 mission.updated_at = self._clock()
                 self._save()
+
+            elif mission.status == "waiting_external":
+                if not approved:
+                    mission.status = "paused"
+                    mission.updated_at = self._clock()
+                    self._save()
+                    return ToolResult("success", f"Mission {mission_id} paused while the external operation continues.",
+                                      {"mission": mission.public()}, side_effect=True)
+                pending = mission.pending_confirmation or {}
+                for step in mission.steps:
+                    if step["id"] == pending.get("step_id") and step.get("status") == "started":
+                        step["status"] = "completed"
+                        step["result"] = (step.get("result") or "") + " Owner confirmed continuation after external start."
+                mission.pending_confirmation = None
+                mission.status = "running"
+                mission.updated_at = self._clock()
+                self._save()
+
+            elif mission.status in ("interrupted", "paused"):
+                pending = mission.pending_confirmation or {}
+                kind = str(pending.get("kind") or "")
+                if kind == "confirmation":
+                    if not approved:
+                        return ToolResult("success", f"Mission {mission_id} remains paused.",
+                                          {"mission": mission.public()}, side_effect=True)
+                    # A restart pauses the mission, but it must not bypass the
+                    # real confirmation gate. Only the originating runtime task
+                    # can prove that the owner approved the action.
+                    task_id = pending.get("runtime_task_id")
+                    if not task_id:
+                        return ToolResult(
+                            "waiting_confirmation",
+                            "Use the actual confirmation interface; this paused mission has no verified approval result.",
+                        )
+                    from core.task_runtime import get_runtime
+                    try:
+                        task = get_runtime().get(task_id)
+                    except KeyError:
+                        task = None
+                    if task is not None and task.state in {"cancelled", "failed"}:
+                        mission.status = task.state
+                        mission.error = task.error or "The confirmed operation did not complete."
+                        self._save()
+                        return ToolResult("failed", mission.error)
+                    if task is not None and task.state == "waiting_confirmation":
+                        return ToolResult(
+                            "waiting_confirmation",
+                            "The actual confirmation is still pending. Confirm on the interface, then continue.",
+                        )
+                    if task is None or task.state == "paused":
+                        # The interface gate lives in memory, so a restart loses
+                        # the pending banner. Re-issue the step instead of
+                        # marking it complete; the tool will go through the real
+                        # confirmation gate again.
+                        for step in mission.steps:
+                            if step.get("id") == pending.get("step_id"):
+                                step["status"] = "pending"
+                                step["result"] = ""
+                                step["error"] = "Restarted before approval; the confirmation will be requested again."
+                        mission.pending_confirmation = None
+                        mission.status = "running"
+                        mission.updated_at = self._clock()
+                        self._save()
+                    elif task.state == "completed":
+                        for step in mission.steps:
+                            if step.get("id") == pending.get("step_id"):
+                                step["status"] = "completed"
+                                step["result"] = "Completion recorded by the confirmed operator task."
+                        mission.pending_confirmation = None
+                        mission.status = "running"
+                        mission.updated_at = self._clock()
+                        self._save()
+                    else:
+                        return ToolResult(
+                            "waiting_confirmation",
+                            "The actual confirmation is still pending. Confirm on the interface, then continue.",
+                        )
+                else:
+                    if not approved:
+                        return ToolResult("success", f"Mission {mission_id} remains paused.",
+                                          {"mission": mission.public()}, side_effect=True)
+                    if kind == "external":
+                        # A restart pauses the mission. An explicit owner
+                        # continue is the acknowledgement that the externally
+                        # started step may be recorded as finished; otherwise
+                        # the worker would later treat the untouched "started"
+                        # step as a failure.
+                        for step in mission.steps:
+                            if step.get("id") == pending.get("step_id") and step.get("status") == "started":
+                                step["status"] = "completed"
+                                step["result"] = (step.get("result") or "") + (
+                                    " Owner confirmed continuation after external start.")
+                    mission.pending_confirmation = None
+                    mission.status = "running"
+                    mission.updated_at = self._clock()
+                    self._save()
 
             else:
                 return ToolResult("failed", f"Mission {mission_id} is in status '{mission.status}' and cannot be continued.")

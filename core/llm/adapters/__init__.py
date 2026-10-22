@@ -18,6 +18,13 @@ ADAPTER_MAP = {
     "openrouter": OpenRouterAdapter,
     "groq": GroqAdapter,
     "deepseek": DeepSeekAdapter,
+    "mistral": OpenAIBaseAdapter,
+    "xai": OpenAIBaseAdapter,
+    "together": OpenAIBaseAdapter,
+    "cerebras": OpenAIBaseAdapter,
+    "lmstudio": OpenAIBaseAdapter,
+    "llamacpp": OpenAIBaseAdapter,
+    "vllm": OpenAIBaseAdapter,
     "ollama": OllamaAdapter,
     "compatible": CompatibleEndpointAdapter,
 }

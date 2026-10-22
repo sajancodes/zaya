@@ -65,6 +65,22 @@ class OllamaAdapter(BaseAdapter):
 
             if images:
                 item["images"] = images
+            # Ollama's native /api/chat uses tool_name rather than OpenAI's
+            # tool_call_id, and the assistant turn must retain the calls it
+            # made or the following tool result has no context.
+            if msg.name:
+                item["tool_name"] = msg.name
+            if msg.tool_calls:
+                item["tool_calls"] = [
+                    {
+                        "function": {
+                            "name": call.name,
+                            "arguments": call.arguments if isinstance(call.arguments, dict)
+                            else {"value": str(call.arguments)},
+                        }
+                    }
+                    for call in msg.tool_calls
+                ]
             formatted.append(item)
         return formatted
 

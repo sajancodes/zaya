@@ -133,7 +133,8 @@ class TaskRuntime:
                 # Keep evidence of a late side effect without undoing cancellation.
                 return self._save(task, event=None)
             state = {'success': 'completed', 'failed': 'failed', 'partial': 'waiting_external',
-                     'cancelled': 'cancelled', 'waiting_confirmation': 'waiting_confirmation'}.get(result.status, 'failed')
+                     'cancelled': 'cancelled', 'waiting_confirmation': 'waiting_confirmation',
+                     'ambiguous': 'waiting_confirmation', 'started': 'waiting_external'}.get(result.status, 'failed')
             return self.transition(task_id, state, evidence=task.evidence, side_effects=task.side_effects,
                                    error=result.summary if state == 'failed' else None)
 

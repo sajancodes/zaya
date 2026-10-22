@@ -398,11 +398,76 @@ def _keep_context_of(exc: BaseException) -> bool:
     return True
 
 
+class _LocalSession:
+    """Session-shaped facade over the modular pipeline.
+
+    Dashboard, notifications and phone commands already speak this interface.
+    Keeping the shape means those systems do not need a second code path just
+    because the live model is replaced by local STT -> LLM -> TTS.
+    """
+
+    def __init__(self, host: "JarvisLive"):
+        self.host = host
+        self._video_warned = False
+
+    async def send_client_content(self, turns=None, turn_complete=True, **kwargs):
+        parts = []
+        if isinstance(turns, dict):
+            parts = turns.get("parts") or []
+        elif isinstance(turns, list):
+            for turn in turns:
+                if isinstance(turn, dict):
+                    parts.extend(turn.get("parts") or [])
+        text_parts = []
+        image_parts = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            if isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+            if part.get("inline_data") or part.get("inlineData"):
+                image_parts.append(part)
+        pipeline = getattr(self.host, "_local_pipeline", None)
+        if pipeline is None:
+            return None
+        text = "\n".join(value for value in text_parts if value.strip()).strip()
+        if image_parts and not self._video_warned:
+            self._video_warned = True
+            self.host.ui.write_log(
+                "SYS: The modular engine does not process images yet; "
+                "the text part was kept."
+            )
+        if text:
+            await pipeline.submit_text(text, source="injected")
+        return None
+
+    async def send_realtime_input(self, **kwargs):
+        # Phone microphone audio is fed into out_queue by _relay_phone_audio
+        # before it reaches the engine. Video is optional and has no equivalent
+        # in the text/audio pipeline, so it is reported once rather than
+        # pretending it was analyzed.
+        if (kwargs.get("video") or kwargs.get("media")) and not self._video_warned:
+            self._video_warned = True
+            self.host.ui.write_log(
+                "SYS: The modular engine does not process camera video yet; "
+                "audio continues."
+            )
+        return None
+
+    async def send_tool_response(self, **kwargs):
+        return None
+
+    async def close(self):
+        return None
+
+
 class JarvisLive:
     def __init__(self, ui: JarvisUI):
         self.ui             = ui
         self._asst_name     = "Zaya"
         self.session              = None
+        self._local_pipeline      = None
+        self._local_caption       = ""
         self.audio_in_queue       = None
         self.out_queue            = None
         self._loop                     = None
@@ -749,6 +814,13 @@ class JarvisLive:
         from core.execution_policy import TRUST_LOCAL_OWNER
         actual_trust = trust or TRUST_LOCAL_OWNER
         self._begin_owner_goal(text, trust=actual_trust)
+        with self._speaking_lock:
+            speaking = self._is_speaking
+        if speaking:
+            # A typed request is a deliberate barge-in too. Clear queued audio
+            # before the next answer so the old sentence cannot play over it.
+            self.interrupt()
+        self.ui.write_log(f"You: {text}")
         asyncio.run_coroutine_threadsafe(
             self._send_owner_text(text),
             self._loop
@@ -863,6 +935,9 @@ class JarvisLive:
         # owner's next response even though the server was never speaking.
         self._interrupted = not getattr(self, '_notification_active', False)
         self._notification_active = False
+        local = getattr(self, '_local_pipeline', None)
+        if local is not None:
+            local.interrupt()
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -961,7 +1036,8 @@ class JarvisLive:
             ),
         })
 
-        parts = [time_ctx, identity_ctx]
+        from core.security.untrusted_content import boundary_prompt
+        parts = [time_ctx, identity_ctx, boundary_prompt()]
         from core.zayabar_config import emotion_tones
         parts.append('[VOICE AND FACE DELIVERY]\nUse the same selected emotion for your face and your Nika voice.\n' +
                      '\n'.join(f'{emotion}: {tone}' for emotion, tone in emotion_tones().items()))
@@ -1131,17 +1207,23 @@ class JarvisLive:
             with with_trust(effective):
                 result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
                                                                goal=goal or fc.name,
-                                                               trust_level=trust or '')
+                                                               trust_level=trust or '',
+                                                               arguments=dict(fc.args or {}))
         finally:
             self._tools_active -= 1
             self._last_tool_end = time.monotonic()
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
-        response.response["result"] = result.to_dict()
+        from core.security.untrusted_content import mark_tool_result
+        response.response["result"] = mark_tool_result(result.to_dict(), fc.name)
+        if result.status in {'started', 'partial'}:
+            from core.event_bus import bus as _bus
+            _bus.publish('tool.progress', tool=fc.name, status=result.status,
+                         summary=result.summary, data=result.data)
         # An individual tool can be only an inspection step in a larger goal.
         # Leave the originating remote request acknowledged until a scoped
         # whole-goal completion exists; a tool receipt must not claim it is done.
-        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
+        if result.status in {'success', 'started'} and (fc.name in {'dev_agent', 'code_helper'}
                 or (fc.name == 'coding_job' and dict(fc.args or {}).get('action') in {'start', 'continue'})
                 or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
                     {'stage', 'commit', 'push', 'pull', 'checkout', 'create_branch'})):
@@ -1201,7 +1283,18 @@ class JarvisLive:
                 import time as _t_mod
                 _now = _t_mod.monotonic()
                 _cooldown = 4.0  # seconds — covers echo window after speaking ends
-                if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
+                local_engine = getattr(self, "_local_pipeline", None)
+                if local_engine is not None and not local_engine.capabilities.supports_images:
+                    from core.tool_result import ToolResult
+                    result = ToolResult(
+                        "failed",
+                        "Visual capture is unavailable in the modular engine; it "
+                        "handles text and microphone audio only. Switch to Gemini "
+                        "Live for screen or camera analysis.",
+                        {"capability": "vision", "executed": False},
+                        retryable=False,
+                    )
+                elif self._vision_busy or (_now - self._vision_last_time) < _cooldown:
                     _wait = max(0, _cooldown - (_now - self._vision_last_time))
                     print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
                     result = "Vision is still processing the previous request. I will not call this again."
@@ -1344,7 +1437,10 @@ class JarvisLive:
                 self.ui.stop_camera_stream()
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
-            self.speak_error(name, e)
+            # Keep the exact component failure in logs and the tool result.
+            # Do not inject a generic spoken "operator task failed" line into
+            # the conversation; the model can report the actual result once.
+            self.ui.write_log(f"ERR: {name} — {type(e).__name__}: {e}")
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -2470,6 +2566,236 @@ class JarvisLive:
                 print(f"[Dashboard] Command error: {e}")
                 get_gate().complete(request_id, ok=False, error=str(e))
 
+    # ── modular engine ──────────────────────────────────────────────────────
+
+    def _local_on_user_text(self, text: str, language: str, source: str) -> None:
+        self._last_user_speech = time.monotonic()
+        self._local_caption = ""
+        if source == "microphone":
+            from core.execution_policy import (
+                TRUST_AUTHENTICATED_REMOTE_OWNER, TRUST_LOCAL_OWNER,
+            )
+            trust = (TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
+                     else TRUST_LOCAL_OWNER)
+            self._begin_owner_goal(text, trust=trust)
+            self.ui.write_log(f"You: {text}")
+            self._session_log.append(f"User: {text}")
+            asyncio.create_task(self._conversation_write("append", "user", text))
+            from core.event_bus import bus
+            bus.publish("owner.message", text=text, source="local_voice")
+            if self._dashboard:
+                asyncio.create_task(self._dashboard.broadcast({
+                    "type": "log", "speaker": "user", "text": text,
+                }))
+
+    def _local_on_state(self, state: str) -> None:
+        if state == "SPEAKING":
+            self.set_speaking(True)
+        elif state == "THINKING":
+            self.ui.set_state("THINKING")
+            from core.event_bus import bus
+            bus.publish("avatar.caption", text="Thinking…")
+        elif state == "LISTENING" and not self._is_speaking:
+            self.ui.set_state("SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING")
+
+    def _local_on_delta(self, text: str) -> None:
+        if not text:
+            return
+        self._local_caption += text
+        from core.event_bus import bus
+        bus.publish("avatar.caption", text=self._local_caption)
+        try:
+            self._visemes.feed_text(text)
+        except Exception:
+            pass
+
+    def _local_on_display_final(self, text: str) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        self._local_caption = value
+        self._last_out_logged = value
+        asyncio.create_task(self._conversation_write("append", "model", value))
+        self.ui.write_log(f"{self._asst_name}: {value}")
+        self._session_log.append(f"{self._asst_name}: {value}")
+        from core.event_bus import bus
+        bus.publish("zaya.message", text=value)
+        if self._dashboard:
+            asyncio.create_task(self._dashboard.broadcast({
+                "type": "log", "speaker": "jarvis", "text": value,
+            }))
+        self._owner_request_pending = False
+        self._owner_turn_pending = False
+
+    def _local_on_tool_result(self, name: str, result) -> None:
+        from core.event_bus import bus
+        bus.publish("tool.progress", tool=name, status=result.status,
+                    summary=result.summary, data=result.data)
+        if result.status in {"failed", "partial", "started"}:
+            self.ui.write_log(f"SYS: {name} — {result.summary}")
+
+    def _local_on_error(self, message: str) -> None:
+        text = str(message or "Unknown local engine error")
+        print(f"[Zaya/local] {text}")
+        self.ui.write_log(f"ERR: {text}")
+
+    def _local_on_readiness(self, state: dict) -> None:
+        from core.ai.settings import write_readiness
+        write_readiness(state)
+        self._local_readiness = dict(state)
+
+    def _local_on_timing(self, values: dict) -> None:
+        if not getattr(self, "_local_timing_enabled", True):
+            return
+        payload = {
+            "time": round(time.time(), 3),
+            "engine": "local_pipeline",
+            "provider": str(values.get("provider") or ""),
+            "stt_ms": values.get("stt_ms"),
+            "llm_first_text_ms": values.get("llm_first_text_ms"),
+            "turn_ms": values.get("turn_ms"),
+            "tts": values.get("tts"),
+        }
+        path = BASE_DIR / "logs" / "runtime" / "local_pipeline_timings.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > 2_000_000:
+                path.replace(path.with_suffix(".jsonl.1"))
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    async def _execute_pipeline_tool(self, name: str, arguments: dict):
+        from types import SimpleNamespace
+        from core.tool_result import normalize
+        import uuid as _uuid
+        call = SimpleNamespace(
+            id=f"local_{_uuid.uuid4().hex[:10]}",
+            name=name,
+            args=dict(arguments or {}),
+        )
+        try:
+            response = await self._execute_tool(
+                call, owner_scope=self._operator_scope,
+                owner_goal=self._operator_goal)
+            payload = getattr(response, "response", {}) or {}
+            return normalize(payload.get("result", payload))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            return normalize({"status": "failed", "summary": f"{name} failed: {type(error).__name__}: {error}"})
+
+    def _local_tool_declarations(self):
+        return (TOOL_DECLARATIONS
+                + self._action_registry.get_tool_declarations()
+                + self._plugin_registry.get_tool_declarations())
+
+    async def _run_local_engine(self):
+        from core.ai.pipeline import LocalConversationPipeline, PipelineCallbacks
+        from core.ai.runtime import build_local_runtime
+        from core.ai.settings import local_pipeline_settings, write_readiness
+
+        while not getattr(self, "_shutdown_requested", False):
+            pipeline = None
+            try:
+                values = local_pipeline_settings()
+                self._local_timing_enabled = bool(values.timings)
+                self.ui.set_state("CONNECTING")
+                self.ui.write_log(
+                    f"SYS: Modular engine — {values.provider} / {values.stt_model} / {values.tts_provider}.")
+                bundle = build_local_runtime(values)
+                self.session = _LocalSession(self)
+                self.audio_in_queue = asyncio.Queue()
+                self.out_queue = asyncio.Queue(maxsize=16)
+                self._turn_done_event = asyncio.Event()
+                self._interrupted = False
+                self._notification_active = False
+                self._owner_request_pending = False
+                self._owner_turn_pending = False
+                self._active_selective_audio = False
+                config = self._build_config()
+                pipeline = LocalConversationPipeline(
+                    stt=bundle.stt,
+                    tts=bundle.tts,
+                    llm=bundle.llm,
+                    provider=bundle.provider,
+                    settings=values,
+                    input_queue=self.out_queue,
+                    audio_queue=self.audio_in_queue,
+                    tool_executor=self._execute_pipeline_tool,
+                    tool_declarations=self._local_tool_declarations(),
+                    system_prompt=(config.system_instruction or ""),
+                    callbacks=PipelineCallbacks(
+                        on_state=self._local_on_state,
+                        on_user_text=self._local_on_user_text,
+                        on_display_delta=self._local_on_delta,
+                        on_display_final=self._local_on_display_final,
+                        on_tool_result=self._local_on_tool_result,
+                        on_error=self._local_on_error,
+                        on_readiness=self._local_on_readiness,
+                        on_timing=self._local_on_timing,
+                        is_speaking=lambda: self._is_speaking,
+                    ),
+                )
+                self._local_pipeline = pipeline
+                readiness = await pipeline.warmup()
+                write_readiness(readiness)
+                if not readiness.get("LLM_READY"):
+                    self.ui.write_log("ERR: Local LLM is not ready. — keeping typed input available.")
+                if not readiness.get("STT_READY"):
+                    self.ui.write_log("SYS: Voice input is unavailable; typed commands still work.")
+                if not readiness.get("TTS_READY"):
+                    self.ui.write_log("SYS: Voice output is unavailable; text replies still work.")
+                ready_note = "SYS: Modular engine ready."
+                if not readiness.get("STT_READY"):
+                    ready_note += " STT unavailable."
+                if not readiness.get("TTS_READY"):
+                    ready_note += " TTS unavailable."
+                self.ui.write_log(ready_note)
+                if self._wake_enabled:
+                    self._ensure_wake_detector()
+                    self._awake = False
+                    self.ui.set_state("SLEEPING")
+                else:
+                    self._awake = True
+                    self.ui.set_state("LISTENING")
+                if self._dashboard:
+                    await self._dashboard.broadcast({"type": "status", "state": "active"})
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(self._listen_audio())
+                    tg.create_task(self._play_audio())
+                    tg.create_task(self._run_system_monitor())
+                    tg.create_task(self._run_background_monitor())
+                    tg.create_task(self._run_proactive_mode())
+                    tg.create_task(self._run_sleep_watch())
+                    if self._dashboard:
+                        tg.create_task(self._relay_phone_audio())
+                        tg.create_task(self._relay_phone_video())
+                    tg.create_task(pipeline.run())
+            except asyncio.CancelledError:
+                raise
+            except KeyboardInterrupt:
+                raise
+            except Exception as error:
+                # TaskGroup wraps the failing service. Report the actual cause
+                # (for example "STT failed (...)" or "LLM failed: provider")
+                # instead of a generic ExceptionGroup.
+                root = error
+                while isinstance(root, BaseExceptionGroup) and root.exceptions:
+                    root = root.exceptions[0]
+                self.ui.write_log(f"ERR: Modular engine stopped — {type(root).__name__}: {root}")
+                self.ui.set_state("SLEEPING")
+                await asyncio.sleep(8)
+            finally:
+                self._local_pipeline = None
+                if pipeline is not None:
+                    try:
+                        await pipeline.stop()
+                    except Exception:
+                        pass
+                self.session = None
+
     # ── main loop ───────────────────────────────────────────────────────────
 
     async def run(self):
@@ -2533,6 +2859,11 @@ class JarvisLive:
             lambda: owner_is_away(phone_call_settings().away_seconds))
         self._calls.set_reachable_provider(self._phone_reachable)
         self._calls.set_available_provider(lambda: self.session is not None)
+
+        from core.ai.settings import engine_mode
+        if engine_mode() == "local_pipeline":
+            await self._run_local_engine()
+            return
 
         while True:
             _resumed_with = False
@@ -2794,8 +3125,10 @@ class JarvisLive:
 def _run_desktop_agent(ui, stopping):
     agent = None
     try:
-        if not ui.wait_for_api_key(stopping):
-            return
+        from core.ai.settings import engine_mode
+        if engine_mode() != "local_pipeline":
+            if not ui.wait_for_api_key(stopping):
+                return
         agent = JarvisLive(ui)
         if not stopping.is_set():
             asyncio.run(agent.run())

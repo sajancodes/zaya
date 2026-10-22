@@ -70,11 +70,24 @@ class RoutingPolicy:
         task: Optional[str] = None,
         preferred_provider: Optional[str] = None,
         require_multimodal: bool = False,
+        allow_failover: bool = True,
     ) -> List[ProviderConfig]:
-        """Returns ordered list of available ProviderConfigs eligible for routing."""
+        """Returns ordered list of available ProviderConfigs eligible for routing.
+
+        ``allow_failover=False`` is stricter than simply taking the first
+        healthy candidate: a preferred provider that is missing or
+        unconfigured must produce an empty list, never a silent request to a
+        different provider.
+        """
         all_providers = list(self.registry.providers.values())
         if not all_providers:
             return []
+
+        preferred = self.registry.get(preferred_provider) if preferred_provider else None
+        if preferred_provider and not allow_failover:
+            if preferred is None or not preferred.configured:
+                return []
+            all_providers = [preferred]
 
         def sort_key(p: ProviderConfig):
             # 1. Explicitly preferred provider gets highest priority
@@ -93,8 +106,30 @@ class RoutingPolicy:
 
         sorted_providers = sorted(all_providers, key=sort_key)
 
+        primary = self.registry.get(self.registry.primary_provider)
+        # Local-only privacy applies when the selected provider is local, or
+        # when no provider was selected and the configured primary is local.
+        # An explicitly selected remote provider must remain a candidate even
+        # if some other local provider is installed; otherwise choosing a
+        # cloud provider in the modular engine would silently produce no
+        # provider at all.
+        privacy_local = bool(
+            not self.registry.allow_cloud_fallback
+            and ((preferred is not None and preferred.local)
+                 or (preferred is None and primary is not None and primary.local))
+        )
+
         candidates = []
         for p in sorted_providers:
+            # An endpoint without a key or a local address is not a candidate.
+            # Listing every known provider must never mean sending a request to
+            # one the owner never configured.
+            if not p.configured:
+                logger.debug(f"Skipping {p.name}: not configured")
+                continue
+            if privacy_local and not p.local:
+                logger.debug(f"Skipping {p.name}: local-only privacy policy")
+                continue
             # Check cooldown
             if self.cooldown.is_cooling(p.name):
                 logger.debug(f"Skipping {p.name}: cooling down")
@@ -104,7 +139,7 @@ class RoutingPolicy:
                 logger.debug(f"Skipping {p.name}: circuit breaker open")
                 continue
             # If multimodal is required, ensure provider supports it
-            if require_multimodal and p.provider_type not in ("gemini", "openai", "openrouter"):
+            if require_multimodal and not p.capabilities.get("vision", False):
                 continue
             candidates.append(p)
 

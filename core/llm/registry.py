@@ -35,23 +35,10 @@ def _default_config_path() -> Path:
     return project_root / "config" / "api_keys.json"
 
 
-DEFAULT_BASE_URLS = {
-    "gemini": "https://generativelanguage.googleapis.com",
-    "openai": "https://api.openai.com/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "groq": "https://api.groq.com/openai/v1",
-    "deepseek": "https://api.deepseek.com/v1",
-    "ollama": "http://localhost:11434",
-}
+from core.providers.catalog import PROVIDER_SPECS, provider_spec
 
-DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash",
-    "openai": "gpt-4o-mini",
-    "openrouter": "google/gemini-2.5-flash",
-    "groq": "llama-3.3-70b-versatile",
-    "deepseek": "deepseek-chat",
-    "ollama": "llama3.2",
-}
+DEFAULT_BASE_URLS = {key: spec.base_url for key, spec in PROVIDER_SPECS.items()}
+DEFAULT_MODELS = {key: spec.model for key, spec in PROVIDER_SPECS.items()}
 
 
 @dataclass
@@ -66,14 +53,54 @@ class ProviderConfig:
     priority: int = 100
     task_affinity: List[str] = field(default_factory=list)  # e.g. ["fast", "vision", "reasoning", "code"]
     active_key_index: int = 0
+    label: str = ""
+    local: bool = False
+    requires_key: bool = True
+    capabilities: Dict[str, Any] = field(default_factory=dict)
+    max_tools: int = 16
+    max_tool_schema_chars: int = 18000
+    settings_fields: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.provider_type:
             self.provider_type = self.name.lower()
+        spec = provider_spec(self.name) or provider_spec(self.provider_type)
+        if spec is not None:
+            if not self.base_url:
+                self.base_url = spec.base_url
+            if not self.model:
+                self.model = spec.model
+            if not self.label:
+                self.label = spec.label
+            self.local = bool(self.local or spec.local)
+            self.requires_key = bool(self.requires_key and spec.requires_key)
+            if not self.task_affinity:
+                self.task_affinity = list(spec.task_affinity)
+            if self.max_tools == 16:
+                self.max_tools = spec.max_tools
+            if self.max_tool_schema_chars == 18000:
+                self.max_tool_schema_chars = spec.max_tool_schema_chars
+            if not self.capabilities:
+                self.capabilities = {
+                    "tools": spec.supports_tools,
+                    "vision": spec.supports_vision,
+                    "streaming": spec.supports_streaming,
+                    "local": spec.local,
+                }
+            if not self.settings_fields:
+                self.settings_fields = spec.settings
         if not self.base_url:
             self.base_url = DEFAULT_BASE_URLS.get(self.provider_type, "")
         if not self.model:
             self.model = DEFAULT_MODELS.get(self.provider_type, "")
+        if not self.label:
+            self.label = self.name
+
+    @property
+    def configured(self) -> bool:
+        if self.local and not self.requires_key:
+            return bool(self.base_url or self.provider_type == "ollama")
+        return bool(self.api_key) and bool(self.base_url)
 
     @property
     def api_key(self) -> str:
@@ -95,6 +122,7 @@ class ProviderRegistry:
         self.providers: Dict[str, ProviderConfig] = {}
         self.primary_provider: str = "gemini"
         self.fallback_chain: List[str] = []
+        self.allow_cloud_fallback: bool = True
 
     def register(self, config: ProviderConfig) -> None:
         self.providers[config.name] = config
@@ -128,91 +156,80 @@ class ProviderRegistry:
         if isinstance(raw_fallbacks, str):
             raw_fallbacks = re.split(r"[,\s]+", raw_fallbacks)
         elif not isinstance(raw_fallbacks, (list, tuple)):
-            raw_fallbacks = ["gemini", "openai", "openrouter", "groq", "deepseek", "ollama"]
+            raw_fallbacks = [key for key in PROVIDER_SPECS if key != "custom"]
         self.fallback_chain = [
             str(p).strip().lower() for p in raw_fallbacks if str(p).strip()
         ]
 
         from core.security.key_vault import decrypt_secret
         enc_map = data.get("encrypted_keys", {}) if isinstance(data.get("encrypted_keys"), dict) else {}
+        engine_mode = str(data.get("engine_mode") or "gemini_live").strip().lower()
+        raw_cloud = data.get("allow_cloud_fallback")
+        self.allow_cloud_fallback = (
+            bool(raw_cloud) if isinstance(raw_cloud, bool)
+            else engine_mode not in {"local", "local_pipeline", "offline"}
+        )
 
-        # 1. Gemini
-        gemini_keys = []
-        raw_keys = enc_map.get("gemini") or data.get("gemini_api_keys") or data.get("gemini_api_key") or data.get("api_key") or os.environ.get("GEMINI_API_KEY", "")
-        if isinstance(raw_keys, list):
-            gemini_keys = [decrypt_secret(str(k)).strip() for k in raw_keys if str(k).strip()]
-        elif isinstance(raw_keys, str) and raw_keys.strip():
-            gemini_keys = [decrypt_secret(k).strip() for k in raw_keys.replace("\n", ",").split(",") if k.strip()]
+        def _key_values(provider: str) -> list[str]:
+            raw = (enc_map.get(provider) if isinstance(enc_map, dict) else None)
+            if raw in (None, ""):
+                raw = (data.get(f"{provider}_api_keys")
+                       or data.get(f"{provider}_api_key")
+                       or data.get(f"{provider}_key")
+                       or os.environ.get((provider_spec(provider).env_key if provider_spec(provider) else ""), ""))
+            if isinstance(raw, (list, tuple)):
+                values = [str(item).strip() for item in raw if str(item).strip()]
+            elif isinstance(raw, str) and raw.strip():
+                values = [item.strip() for item in re.split(r"[\n,]+", raw) if item.strip()]
+            else:
+                values = []
+            values = [decrypt_secret(item).strip() for item in values if item.strip()]
+            if provider == "gemini" and not values:
+                legacy = data.get("api_key") or os.environ.get("GEMINI_API_KEY", "")
+                if isinstance(legacy, str) and legacy.strip():
+                    values = [decrypt_secret(legacy.strip())]
+            return values
 
-        self.register(ProviderConfig(
-            name="gemini",
-            provider_type="gemini",
-            base_url=_text(data.get("gemini_base_url"), DEFAULT_BASE_URLS["gemini"]),
-            api_keys=gemini_keys,
-            model=_text(data.get("gemini_model") or data.get("model_name"), DEFAULT_MODELS["gemini"]),
-            priority=10,
-            task_affinity=["vision", "fast", "multimodal"]
-        ))
+        for key, spec in PROVIDER_SPECS.items():
+            if key == "custom":
+                continue
+            keys = _key_values(key)
+            base = _text(data.get(f"{key}_base_url"), spec.base_url)
+            model = _text(data.get(f"{key}_model"), spec.model)
+            if key == "gemini":
+                model = _text(data.get("gemini_model") or data.get("model_name"), spec.model)
+            headers = {"HTTP-Referer": "https://github.com/sajancodes/zaya", "X-Title": "Zaya"} if key == "openrouter" else {}
+            self.register(ProviderConfig(
+                name=key,
+                provider_type=spec.provider_type,
+                base_url=base,
+                api_keys=keys,
+                model=model,
+                priority=spec.priority,
+                task_affinity=list(spec.task_affinity),
+                headers=headers,
+                local=spec.local,
+                requires_key=spec.requires_key,
+                max_tools=spec.max_tools,
+                max_tool_schema_chars=spec.max_tool_schema_chars,
+            ))
 
-        # 2. OpenAI
-        openai_key = enc_map.get("openai") or data.get("openai_api_key") or data.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
-        openai_keys = [decrypt_secret(str(openai_key)).strip()] if isinstance(openai_key, str) and openai_key.strip() else []
-        self.register(ProviderConfig(
-            name="openai",
-            provider_type="openai",
-            base_url=_text(data.get("openai_base_url"), DEFAULT_BASE_URLS["openai"]),
-            api_keys=openai_keys,
-            model=_text(data.get("openai_model"), DEFAULT_MODELS["openai"]),
-            priority=20,
-            task_affinity=["reasoning", "general"]
-        ))
+        custom_base = _text(data.get("custom_base_url"), "")
+        custom_keys = _key_values("custom")
+        if custom_base:
+            self.register(ProviderConfig(
+                name="custom",
+                provider_type="compatible",
+                base_url=custom_base,
+                api_keys=custom_keys,
+                model=_text(data.get("custom_model"), "local-model"),
+                priority=90,
+                task_affinity=["general"],
+                local=bool(data.get("custom_local", False)),
+                requires_key=False,
+                max_tools=12,
+                max_tool_schema_chars=12000,
+            ))
 
-        # 3. OpenRouter
-        or_key = data.get("openrouter_api_key") or data.get("openrouter_key") or os.environ.get("OPENROUTER_API_KEY", "")
-        or_keys = [or_key] if isinstance(or_key, str) and or_key.strip() else []
-        self.register(ProviderConfig(
-            name="openrouter",
-            provider_type="openrouter",
-            base_url=_text(data.get("openrouter_base_url"), DEFAULT_BASE_URLS["openrouter"]),
-            api_keys=or_keys,
-            model=_text(data.get("openrouter_model"), DEFAULT_MODELS["openrouter"]),
-            priority=30,
-            headers={"HTTP-Referer": "https://github.com/sajancodes/zaya", "X-Title": "Zaya"},
-            task_affinity=["general"]
-        ))
-
-        # 4. Groq
-        groq_key = data.get("groq_api_key") or os.environ.get("GROQ_API_KEY", "")
-        groq_keys = [groq_key] if isinstance(groq_key, str) and groq_key.strip() else []
-        self.register(ProviderConfig(
-            name="groq",
-            provider_type="groq",
-            base_url=_text(data.get("groq_base_url"), DEFAULT_BASE_URLS["groq"]),
-            api_keys=groq_keys,
-            model=_text(data.get("groq_model"), DEFAULT_MODELS["groq"]),
-            priority=40,
-            task_affinity=["fast"]
-        ))
-
-        # 5. DeepSeek
-        deepseek_key = data.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
-        deepseek_keys = [deepseek_key] if isinstance(deepseek_key, str) and deepseek_key.strip() else []
-        self.register(ProviderConfig(
-            name="deepseek",
-            provider_type="deepseek",
-            base_url=_text(data.get("deepseek_base_url"), DEFAULT_BASE_URLS["deepseek"]),
-            api_keys=deepseek_keys,
-            model=_text(data.get("deepseek_model"), DEFAULT_MODELS["deepseek"]),
-            priority=50,
-            task_affinity=["code", "reasoning"]
-        ))
-
-        # 6. Ollama
-        self.register(ProviderConfig(
-            name="ollama",
-            provider_type="ollama",
-            base_url=data.get("ollama_base_url") or DEFAULT_BASE_URLS["ollama"],
-            model=data.get("ollama_model") or DEFAULT_MODELS["ollama"],
-            priority=60,
-            task_affinity=["offline", "local"]
-        ))
+        if not self.fallback_chain:
+            self.fallback_chain = [key for key in PROVIDER_SPECS if key != "custom"]

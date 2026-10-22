@@ -15,6 +15,7 @@ history is also available on `zaya-updates`.
 - [Capabilities](#capabilities)
 - [Requirements and installation](#requirements-and-installation)
 - [Multiple Gemini keys and rate limits](#multiple-gemini-keys-and-rate-limits)
+- [Modular local AI engine](#modular-local-ai-engine)
 - [Everyday controls](#everyday-controls)
 - [Character artwork, voices, and bubbles](#character-artwork-voices-and-bubbles)
 - [Media and audio ducking](#media-and-audio-ducking)
@@ -61,7 +62,9 @@ as unverified until Zaya observes the result.
 - Windows is the primary tested desktop environment. Some modules include
   macOS/Linux implementations; OS-specific tools and audio mixing vary.
 - A microphone and working audio output for voice conversation.
-- A configured Gemini API key, network access, and available provider quota.
+- Gemini Live: a configured Gemini API key, network access, and available
+  provider quota. The optional modular engine can instead use a local or
+  OpenAI-compatible provider.
 - Playwright browser binaries for interactive automation.
 - Optional: Hermes and its Node dependencies for WhatsApp.
 
@@ -121,6 +124,36 @@ not guarantee that rate limits disappear. See [Google's rate-limit guide](https:
 Connection setup has a 20-second deadline. A slow or unavailable provider shows
 connection/retry status rather than leaving a permanent Thinking state. Startup
 worker failures are visible and recorded in `logs/startup_failure.log`.
+
+## Modular local AI engine
+
+Gemini Live remains Zaya's preferred low-latency voice path. The optional
+modular engine replaces one live connection with separate speech-to-text,
+language-model, and text-to-speech stages. Open **AI ENGINE** in the settings
+drawer, choose **LOCAL PIPELINE**, then choose a provider and speech models.
+Engine and provider changes apply after restarting Zaya.
+
+Local language models can run through Ollama, LM Studio, llama.cpp server, vLLM,
+or any compatible `/v1/chat/completions` endpoint. The speech stages need the
+optional local packages:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-local-speech.txt
+```
+
+Download a Piper `.onnx` voice plus its `.onnx.json` metadata file and enter the
+voice path in **AI ENGINE**. faster-whisper downloads its selected model on first
+use; a smaller model starts faster and uses less memory. The default `small`
+model is a practical balance. The engine writes component readiness to
+`logs/runtime/local_engine_readiness.json`; timed, content-free stage timings go
+to `logs/runtime/local_pipeline_timings.jsonl`.
+
+Failures name the component and provider. If transcription is unavailable,
+typed commands still work. If voice synthesis fails, the text answer remains
+visible. If the language model fails, Zaya reports that provider rather than
+blaming the microphone or voice. Cloud failover is off by default for the local
+pipeline: selecting a local provider never silently sends text to a cloud
+service. See `docs/local-ai-engine.md` for configuration keys and limits.
 
 ## Everyday controls
 

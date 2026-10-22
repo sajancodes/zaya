@@ -23,9 +23,9 @@ def mission_control(parameters: dict, *, owner_request: str | None = None, **_kw
                 return ToolResult("failed", "Missing required 'goal' parameter to start a mission.")
             mission = supervisor.start_mission(goal)
             return ToolResult(
-                "success",
+                "started",
                 f"Mission {mission.id} planned and started in background ({len(mission.steps)} steps).",
-                {"mission": mission.public()},
+                {"mission": mission.public(), "progress_message": "I've started the background mission and will report each meaningful milestone."},
                 side_effect=True,
             )
 

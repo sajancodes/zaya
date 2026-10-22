@@ -54,8 +54,12 @@ def coding_job(parameters: dict, *, owner_request=None, **_kwargs):
         else:
             raise ValueError('Use start, status, stop, continue or updates.')
         state = jobs.execution_status()
-        return ToolResult('success', summary,
-                          {'job': job.public(), **state, 'response_is_untrusted_data': True},
+        status = 'started' if action in {'start', 'continue'} else 'success'
+        return ToolResult(status, summary,
+                          {'job': job.public(), **state, 'response_is_untrusted_data': True,
+                           'progress_message': (
+                               'I have started the project work and will report the first meaningful result.'
+                               if action in {'start', 'continue'} else '')},
                           [{'source': 'opencode', 'phase': job.phase, 'session_id': job.session_id, **state}],
                           side_effect=action != 'status')
     except (ValueError, RuntimeError, OSError) as error:

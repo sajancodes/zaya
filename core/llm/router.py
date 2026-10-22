@@ -76,6 +76,7 @@ class LLMRouter:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         timeout_sec: Optional[float] = None,
+        allow_failover: bool = True,
         **kwargs
     ) -> LLMResponse:
         """Routes chat request through candidate providers with intelligent failover."""
@@ -86,7 +87,10 @@ class LLMRouter:
             task=task,
             preferred_provider=preferred_provider,
             require_multimodal=require_multimodal,
+            allow_failover=allow_failover,
         )
+        if not allow_failover:
+            candidates = candidates[:1]
 
         if not candidates:
             raise LLMError(f"No available or healthy providers found for task '{task}' (multimodal={require_multimodal}).")
@@ -181,13 +185,17 @@ class LLMRouter:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         timeout_sec: Optional[float] = None,
+        allow_failover: bool = True,
         **kwargs
     ) -> Iterator[StreamChunk]:
         """Routes streaming request to first eligible provider."""
         candidates = self.routing_policy.get_candidate_providers(
             task=task,
             preferred_provider=preferred_provider,
+            allow_failover=allow_failover,
         )
+        if not allow_failover:
+            candidates = candidates[:1]
         if not candidates:
             raise LLMError(f"No available or healthy providers found for streaming task '{task}'.")
 
