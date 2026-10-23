@@ -169,14 +169,14 @@ def prepare_windows_release(
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core.version import VERSION, BUILD
+    from core.version import VERSION, BUILD, CHANNEL
 
     parser = argparse.ArgumentParser(description="Build Inno Setup installer and update metadata.")
     parser.add_argument("--app-dir", required=True, help="Path to PyInstaller Zaya onedir output.")
     parser.add_argument("--output", required=True, help="Destination directory for installer and manifest.")
     parser.add_argument("--version", default=VERSION, help="Semantic version string.")
     parser.add_argument("--build", type=int, default=BUILD, help="Integer build code.")
-    parser.add_argument("--channel", default="stable", choices=["stable", "beta"], help="Release channel.")
+    parser.add_argument("--channel", default=CHANNEL, choices=["stable", "beta"], help="Release channel from canonical version.json.")
     parser.add_argument("--tag", default=None, help="Explicit release tag (e.g. v0.5.1).")
     parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
     parser.add_argument("--cert", default=os.environ.get('ZAYA_SIGNING_CERT_PATH'), help="Production PFX certificate path.")

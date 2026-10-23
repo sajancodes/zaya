@@ -10,7 +10,10 @@
 param(
     [switch]$SkipRendererBuild,
     [switch]$SkipWorkerBuild,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [string]$PythonPath,
+    [string]$WorkerPythonPath,
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,10 +24,8 @@ try {
     Write-Host "=== Zaya Windows Desktop Distribution Build ===" -ForegroundColor Cyan
     Write-Host "Repository root: $repoRoot"
 
-    $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
-    $venvPyinstaller = Join-Path $repoRoot ".venv\Scripts\pyinstaller.exe"
-    $handsPython = Join-Path $repoRoot ".venv-hands\Scripts\python.exe"
-    $handsPyinstaller = Join-Path $repoRoot ".venv-hands\Scripts\pyinstaller.exe"
+    $venvPython = if ($PythonPath) { $PythonPath } else { Join-Path $repoRoot '.venv\Scripts\python.exe' }
+    $handsPython = if ($WorkerPythonPath) { $WorkerPythonPath } else { Join-Path $repoRoot '.venv-hands\Scripts\python.exe' }
 
     if (-not (Test-Path $venvPython)) {
         throw "Main Python environment not found at $venvPython"
@@ -41,8 +42,9 @@ try {
                 Push-Location $rendererDir
                 try {
                     if (-not (Test-Path "node_modules")) {
-                        Write-Host "Running npm install..."
-                        & npm install --no-audit --no-fund
+                        Write-Host "Restoring renderer dependencies from its lockfile..."
+                        & npm ci --no-audit --no-fund
+                        if ($LASTEXITCODE -ne 0) { throw 'Renderer dependency restore failed.' }
                     }
                     Write-Host "Running npm run build..."
                     & npm run build
@@ -51,7 +53,7 @@ try {
                     Pop-Location
                 }
             } else {
-                Write-Warning "npm not found in PATH; skipping renderer compilation. Existing dist will be used if present."
+                throw 'npm is required to build the renderer.'
             }
         }
     } else {
@@ -60,25 +62,18 @@ try {
 
     # Verify renderer dist exists
     if (-not (Test-Path (Join-Path $rendererDist "index.html"))) {
-        Write-Warning "spatial_renderer/dist/index.html not found. Creating placeholder or check renderer build."
+        throw 'spatial_renderer/dist/index.html is required; no placeholder renderer will be packaged.'
     }
 
     # 2. Build isolated hand tracking worker executable (ZayaHandWorker.exe)
-    $distWindows = Join-Path $repoRoot "dist\windows"
+    $distWindows = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $repoRoot 'dist\windows' }
     $workerOutDir = Join-Path $distWindows "worker"
     $workerExe = Join-Path $workerOutDir "ZayaHandWorker.exe"
 
     if (-not $SkipWorkerBuild) {
         Write-Host "`n[2/5] Building isolated hand tracking worker (ZayaHandWorker.exe)..." -ForegroundColor Yellow
         $workerPython = if (Test-Path $handsPython) { $handsPython } else { $venvPython }
-        $workerPyinstaller = if (Test-Path $handsPyinstaller) { $handsPyinstaller } else { $venvPyinstaller }
-
-        if (-not (Test-Path $workerPyinstaller)) {
-            Write-Warning "PyInstaller not found in $workerPyinstaller; installing into worker environment..."
-            & $workerPython -m pip install --quiet pyinstaller
-        }
-
-        & $workerPyinstaller packaging/windows/zaya-hand-worker.spec --noconfirm --distpath $workerOutDir
+        & $workerPython -m PyInstaller packaging/windows/zaya-hand-worker.spec --noconfirm --distpath $workerOutDir
         if ($LASTEXITCODE -ne 0) { throw "ZayaHandWorker.exe build failed." }
     } else {
         Write-Host "`n[2/5] Skipping hand worker build (-SkipWorkerBuild)" -ForegroundColor DarkGray
@@ -86,12 +81,7 @@ try {
 
     # 3. Build main application onedir with PyInstaller
     Write-Host "`n[3/5] Building main Zaya desktop application..." -ForegroundColor Yellow
-    if (-not (Test-Path $venvPyinstaller)) {
-        Write-Warning "PyInstaller not found in main venv; installing..."
-        & $venvPython -m pip install --quiet pyinstaller
-    }
-
-    & $venvPyinstaller packaging/windows/zaya.spec --noconfirm --distpath $distWindows
+    & $venvPython -m PyInstaller packaging/windows/zaya.spec --noconfirm --distpath $distWindows
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller packaging for Zaya failed." }
 
     $appDir = Join-Path $distWindows "Zaya"
@@ -104,6 +94,8 @@ try {
     if (Test-Path $workerExe) {
         Copy-Item -Path $workerExe -Destination $appDir -Force
         Write-Host "Copied $workerExe -> $appDir"
+    } else {
+        throw 'The isolated hand worker is required for a complete desktop build.'
     }
 
     $appRendererDist = Join-Path $appDir "spatial_renderer\dist"

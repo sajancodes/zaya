@@ -112,4 +112,6 @@ web/data/
 *service-account*.json
 .vercel/
 .venv-release-audit/
+.venv-local-release/
+.venv-local-hands/
 updates/
