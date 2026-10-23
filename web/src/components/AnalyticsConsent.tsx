@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 
 export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
   const id = (import.meta as any).env.VITE_GA_MEASUREMENT_ID || '';
-  const [consent, setConsent] = useState(() => localStorage.getItem('zaya-site-analytics') || 'unset');
+  const [consent, setConsent] = useState(() => typeof localStorage === 'undefined' ? 'unset' : localStorage.getItem('zaya-site-analytics') || 'unset');
   useEffect(() => {
     if (path.startsWith('/admin') || consent !== 'yes' || !/^G-[A-Z0-9]+$/.test(id)) return;
     const win = window as any;

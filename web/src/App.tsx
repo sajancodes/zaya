@@ -14,10 +14,31 @@ import { Security } from './pages/Security';
 import { About } from './pages/About';
 import { Admin } from './pages/Admin';
 import { AnalyticsConsent } from './components/AnalyticsConsent';
+import { pageMetadata, pageSchema } from './data/seo';
 
-export const App: React.FC = () => {
-  const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/');
+export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
+  const [currentPath, setCurrentPath] = useState<string>(initialPath ?? (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const metadata = pageMetadata(currentPath);
+    document.title = metadata.title;
+    const url = new URL(currentPath, import.meta.env.VITE_PUBLIC_SITE_URL || 'https://zayaxyz.vercel.app').href;
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href', url);
+    for (const [selector, value] of [
+      ['meta[name="description"]', metadata.description],
+      ['meta[property="og:title"]', metadata.title],
+      ['meta[property="og:description"]', metadata.description],
+      ['meta[property="og:url"]', url],
+    ]) document.querySelector(selector)?.setAttribute('content', value);
+    const existing = document.querySelector('script[data-zaya-schema]');
+    if (currentPath.startsWith('/admin')) { existing?.remove(); return; }
+    const schema = existing ?? document.createElement('script');
+    schema.setAttribute('type', 'application/ld+json');
+    schema.setAttribute('data-zaya-schema', '');
+    schema.textContent = JSON.stringify(pageSchema(currentPath, new URL(url).origin));
+    if (!existing) document.head.appendChild(schema);
+  }, [currentPath]);
 
   useEffect(() => {
     const onPopState = () => {

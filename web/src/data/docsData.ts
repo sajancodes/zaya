@@ -40,7 +40,7 @@ Zaya is a personal AI system created and developed by **Sajan Rai**. It operates
 
 ## The 8-Step Setup Journey
 
-1. **Download ZayaSetup.exe**: Navigate to [/download](/download) and download the official signed installer.
+1. **Check release availability**: Visit [/download](/download). The signed public Windows installer is not published yet; use only an artifact actually listed there after release verification.
 2. **Run Installer**: Double-click \`ZayaSetup.exe\`. It installs binaries to \`%LOCALAPPDATA%\\Programs\\Zaya\` without requiring administrator elevation.
 3. **Launch Zaya**: Launch from Start Menu or desktop shortcut. The animated companion appears on your taskbar.
 4. **First-Run Wizard**: The onboarding window opens automatically to configure audio devices and provider credentials.
@@ -50,7 +50,7 @@ Zaya is a personal AI system created and developed by **Sajan Rai**. It operates
    - Paste the key into Zaya and click **Test Connection**. Zaya encrypts it with Windows DPAPI.
 6. **Configure Voice Output**: Select the **Nika** voice tone or your preferred audio playback device.
 7. **Optional Optical Tracking**: Enable hand tracking in Settings > Hand controls & 3D workspace. (The camera remains completely OFF at startup).
-8. **Start Speaking**: Say *"Hey Jarvis"* or hold your push-to-talk hotkey and converse naturally.
+8. **Start Speaking**: Address Zaya naturally or use your configured push-to-talk hotkey.
 `
   },
 

@@ -6,6 +6,8 @@ Implementation commits include `c3d2a80` (desktop release safeguards), `7eca31b`
 
 ## Verified work
 
+- SEO follow-up: the build prerenders the actual React content for 35 public pages, including complete documentation articles, with unique titles/descriptions/canonicals, creator/application identity and docs breadcrumbs. Navigation and documentation links are crawlable anchors. Search crawlers inherit the public robots allowance; admin/API remain excluded. Client navigation updates page metadata. The build checks all 35 outputs. A second-account Google Search Console URL property and public verification tag are prepared; ownership verification and sitemap submission must be confirmed after deployment. Google indexing/ranking and AI recommendations are not guaranteed.
+
 - Canonical desktop version: `version.json`, candidate `0.5.0`, build `10007`, stable. CI reads this file rather than inventing versions. Existing Android 0.4.6 remains a separate legacy companion release.
 - Windows updater accepts the actual installer filename, requires immutable official HTTPS artifact URLs, compares SemVer/channel/build, bounds downloads, checks size and SHA-256, and rechecks immediately before execution. Packaged Windows builds require a valid Authenticode signature with the expected publisher. Stable/beta selection persists locally. Startup checks can open the update dialog; Later and View changes are available.
 - Optional Coding Skill can be installed/repaired/removed from desktop controls or selected during installation. Official OpenCode 1.19.2 Windows archive is pinned by SHA-256. A real isolated install returned `Installed · 1.19.2`. Existing global OpenCode, authentication and user projects are preserved.

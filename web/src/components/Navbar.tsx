@@ -92,7 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               borderLeft: '1px solid rgba(95, 234, 255, 0.18)',
               paddingLeft: '10px',
               display: 'none',
-              ...(window.innerWidth > 640 ? { display: 'inline' } : {})
+              ...(typeof window !== 'undefined' && window.innerWidth > 640 ? { display: 'inline' } : {})
             }}
           >
             by Sajan Rai
@@ -111,9 +111,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           {navLinks.map((link) => {
             const isActive = currentPath === link.path || (link.path !== '/' && currentPath.startsWith(link.path));
             return (
-              <span
+              <a
                 key={link.path}
-                onClick={() => handleNav(link.path)}
+                href={link.path}
+                onClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) { e.preventDefault(); handleNav(link.path); } }}
                 style={{
                   fontSize: '13px',
                   fontWeight: isActive ? 600 : 400,
@@ -145,7 +146,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     }}
                   />
                 )}
-              </span>
+              </a>
             );
           })}
         </div>

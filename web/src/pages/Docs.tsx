@@ -217,8 +217,9 @@ export const Docs: React.FC<DocsProps> = ({ topic = 'getting-started', navigate 
                       const isSelected = doc.id === currentDoc.id || doc.id === normalizedKey;
                       return (
                         <li key={doc.id}>
-                          <span
-                            onClick={() => handleSelectDoc(doc.id)}
+                          <a
+                            href={'/docs/' + doc.id}
+                            onClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) { e.preventDefault(); handleSelectDoc(doc.id); } }}
                             style={{
                               display: 'block',
                               padding: '6px 10px',
@@ -238,7 +239,7 @@ export const Docs: React.FC<DocsProps> = ({ topic = 'getting-started', navigate 
                             }}
                           >
                             {doc.title}
-                          </span>
+                          </a>
                         </li>
                       );
                     })}

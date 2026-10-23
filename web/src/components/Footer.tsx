@@ -79,34 +79,34 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
               <li>
-                <span onClick={() => navigate('/features')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/features" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Features Encyclopedia
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/voice')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/voice" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Voice Architecture (Nika)
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/computer-control')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/computer-control" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Desktop Operator & UIA
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/hand-control')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/hand-control" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Optical Hand Tracking
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/spatial')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/spatial" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Spatial 3D Canvas
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/mobile')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/mobile" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Android Companion App
-                </span>
+                </a>
               </li>
             </ul>
           </div>
@@ -118,34 +118,34 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
               <li>
-                <span onClick={() => navigate('/docs/getting-started')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/getting-started" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Getting Started Walkthrough
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/install/windows')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/install/windows" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Windows Installation
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/providers')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/providers" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   AI Provider Setup
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/local-ai')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/local-ai" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Local AI Engine (Ollama/llama.cpp)
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/architecture')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/architecture" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Architecture Explorer
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/docs/troubleshooting')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/troubleshooting" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Troubleshooting & Diagnostics
-                </span>
+                </a>
               </li>
             </ul>
           </div>
@@ -157,34 +157,34 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
               <li>
-                <span onClick={() => navigate('/download')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/download" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Download Zaya (v0.5.0)
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/releases')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/releases" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Official Releases & Notes
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/roadmap')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/roadmap" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Evolution Roadmap
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/security')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/security" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Security & Trust Boundary
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/privacy')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/privacy" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Privacy & Data Retention
-                </span>
+                </a>
               </li>
               <li>
-                <span onClick={() => navigate('/terms')} style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/terms" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Terms & Open Attribution
-                </span>
+                </a>
               </li>
             </ul>
           </div>

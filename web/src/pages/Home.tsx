@@ -34,7 +34,7 @@ export const Home: React.FC<HomeProps> = ({ navigate, latestVersion = '0.5.0' })
   return (
     <div style={{ position: 'relative', minHeight: '100vh', overflow: 'hidden', backgroundColor: '#010409' }}>
       {/* 3D Living Universe of Destiny (Three.js WebGL Engine) */}
-      <Suspense fallback={null}><DestinyPath3D /></Suspense>
+      {typeof window !== 'undefined' && <Suspense fallback={null}><DestinyPath3D /></Suspense>}
 
       {/* Foreground Cinematic Experience */}
       <div style={{ position: 'relative', zIndex: 10 }}>

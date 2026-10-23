@@ -33,7 +33,7 @@ export const About: React.FC = () => {
             {[
               {
                 title: '1. Sovereign & Local First',
-                desc: 'Your memory archive, transcripts, and private databases remain strictly on your machine. Credentials are encrypted via Windows DPAPI, and continuous screen perception runs 100% locally with zero cloud streaming.'
+                desc: 'Conversation archives are stored locally. Windows credentials use DPAPI. Optional local AI and perception are available; enabling a cloud provider can send the relevant voice, text or images to that provider. See the privacy policy for details.'
               },
               {
                 title: '2. Deterministic Action Verification',

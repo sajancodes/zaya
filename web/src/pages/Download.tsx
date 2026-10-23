@@ -4,7 +4,8 @@ import { useReleases } from '../data/useReleases';
 export const Download: React.FC<{navigate: (path: string) => void}> = ({navigate}) => {
   const {releases, loading} = useReleases();
   const [channel, setChannel] = useState('Stable');
-  const detected = /Android/i.test(navigator.userAgent) ? 'android' : /Linux/i.test(navigator.userAgent) ? 'linux' : 'windows';
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  const detected = /Android/i.test(userAgent) ? 'android' : /Linux/i.test(userAgent) ? 'linux' : 'windows';
   const platforms = [detected, ...['windows', 'linux', 'android'].filter(p => p !== detected)];
   return <section className="section" style={{minHeight:'100vh', paddingTop:60}}>
     <div className="container" style={{maxWidth:1040}}>

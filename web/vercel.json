@@ -18,7 +18,8 @@
     {"source": "/about", "destination": "/about/index.html"},
     {"source": "/roadmap", "destination": "/roadmap/index.html"},
     {"source": "/admin", "destination": "/index.html"},
-    {"source": "/docs/:path*", "destination": "/docs/index.html"},
+    {"source": "/docs/install/:platform", "destination": "/docs/install-:platform/index.html"},
+    {"source": "/docs/:topic", "destination": "/docs/:topic/index.html"},
     {"source": "/", "destination": "/index.html"}
   ],
   "headers": [

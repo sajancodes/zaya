@@ -1,0 +1,38 @@
+import { DOCS_DATA } from './docsData';
+
+export const PUBLIC_PAGES: Record<string, {title: string; description: string}> = {
+  '/': {title: 'Zaya AI Assistant — Voice, Desktop & Android | Sajan Rai', description: 'Meet Zaya, the personal AI assistant created by Sajan Rai: voice conversations, Windows computer control, optional local AI, supervised OpenCode coding and an Android companion.'},
+  '/features': {title: 'Zaya AI Assistant Features — Voice, Computer Control & Coding', description: 'Explore Zaya voice assistance, screen understanding, owner-controlled desktop actions, OpenCode coding, local AI options and Android companion calls.'},
+  '/docs': {title: 'Zaya Documentation — Setup, Voice & Android Pairing', description: 'Learn how Zaya works: Windows setup, AI providers, voice configuration, Android pairing, optional hand controls and owner permissions.'},
+  '/download': {title: 'Download Zaya AI Assistant — Platform Availability', description: 'Check actual Zaya Windows, Linux and Android release availability, verified checksums and installation requirements. Public desktop packages are pending release verification.'},
+  '/releases': {title: 'Zaya Releases — Versions, Checksums & Changes', description: 'Official Zaya release metadata, published platform downloads, version changes and known limitations. Created by Sajan Rai.'},
+  '/roadmap': {title: 'Zaya Roadmap — Planned AI Assistant Improvements', description: 'Follow planned Zaya improvements and current platform limitations. Planned features are distinct from published releases.'},
+  '/security': {title: 'Zaya Security — Owner Permissions & Verified Updates', description: 'Understand Zaya owner authorization, credential protection, verified update requirements and release security limitations.'},
+  '/privacy': {title: 'Zaya Privacy — Local Data & AI Providers', description: 'How Zaya handles local conversation archives, external AI providers, optional analytics, device pairing and retention.'},
+  '/terms': {title: 'Zaya Terms of Use', description: 'Zaya software terms, third-party AI services, user responsibilities and beta limitations.'},
+  '/about': {title: 'About Zaya AI Assistant — Created by Sajan Rai', description: 'Zaya is a personal AI assistant created and developed by Sajan Rai. Learn about its voice, desktop, coding and Android companion approach.'},
+};
+
+export function pageMetadata(path: string) {
+  if (PUBLIC_PAGES[path]) return PUBLIC_PAGES[path];
+  const key = path.replace(/^\/docs\//, '').replace(/^install\//, 'install-');
+  const doc = path.startsWith('/docs/') ? DOCS_DATA[key] : undefined;
+  return doc ? {title: `${doc.title} | Zaya AI Assistant Docs`, description: doc.description}
+    : {title: 'Page not found | Zaya', description: 'This Zaya page does not exist.'};
+}
+
+export function pageSchema(path: string, origin: string) {
+  const {title, description} = pageMetadata(path);
+  const url = origin + path;
+  return {'@context':'https://schema.org', '@graph': [
+      {'@type':'WebSite', '@id':origin + '/#website', name:'Zaya AI Assistant', url:origin},
+      {'@type':'Person', '@id':origin + '/about#creator', name:'Sajan Rai', url:origin + '/about', sameAs:['https://github.com/sajancodes']},
+      {'@type':'WebPage', '@id':url + '#page', name:title, description, url, isPartOf:{'@id':origin + '/#website'}},
+      ...(path === '/' ? [{'@type':'SoftwareApplication', '@id':origin + '/#zaya', name:'Zaya', alternateName:'Zaya AI Assistant', description, url:origin, applicationCategory:'ProductivityApplication', operatingSystem:'Windows; Android companion', creator:{'@id':origin + '/about#creator'}}] : []),
+      ...(path.startsWith('/docs/') ? [{'@type':'BreadcrumbList', itemListElement:[
+        {'@type':'ListItem', position:1, name:'Zaya', item:origin + '/'},
+        {'@type':'ListItem', position:2, name:'Documentation', item:origin + '/docs'},
+        {'@type':'ListItem', position:3, name:title, item:url}
+      ]}] : [])
+    ]};
+}
