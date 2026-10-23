@@ -36,7 +36,7 @@ Android signer SHA-256: `b54d592e8e1e7da30cc07a6937cb9a399e012dbfc0aa7634d2fd192
 - Existing running Zaya Python processes were detected. Their loaded binary libraries were not replaced. Refresh that environment after closing those processes; do not mistake the old installed environment for the newly audited release dependency set.
 - Fatal Python lint checks and compilation passed. Local dependency consistency check passed before dependency migration. OpenCode isolated installation smoke check passed. A real Microsoft-signed binary (including a staged .tmp filename) passed Windows signature verification; the wrong publisher was rejected. The verifier now uses the system PowerShell executable/modules, avoiding incompatible inherited PowerShell 7 module paths.
 - GitHub hosted CI **did not run**: both jobs were rejected before execution because account payments/spending settings block Actions. Evidence: https://github.com/sajancodes/zaya/actions/runs/39882042105 . Local checks are not presented as hosted-CI success.
-- Windows clean install, update on an installed old build, uninstall, physical device/camera verification, Linux execution and production Defender scanning: **not performed**. Production signing/Defender/test gates are prepared, not certified as executed.
+- Windows clean install, update on an installed old build, uninstall, physical device/camera verification, Linux execution and production Defender scanning: **not performed**. Production signing/Defender/test gates are prepared, not certified as executed. This Windows host has no WSL installation, and hosted Linux CI is currently blocked by account billing/spending settings.
 
 ## Remaining release requirements
 
