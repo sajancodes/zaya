@@ -13,6 +13,7 @@ export const About: React.FC = () => {
           <p style={{ color: 'var(--site-muted)', fontSize: '16px', lineHeight: '1.7' }}>
             Created and developed by <strong>Sajan Rai</strong> — <a href="https://github.com/sajancodes" target="_blank" rel="noopener noreferrer">sajancodes</a>.
           </p>
+          <p className="yatra-credit" style={{marginTop:12}}>Co-powered by Yatra Technologies</p>
         </div>
 
         <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: 'var(--site-muted)' }}>

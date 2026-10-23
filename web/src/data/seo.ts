@@ -1,6 +1,7 @@
 import { DOCS_DATA } from './docsData';
 
 export const PUBLIC_PAGES: Record<string, {title: string; description: string}> = {
+  '/enterprise': {title: 'Custom AI Agents & Assistants — Zaya Enterprise | Yatra Technologies', description: 'Discuss custom AI agents, business assistants and workflow integrations with Sajan Rai. Co-powered by Yatra Technologies. Contact support for an individually scoped project.'},
   '/': {title: 'Zaya AI Assistant — Voice, Desktop & Android | Sajan Rai', description: 'Meet Zaya, the personal AI assistant created by Sajan Rai: voice conversations, Windows computer control, optional local AI, supervised OpenCode coding and an Android companion.'},
   '/features': {title: 'Zaya AI Assistant Features — Voice, Computer Control & Coding', description: 'Explore Zaya voice assistance, screen understanding, owner-controlled desktop actions, OpenCode coding, local AI options and Android companion calls.'},
   '/docs': {title: 'Zaya Documentation — Setup, Voice & Android Pairing', description: 'Learn how Zaya works: Windows setup, AI providers, voice configuration, Android pairing, optional hand controls and owner permissions.'},

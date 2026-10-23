@@ -13,6 +13,7 @@ import { Privacy } from './pages/Privacy';
 import { Terms } from './pages/Terms';
 import { Security } from './pages/Security';
 import { About } from './pages/About';
+import { Enterprise } from './pages/Enterprise';
 import { Admin } from './pages/Admin';
 import { AnalyticsConsent } from './components/AnalyticsConsent';
 import { canonicalPath, pageMetadata, pageSchema } from './data/seo';
@@ -81,6 +82,9 @@ export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
     }
     if (currentPath === '/features') {
       return <Features />;
+    }
+    if (currentPath === '/enterprise') {
+      return <Enterprise />;
     }
     if (currentPath.startsWith('/docs')) {
       const topic = currentPath.replace(/^\/docs\/?/, '') || 'getting-started';
