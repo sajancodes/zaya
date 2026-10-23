@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
+import { CrystalAtmosphere } from './components/CrystalAtmosphere';
 import { Footer } from './components/Footer';
 import { SearchModal } from './components/SearchModal';
 import { Home } from './pages/Home';
@@ -19,6 +20,7 @@ import { canonicalPath, pageMetadata, pageSchema } from './data/seo';
 export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
   const [currentPath, setCurrentPath] = useState<string>(initialPath ?? (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [effectsPaused, setEffectsPaused] = useState(false);
 
   useEffect(() => {
     const metadata = pageMetadata(currentPath);
@@ -110,7 +112,9 @@ export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
   };
 
   return (
-    <div className={currentPath === '/' ? 'site-shell home-shell' : currentPath === '/download' ? 'site-shell download-shell' : currentPath.startsWith('/admin') ? 'site-shell admin-shell' : 'site-shell'}>
+    <div className={currentPath.startsWith('/admin') ? 'site-shell admin-shell' : `site-shell premium-shell ${effectsPaused ? 'effects-paused' : ''} ${currentPath === '/' ? 'home-shell' : currentPath === '/download' ? 'download-shell' : ''}`}>
+      {currentPath !== '/' && !currentPath.startsWith('/admin') && <CrystalAtmosphere />}
+      {currentPath !== '/' && !currentPath.startsWith('/admin') && <button className="motion-control" aria-pressed={effectsPaused} onClick={() => setEffectsPaused(!effectsPaused)}>{effectsPaused ? 'Resume effects' : 'Pause effects'} <span aria-hidden="true">◇</span></button>}
       <Navbar currentPath={currentPath} navigate={navigate} onOpenSearch={() => setIsSearchOpen(true)} />
       <main id="main-content" style={{ flex: 1 }}>
         {renderRoute()}

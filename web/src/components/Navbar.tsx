@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 export const Navbar: React.FC<{currentPath:string; navigate:(path:string)=>void; onOpenSearch?:()=>void}> = ({currentPath,onOpenSearch}) => {
   const [open,setOpen] = useState(false);
-  const links=[['What Zaya does','/features'],['Getting started','/docs/getting-started'],['Release notes','/releases']];
+  const links=[['Features','/features'],['Getting started','/docs/getting-started'],['Release notes','/releases']];
   return <header className="site-header"><a className="skip-link" href="#main-content">Skip to content</a><nav className="wrap nav-inner" aria-label="Main navigation">
     <a className="site-brand" href="/" aria-label="Zaya home"><img src="/assets/zaya-logo.png" alt="" width="34" height="34"/><span>Zaya<span className="brand-byline">by Sajan Rai</span></span></a>
     <div className="nav-links">{links.map(([label,path])=><a key={path} href={path} aria-current={currentPath===path?'page':undefined}>{label}</a>)}</div>
