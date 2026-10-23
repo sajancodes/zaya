@@ -110,7 +110,7 @@ export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
   };
 
   return (
-    <div className={currentPath === '/' ? 'site-shell home-shell' : currentPath.startsWith('/admin') ? 'site-shell admin-shell' : 'site-shell'}>
+    <div className={currentPath === '/' ? 'site-shell home-shell' : currentPath === '/download' ? 'site-shell download-shell' : currentPath.startsWith('/admin') ? 'site-shell admin-shell' : 'site-shell'}>
       <Navbar currentPath={currentPath} navigate={navigate} onOpenSearch={() => setIsSearchOpen(true)} />
       <main id="main-content" style={{ flex: 1 }}>
         {renderRoute()}

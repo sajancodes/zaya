@@ -46,10 +46,15 @@ em { font-family:Fraunces,Georgia,serif; font-weight:400; }
 .skip-link:focus { top:5px; }
 .mobile-navigation { position:absolute; top:100%; left:-20px; right:-20px; padding:22px; display:grid; gap:20px; background:var(--site-bg); border-bottom:1px solid var(--site-line); }
 .mobile-navigation button { background:transparent; border:0; text-align:left; color:var(--site-accent); }
-.home-shell { --site-bg:#020813; --site-ink:#edf6f8; --site-muted:#b1c3cf; --site-accent:#a2dfed; --site-line:rgba(163,205,223,.23); --site-soft:rgba(17,46,65,.9); --site-surface:rgba(3,15,27,.88); }
-.home-shell .site-header { background:rgba(2,8,19,.92); }
-.home-shell .btn-primary { background:#d7f2f5; border-color:#d7f2f5; color:#102c38; }
-.home-shell .btn-primary:hover { background:white; }
+.home-shell,.download-shell { --site-bg:#020813; --site-ink:#edf6f8; --site-muted:#b1c3cf; --site-accent:#a2dfed; --site-line:rgba(163,205,223,.23); --site-soft:rgba(17,46,65,.9); --site-surface:rgba(3,15,27,.88); }
+.home-shell .site-header,.download-shell .site-header { background:rgba(2,8,19,.92); }
+.home-shell .btn-primary,.download-shell .btn-primary { background:#d7f2f5; border-color:#d7f2f5; color:#102c38; }
+.home-shell .btn-primary:hover,.download-shell .btn-primary:hover { background:white; }
+.download-shell { background:radial-gradient(ellipse at 8% 12%,rgba(33,106,133,.17),transparent 45%),radial-gradient(ellipse at 100% 50%,rgba(26,78,113,.12),transparent 50%),var(--site-bg); }
+.download-shell .download-primary { background:linear-gradient(145deg,rgba(16,39,56,.9),rgba(3,15,27,.96)); box-shadow:0 20px 65px rgba(0,0,0,.25); }
+.download-shell .badge-beta { background:rgba(174,134,64,.13); color:#e5c58a; border-color:rgba(229,197,138,.3); }
+.download-shell .notice { background:rgba(174,134,64,.09); color:#dcc9a8; border:1px solid rgba(229,197,138,.18); }
+.download-shell .small-button { background:var(--site-soft); color:var(--site-ink); }
 .home-experience { position:relative; overflow:hidden; isolation:isolate; background:#010409; }
 .home-content { position:relative; z-index:10; }
 .home-hero { min-height:690px; padding-block:60px; display:grid; grid-template-columns:1.08fr 1fr; gap:64px; align-items:center; }
