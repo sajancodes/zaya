@@ -32,6 +32,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    uses: ./.github/workflows/code-checks.yml
   version:
     name: Determine Release Version
     runs-on: ubuntu-latest
@@ -63,7 +65,7 @@ jobs:
     name: Build Windows Application
     runs-on: windows-latest
     timeout-minutes: 45
-    needs: [version]
+    needs: [version, checks]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == 'windows' }}
     steps:
       - uses: actions/checkout@v4
@@ -115,7 +117,9 @@ jobs:
           ZAYA_BUILD: ${{ needs.version.outputs.version_code }}
           ZAYA_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
-          python -m PyInstaller packaging/windows/zaya-hand-worker.spec --noconfirm --distpath dist/windows/worker
+          python -m venv .venv-hands
+          .venv-hands\Scripts\python.exe -m pip install -r requirements-hands.txt pyinstaller
+          .venv-hands\Scripts\python.exe -m PyInstaller packaging/windows/zaya-hand-worker.spec --noconfirm --distpath dist/windows/worker
           python -m PyInstaller packaging/windows/zaya.spec --noconfirm --distpath dist/windows
           Copy-Item dist/windows/worker/ZayaHandWorker.exe dist/windows/Zaya/ -Force
 
@@ -159,7 +163,7 @@ jobs:
     name: Build Android Companion & App Bundle
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    needs: [version]
+    needs: [version, checks]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == 'android' }}
     steps:
       - uses: actions/checkout@v4

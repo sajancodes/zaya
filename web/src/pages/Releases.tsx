@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { RELEASES_DATA, ReleaseItem } from '../data/releases';
+import { ReleaseItem } from '../data/releases';
+import { useReleases } from '../data/useReleases';
 
 export const Releases: React.FC = () => {
+  const {releases: RELEASES_DATA, loading} = useReleases();
   const [selectedPlatform, setSelectedPlatform] = useState<'ALL' | 'windows' | 'android'>('ALL');
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
+  if (loading) return <section className="section container"><h1>Releases</h1><p>Loading verified releases…</p></section>;
+  if (!RELEASES_DATA.length) return <section className="section container"><h1>Releases</h1><p>No verified releases are available from the release service right now. Please try again later.</p></section>;
   const filteredReleases = RELEASES_DATA.filter((r) => {
     if (selectedPlatform === 'ALL') return true;
     return r.platform === selectedPlatform;

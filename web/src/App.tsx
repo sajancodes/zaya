@@ -13,6 +13,7 @@ import { Terms } from './pages/Terms';
 import { Security } from './pages/Security';
 import { About } from './pages/About';
 import { Admin } from './pages/Admin';
+import { AnalyticsConsent } from './components/AnalyticsConsent';
 
 export const App: React.FC = () => {
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/');
@@ -80,8 +81,7 @@ export const App: React.FC = () => {
       return <Admin />;
     }
 
-    // Default fallback to Home
-    return <Home navigate={navigate} />;
+    return <section className="section container"><h1>Page not found</h1><button onClick={() => navigate('/')}>Return to Zaya</button></section>;
   };
 
   return (
@@ -91,6 +91,7 @@ export const App: React.FC = () => {
         {renderRoute()}
       </main>
       <Footer navigate={navigate} />
+      <AnalyticsConsent path={currentPath}/>
 
       {/* Global Search Modal */}
       <SearchModal

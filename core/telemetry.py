@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TELEMETRY_BASE_URL = os.environ.get(
     "ZAYA_TELEMETRY_URL",
-    os.environ.get("ZAYA_WEBSITE_URL", "https://zaya.sajan.codes")
+    os.environ.get("ZAYA_WEBSITE_URL", "https://zayaxyz.vercel.app")
 ).rstrip("/")
 
-HEARTBEAT_INTERVAL_SECONDS = 86400  # 24 hours
+HEARTBEAT_INTERVAL_SECONDS = 120  # Opt-in only; online means seen within 3 minutes.
 
 
 def _installation_file_path() -> Path:
@@ -204,7 +204,7 @@ class TelemetryClient:
                 logger.debug(f"Telemetry worker initial pass error: {e}")
 
             # Periodic check every 6 hours to catch 24h threshold
-            while not self._stop_event.wait(6 * 3600):
+            while not self._stop_event.wait(HEARTBEAT_INTERVAL_SECONDS):
                 try:
                     report_heartbeat_event(self.base_url)
                 except Exception as e:

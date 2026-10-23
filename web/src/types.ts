@@ -21,6 +21,7 @@ export interface AnalyticsMetrics {
     android: number;
   };
   active: {
+      online_now?: number;
     last_24h: number;
     last_7d: number;
     last_30d: number;

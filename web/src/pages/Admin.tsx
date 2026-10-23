@@ -8,6 +8,10 @@ export const Admin: React.FC = () => {
   const [loginError, setLoginError] = useState<string>('');
   const [metrics, setMetrics] = useState<AnalyticsMetrics | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [releases, setReleases] = useState<any[]>([]);
+  useEffect(() => {
+    if (isAuthenticated) fetch('/api/admin/releases').then(r => r.ok ? r.json() : []).then(setReleases).catch(() => setReleases([]));
+  }, [isAuthenticated]);
 
   const fetchMetrics = () => {
     setIsLoading(true);
@@ -17,6 +21,7 @@ export const Admin: React.FC = () => {
           setIsAuthenticated(false);
           throw new Error('Unauthorized');
         }
+        if (!res.ok) throw new Error('Admin service unavailable');
         return res.json();
       })
       .then((data) => {
@@ -157,10 +162,21 @@ export const Admin: React.FC = () => {
           </div>
         </div>
 
+        <h2>Release management</h2>
+        <p>Deactivate a broken version to stop advertising it. Published binaries remain immutable and are not deleted.</p>
+        {releases.map(release => <p key={release.platform + release.version}>
+          {release.platform} · {release.version} · {release.channel || 'stable'} · {release.active === false ? 'Pulled' : 'Active'}{' '}
+          <button onClick={async () => {
+            const active = release.active === false;
+            const result = await fetch(`/api/admin/releases/${release.platform}/${release.version}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active})});
+            if (result.ok) setReleases(rows => rows.map(r => r === release ? {...r,active} : r));
+          }}>{release.active === false ? 'Reactivate' : 'Stop advertising'}</button>
+        </p>)}
         {metrics && (
           <>
             {/* Top Stat Cards */}
             <div className="metric-grid">
+              <div className="metric-card"><div className="metric-label">Online now</div><div className="metric-value">{metrics.active.online_now ?? 'Unavailable'}</div><div className="metric-sub">Opted-in installations seen within 3 minutes</div></div>
               <div className="metric-card">
                 <div className="metric-label">Total Downloads</div>
                 <div className="metric-value">{metrics.downloads.total}</div>

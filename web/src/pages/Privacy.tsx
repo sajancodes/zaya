@@ -15,11 +15,14 @@ export const Privacy: React.FC = () => {
         </div>
 
         <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: '#8392A6' }}>
+          <h2>Optional product analytics</h2>
+          <p>Disabled by default. If you opt in, Zaya sends a random installation UUID, platform and version every two minutes. Online now means an opted-in installation seen within three minutes, not a count of people. Inactive installation records have a 90-day retention target, enforced when database TTL is enabled. Download clicks are aggregate counters, not proof of installation. No IP addresses are stored for product analytics; hosting providers may process network metadata for security.</p>
+          <p>No prompts, conversations, file names, screen contents, contacts, WhatsApp messages or API keys are collected. Turning analytics off stops future submissions. Website Google Analytics requires a separate opt-in when configured.</p>
           <h2 style={{ color: '#F4FAFF', fontSize: '20px', marginBottom: '12px', fontWeight: 600 }}>
             1. The Sovereign Local Principle
           </h2>
           <p style={{ marginBottom: '20px' }}>
-            Zaya is architected as sovereign desktop software. We do not maintain user databases, central account profiles, or cloud history repositories. Your conversations, memory embeddings, tasks, and configuration files live on your computer in <code>%LOCALAPPDATA%\\Zaya</code>.
+            Your conversations, memory, tasks and configuration remain on your computer. Firebase stores release metadata and optional product analytics; it never receives your private Zaya history or provider keys.
           </p>
 
           <h2 style={{ color: '#F4FAFF', fontSize: '20px', margin: '32px 0 12px', fontWeight: 600 }}>

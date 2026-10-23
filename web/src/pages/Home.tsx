@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { DestinyPath3D } from '../components/DestinyPath3D';
+import React, { lazy, Suspense, useState } from 'react';
+const DestinyPath3D = lazy(() => import('../components/DestinyPath3D').then(m => ({default:m.DestinyPath3D})));
 import { PROVIDERS } from '../data/providers';
 import { ARCHITECTURE_NODES, SystemNode } from '../data/architecture';
 import { SystemNodeModal } from '../components/SystemNodeModal';
@@ -34,7 +34,7 @@ export const Home: React.FC<HomeProps> = ({ navigate, latestVersion = '0.5.0' })
   return (
     <div style={{ position: 'relative', minHeight: '100vh', overflow: 'hidden', backgroundColor: '#010409' }}>
       {/* 3D Living Universe of Destiny (Three.js WebGL Engine) */}
-      <DestinyPath3D />
+      <Suspense fallback={null}><DestinyPath3D /></Suspense>
 
       {/* Foreground Cinematic Experience */}
       <div style={{ position: 'relative', zIndex: 10 }}>

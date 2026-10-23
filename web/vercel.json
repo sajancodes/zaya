@@ -1,0 +1,31 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/index.py": {"includeFiles": "{*.py,templates/**}"}
+  },
+  "rewrites": [
+    {"source": "/api/:path*", "destination": "/api/index.py"},
+    {"source": "/download/:platform", "destination": "/api/index.py"},
+    {"source": "/download", "destination": "/download/index.html"},
+    {"source": "/releases", "destination": "/releases/index.html"},
+    {"source": "/features", "destination": "/features/index.html"},
+    {"source": "/docs", "destination": "/docs/index.html"},
+    {"source": "/privacy", "destination": "/privacy/index.html"},
+    {"source": "/terms", "destination": "/terms/index.html"},
+    {"source": "/security", "destination": "/security/index.html"},
+    {"source": "/about", "destination": "/about/index.html"},
+    {"source": "/roadmap", "destination": "/roadmap/index.html"},
+    {"source": "/:path*", "destination": "/index.html"}
+  ],
+  "headers": [
+    {"source": "/(.*)", "headers": [
+      {"key": "X-Content-Type-Options", "value": "nosniff"},
+      {"key": "X-Frame-Options", "value": "DENY"},
+      {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"},
+      {"key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()"}
+    ]},
+    {"source": "/admin", "headers": [{"key": "X-Robots-Tag", "value": "noindex, nofollow"}, {"key": "Cache-Control", "value": "no-store"}]}
+  ]
+}

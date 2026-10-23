@@ -25,7 +25,13 @@ DEFAULT_DB_DIR = Path(__file__).resolve().parent / "data"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "zaya_analytics.db"
 
 
+def firebase_enabled():
+    return os.environ.get('ZAYA_DATABASE_BACKEND', 'firebase' if os.environ.get('VERCEL') else 'sqlite') == 'firebase'
+
+
 def get_db_path() -> Path:
+    if os.environ.get('VERCEL'):
+        raise RuntimeError('SQLite is disabled on Vercel. Configure the Firebase backend.')
     override = os.environ.get("DATABASE_URL")
     if override and override.startswith("sqlite:///"):
         return Path(override.replace("sqlite:///", "")).resolve()
@@ -79,6 +85,10 @@ def _migrate_releases_table_if_needed(conn: sqlite3.Connection) -> None:
 
 def init_db(db_path: Optional[Path] = None) -> None:
     """Initialize SQLite tables and default release metadata."""
+    if firebase_enabled() and db_path is None:
+        from web.firebase_store import client
+        client()
+        return
     conn = get_connection(db_path)
     try:
         with conn:
@@ -153,6 +163,9 @@ def record_install(installation_id: str, platform: str, version: str) -> bool:
     Returns True if this is a newly recorded unique installation,
     or False if it was already known (updates don't inflate unique user counts).
     """
+    if firebase_enabled():
+        from web import firebase_store
+        return firebase_store.record_install(installation_id, platform, version)
     now = int(time.time())
     conn = get_connection()
     try:
@@ -180,6 +193,9 @@ def record_install(installation_id: str, platform: str, version: str) -> bool:
 
 
 def record_heartbeat(installation_id: str, platform: str, version: str) -> bool:
+    if firebase_enabled():
+        from web import firebase_store
+        return firebase_store.record_heartbeat(installation_id, platform, version)
     """Update last_seen timestamp for an active installation."""
     now = int(time.time())
     conn = get_connection()
@@ -208,11 +224,12 @@ def record_heartbeat(installation_id: str, platform: str, version: str) -> bool:
 
 
 def record_download(platform: str, version: str, client_ip: Optional[str] = None) -> None:
+    if firebase_enabled():
+        from web import firebase_store
+        return firebase_store.record_download(platform, version)
     """Record a platform download event with an anonymized hashed IP."""
     now = int(time.time())
-    ip_hash = None
-    if client_ip:
-        ip_hash = hashlib.sha256(f"salt_{client_ip}".encode("utf-8")).hexdigest()[:16]
+    ip_hash = None  # No raw or deterministically hashed IP in product analytics.
 
     conn = get_connection()
     try:
@@ -225,8 +242,13 @@ def record_download(platform: str, version: str, client_ip: Optional[str] = None
         conn.close()
 
 
-def get_latest_release(platform: str = "windows", db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+def get_latest_release(platform: str = "windows", db_path: Optional[Path] = None, channel: str = 'stable') -> Optional[Dict[str, Any]]:
     """Retrieve the latest release metadata for a given platform."""
+    if firebase_enabled() and db_path is None:
+        from web import firebase_store
+        return firebase_store.get_latest_release(platform, channel=channel)
+    if channel != 'stable':
+        return None
     conn = get_connection(db_path)
     try:
         cursor = conn.execute("""
@@ -251,8 +273,13 @@ def upsert_release(
     release_notes: str = "",
     published_at: Optional[int] = None,
     db_path: Optional[Path] = None,
+    channel: str = 'stable',
+    build: int = 0,
 ) -> None:
     """Insert or update a release manifest row."""
+    if firebase_enabled() and db_path is None:
+        from web import firebase_store
+        return firebase_store.upsert_release(version, platform, filename, url, sha256, size, release_notes, published_at, channel=channel, build=build)
     now = published_at or int(time.time())
     conn = get_connection(db_path)
     try:
@@ -273,50 +300,53 @@ def upsert_release(
 
 
 def sync_releases_from_github() -> None:
-    """Synchronize official release metadata from published GitHub release manifests."""
+    """Sync bounded official stable/beta platform manifests, preserving pulled releases."""
     import json
     import urllib.request
-
-    # Windows manifest
-    win_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/desktop-update.json"
+    from datetime import datetime
+    from web.release_validation import validate_release
+    def read(url):
+        request = urllib.request.Request(url, headers={'User-Agent': 'Zaya-Release-Sync'})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read(1_000_001)
+            if len(raw) > 1_000_000:
+                raise ValueError('Release metadata is too large.')
+            return json.loads(raw)
     try:
-        req = urllib.request.Request(win_url, headers={"User-Agent": "Zaya-Web-Sync"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.load(resp)
-            if isinstance(data, dict) and "version" in data and "sha256" in data:
-                upsert_release(
-                    version=str(data["version"]),
-                    platform="windows",
-                    filename=str(data.get("filename", "ZayaSetup.exe")),
-                    url=str(data.get("url", f"https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/{data.get('filename', 'ZayaSetup.exe')}")),
-                    sha256=str(data["sha256"]),
-                    size=int(data.get("size", 0)),
-                    release_notes=f"Zaya v{data['version']} Windows Production Release",
-                )
-    except Exception as e:
-        logger.debug(f"Could not sync Windows releases from GitHub: {e}")
-
-    # Android manifest
-    droid_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/update.json"
-    try:
-        req = urllib.request.Request(droid_url, headers={"User-Agent": "Zaya-Web-Sync"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.load(resp)
-            if isinstance(data, dict) and "version_name" in data and "sha256" in data:
-                upsert_release(
-                    version=str(data["version_name"]),
-                    platform="android",
-                    filename="Zaya-Companion.apk",
-                    url=str(data.get("download_url", "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/Zaya-Companion.apk")),
-                    sha256=str(data["sha256"]),
-                    size=int(data.get("size") or data.get("size_bytes", 0)),
-                    release_notes=str(data.get("release_notes", f"Zaya Companion v{data['version_name']}")),
-                )
-    except Exception as e:
-        logger.debug(f"Could not sync Android releases from GitHub: {e}")
+        rows = read('https://api.github.com/repos/sajancodes/zaya-companion-releases/releases?per_page=15')
+        seen = set()
+        for release in rows:
+            if release.get('draft'):
+                continue
+            channel = 'beta' if release.get('prerelease') else 'stable'
+            assets = {asset['name']: asset for asset in release.get('assets', [])}
+            for platform, manifest_name in [('windows', 'desktop-update.json'), ('android', 'update.json')]:
+                if (platform, channel) in seen or manifest_name not in assets:
+                    continue
+                data = read(assets[manifest_name]['browser_download_url'])
+                version = data.get('version') if platform == 'windows' else data.get('version_name')
+                filename = data.get('filename', 'ZayaSetup.exe') if platform == 'windows' else 'Zaya-Companion.apk'
+                artifact = assets.get(filename)
+                if not artifact:
+                    continue
+                item = {'version': version, 'platform': platform, 'filename': filename,
+                        'url': artifact['browser_download_url'], 'sha256': data['sha256'],
+                        'size': int(data['size']), 'channel': channel}
+                validate_release(item)
+                if artifact['size'] != item['size'] or artifact.get('digest') != 'sha256:' + item['sha256']:
+                    raise ValueError('Release manifest differs from published asset integrity metadata.')
+                upsert_release(**item, build=int(data.get('build', data.get('version_code', 0))),
+                               published_at=int(datetime.fromisoformat(release['published_at'].replace('Z', '+00:00')).timestamp()),
+                               release_notes=(release.get('body') or '')[:8000])
+                seen.add((platform, channel))
+    except Exception as error:
+        logger.warning('Release sync unavailable (%s); retaining verified catalog.', type(error).__name__)
 
 
 def get_all_releases(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    if firebase_enabled() and db_path is None:
+        from web import firebase_store
+        return firebase_store.get_all_releases()
     """Retrieve all release manifests ordered newest first."""
     conn = get_connection(db_path)
     try:
@@ -330,6 +360,9 @@ def get_all_releases(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
 
 
 def get_analytics_metrics() -> Dict[str, Any]:
+    if firebase_enabled():
+        from web import firebase_store
+        return firebase_store.get_analytics_metrics()
     """Calculate aggregated metrics for the owner admin dashboard."""
     now = int(time.time())
     t_24h = now - 86400

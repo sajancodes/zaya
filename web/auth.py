@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Dict, List, Optional
 
-from web.database import get_connection
+from web.database import get_connection, firebase_enabled
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "owner")
 SESSION_DURATION_SECONDS = 7 * 86400  # 7 days
@@ -128,6 +128,11 @@ def create_session(username: str) -> str:
     now = int(time.time())
     expires_at = now + SESSION_DURATION_SECONDS
 
+    if firebase_enabled():
+        from web.firebase_store import store_session
+        store_session(token, username, expires_at)
+        return token
+
     conn = get_connection()
     try:
         with conn:
@@ -144,6 +149,10 @@ def validate_session(token: Optional[str]) -> bool:
     """Validate an active admin session token."""
     if not token or len(token) != 64:
         return False
+
+    if firebase_enabled():
+        from web.firebase_store import validate_session as validate
+        return validate(token)
 
     now = int(time.time())
     conn = get_connection()
@@ -169,6 +178,9 @@ def revoke_session(token: str) -> None:
     """Revoke an active admin session token."""
     if not token:
         return
+    if firebase_enabled():
+        from web.firebase_store import revoke_session as revoke
+        return revoke(token)
     conn = get_connection()
     try:
         with conn:

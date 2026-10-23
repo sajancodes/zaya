@@ -70,12 +70,12 @@ hidden_imports = [
 ] + action_modules + plugin_modules
 
 datas = [
-    (str(REPO_ROOT / 'actions'), 'actions'),
-    (str(REPO_ROOT / 'plugins'), 'plugins'),
     # Never bundle the owner's provider keys, pairing credentials or settings.
     (str(REPO_ROOT / 'config' / 'jarvis.ico'), 'config'),
     (str(REPO_ROOT / 'core' / 'prompt.txt'), 'core'),
 ]
+for package in ('actions', 'plugins'):
+    datas.extend((str(source), package) for source in (REPO_ROOT / package).glob('*.py'))
 
 renderer_dist = REPO_ROOT / 'spatial_renderer' / 'dist'
 if renderer_dist.is_dir():

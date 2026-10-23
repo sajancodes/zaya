@@ -12,7 +12,8 @@ from memory.fact_policy import active as fact_active, confidence as fact_confide
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
+        from core.runtime_paths import get_user_data_dir
+        return get_user_data_dir()
     return Path(__file__).resolve().parent.parent
 
 

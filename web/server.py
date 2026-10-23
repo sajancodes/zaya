@@ -44,6 +44,7 @@ from web.database import (
     sync_releases_from_github,
 )
 from web.telemetry_service import is_rate_limited, validate_telemetry_payload
+from web.release_validation import validate_release
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("zaya-web")
@@ -55,11 +56,20 @@ STATIC_DIR = WEB_ROOT / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    logger.info("Zaya database initialized in WAL mode.")
+    try:
+        init_db()
+    except Exception:
+        logger.error('Database not configured; public static pages remain available.')
+        yield
+        return
     # Attempt non-blocking release sync from GitHub
     import threading
-    threading.Thread(target=sync_releases_from_github, daemon=True, name="ZayaReleaseSync").start()
+    if os.environ.get('VERCEL'):
+        # Serverless runtimes can suspend background work after a response.
+        from starlette.concurrency import run_in_threadpool
+        await run_in_threadpool(sync_releases_from_github)
+    else:
+        threading.Thread(target=sync_releases_from_github, daemon=True, name="ZayaReleaseSync").start()
     yield
 
 
@@ -73,6 +83,7 @@ app = FastAPI(
 # CORS restricted to official production origin and local development hosts
 ALLOWED_ORIGINS = [
     "https://zaya.sajan.codes",
+    "https://zayaxyz.vercel.app",
     "https://sajan.codes",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -92,6 +103,35 @@ app.add_middleware(
 )
 
 
+@app.middleware('http')
+async def security_headers(request: Request, call_next):
+    if request.url.path.startswith('/api/admin/') and request.method == 'POST':
+        origin = request.headers.get('origin')
+        if origin and origin not in ALLOWED_ORIGINS and origin != str(request.base_url).rstrip('/'):
+            return JSONResponse({'detail': 'Cross-origin administration is forbidden.'}, status_code=403)
+    response = await call_next(request)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.google-analytics.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    if request.url.path.startswith('/api/admin/'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+def downloadable_release(platform, channel='stable'):
+    if platform not in ('windows', 'linux', 'android') or channel not in ('stable', 'beta'):
+        raise HTTPException(400, 'Unsupported platform or release channel.')
+    rel = get_latest_release(platform, channel=channel)
+    if not rel:
+        raise HTTPException(404, 'No verified release is published for this platform/channel.')
+    try:
+        return validate_release(rel)
+    except (TypeError, ValueError):
+        raise HTTPException(503, 'Release metadata is not ready for distribution.')
+
+
 # ---------------------------------------------------------------------------
 # Telemetry Pydantic Models
 # ---------------------------------------------------------------------------
@@ -109,6 +149,32 @@ class DownloadEventPayload(BaseModel):
 class AdminLoginPayload(BaseModel):
     username: str
     password: str
+
+
+class ReleaseActivation(BaseModel):
+    active: bool
+
+
+@app.get('/api/admin/releases')
+async def admin_releases(request: Request, zaya_admin_session: Optional[str] = Cookie(None)):
+    if not is_admin_enabled() or not validate_session(zaya_admin_session):
+        raise HTTPException(401, 'Administrator authentication required.')
+    return get_all_releases()
+
+
+@app.post('/api/admin/releases/{platform}/{version}')
+async def admin_release_activation(platform: str, version: str, payload: ReleaseActivation,
+                                   request: Request, zaya_admin_session: Optional[str] = Cookie(None)):
+    if not is_admin_enabled() or not validate_session(zaya_admin_session):
+        raise HTTPException(401, 'Administrator authentication required.')
+    from web.database import firebase_enabled
+    if not firebase_enabled():
+        raise HTTPException(503, 'Release management requires the production Firebase backend.')
+    from web.firebase_store import set_release_active
+    if not any(row['version'] == version and row['platform'] == platform for row in get_all_releases()):
+        raise HTTPException(404, 'Release not found.')
+    set_release_active(version, platform, payload.active)
+    return {'status': 'ok', 'active': payload.active}
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +230,8 @@ async def api_download_event(payload: DownloadEventPayload, request: Request):
 @app.get("/download/windows")
 async def download_windows(request: Request):
     client_ip = request.client.host if request.client else None
-    rel = get_latest_release("windows")
-    version = rel["version"] if rel else "0.5.0"
-    url = rel["url"] if rel else "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/ZayaSetup.exe"
+    rel = downloadable_release('windows', request.query_params.get('channel', 'stable'))
+    version, url = rel['version'], rel['url']
 
     record_download("windows", version, client_ip)
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
@@ -175,9 +240,8 @@ async def download_windows(request: Request):
 @app.get("/download/android")
 async def download_android(request: Request):
     client_ip = request.client.host if request.client else None
-    rel = get_latest_release("android")
-    version = rel["version"] if rel else "0.4.6"
-    url = rel["url"] if rel else "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/Zaya-Companion.apk"
+    rel = downloadable_release('android', request.query_params.get('channel', 'stable'))
+    version, url = rel['version'], rel['url']
 
     record_download("android", version, client_ip)
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
@@ -187,16 +251,36 @@ async def download_android(request: Request):
 # Release Manifest Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/releases/latest")
-async def api_releases_latest(platform: str = "windows"):
-    rel = get_latest_release(platform)
-    if not rel:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No releases found.")
-    return rel
+async def api_releases_latest(platform: str = "windows", channel: str = 'stable'):
+    return downloadable_release(platform, channel)
 
 
 @app.get("/api/releases")
 async def api_releases_all():
-    return get_all_releases()
+    releases = []
+    for item in get_all_releases():
+        try:
+            if item.get('active', True):
+                releases.append(validate_release(item))
+        except (ValueError, TypeError):
+            continue
+    return releases
+
+
+@app.get('/download/linux')
+async def download_linux(request: Request):
+    rel = downloadable_release('linux', request.query_params.get('channel', 'stable'))
+    record_download('linux', rel['version'])
+    return RedirectResponse(rel['url'], status_code=302)
+
+
+@app.get('/api/updates/desktop')
+async def desktop_update_manifest(channel: str = 'stable'):
+    rel = downloadable_release('windows', channel)
+    if int(rel.get('build', 0)) <= 0:
+        raise HTTPException(503, 'Desktop build metadata is unavailable.')
+    return {**{k: rel[k] for k in ('version', 'build', 'filename', 'url', 'sha256', 'size')},
+            'channel': channel, 'schema': 1}
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +428,9 @@ if STATIC_DIR.is_dir():
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     # If a specific static file exists in dist, serve it
-    candidate = DIST_DIR / full_path
+    candidate = (DIST_DIR / full_path).resolve()
+    if not candidate.is_relative_to(DIST_DIR.resolve()):
+        raise HTTPException(404, 'Not found')
     if full_path and candidate.is_file():
         return FileResponse(str(candidate))
 
