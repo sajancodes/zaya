@@ -32,7 +32,7 @@ Implementation commits include `c3d2a80` (desktop release safeguards), `7eca31b`
 
 | Platform | Artifact / version | Size / SHA-256 | Signing / readiness |
 |---|---|---|---|
-| Windows | Intended `ZayaSetup.exe`, candidate 0.5.0 | Not built; no size/hash to report | Requires a trusted production certificate, Windows SDK/Inno Setup build and clean-machine verification |
+| Windows | Local unsigned application folder, candidate 0.5.0/build 10007 | Built locally from `e9d32b9`; no installer published | Requires a trusted production certificate, Windows SDK/Inno Setup and clean-machine verification |
 | Linux | Intended AppImage/deb | No artifact | Packaging and Linux compatibility verification not completed |
 | Android | Existing `Zaya-Companion.apk`, 0.4.6 | 3,318,779 bytes; `3bd1e75a5baac0c4f8cf742aa6fa5101e79eec5776b115dc328ed31c6c85fb2e` | Downloaded hash matches; apksigner verification succeeds, but DN is **CN=Android Debug** |
 
@@ -40,6 +40,8 @@ Android signer SHA-256: `b54d592e8e1e7da30cc07a6937cb9a399e012dbfc0aa7634d2fd192
 
 ## Validation evidence
 
+- Local owner-run pipeline completed on 23 October 2026 from commit `e9d32b9c931c0f1fb56d38677ee453245a812f29`: **216 tests passed**, fatal lint, exact installed Python dependency consistency/audits, both frontend audits/builds and native Windows packaging passed. Source was exported from Git into a clean snapshot; separate build environments preserved the installed app. PE headers, receipt hashes, version resource and a private-file denylist check passed. The speech metadata hook was repaired; the clipboard test now uses isolated native buffers instead of owner clipboard contents. This is not a frozen startup or clean-machine verification result.
+- Local unsigned `Zaya.exe`: 29,338,390 bytes, SHA-256 `a1d987c4b1ec2b190bda4932612a539b02a3d256adda7ffa2f92ef9908bd9701`. Local unsigned `ZayaHandWorker.exe`: 78,489,718 bytes, SHA-256 `0a19ef9e925464c8f3741bb143ea58b95ae4dba49cf41c0d096fa97867fb2679`. The full application folder is required; the main executable alone is not a distribution. See `docs/LOCAL_BUILDS.md`. No public artifact or update metadata was published.
 - Full repository tests: **183 passed**, one existing warning. Repeated with upgraded Pillow 13.0.0, cryptography 50.0.2 and pypdf 6.21.2: **183 passed**.
 - Website TypeScript/Vite production build passed. npm audit: **zero known vulnerabilities**. The separately resolved web/Firebase Python requirements also audit clean.
 - Initial installed-environment audit found 39 advisories in certifi, cryptography, Pillow and retired PyPDF2. Release requirements were upgraded; PDF consumers now use maintained pypdf. Full resolved **release requirements audit: zero known vulnerabilities**. Audit JSON is local under `dist/`.
