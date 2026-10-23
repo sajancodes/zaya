@@ -33,6 +33,9 @@ class Reference:
             result[field] = result.get(field, 0) + value._value if isinstance(value, firestore.Increment) else value
         self.database.rows[key] = result
 
+    def update(self, data):
+        self.set(data, merge=True)
+
 
 class Collection:
     def __init__(self, database, name, condition=None, size=100):
@@ -100,6 +103,14 @@ def test_limit_outage_does_not_downgrade_to_memory(database, monkeypatch):
     assert 'credential-should-never-be-shown' not in str(error.value)
 
 
+@pytest.mark.parametrize('credential', ['[]', '{"private_key": 123}', 'invalid-json'])
+def test_bad_shared_limit_configuration_fails_safely(monkeypatch, credential):
+    monkeypatch.delenv('ZAYA_RATE_LIMIT_SECRET', raising=False)
+    monkeypatch.setenv('FIREBASE_SERVICE_ACCOUNT_JSON', credential)
+    with pytest.raises(shared_limits.RateLimitUnavailable):
+        shared_limits.bucket_id('test', 'test', 60, 120)
+
+
 def test_registration_retry_and_heartbeat_do_not_double_count(database):
     assert firebase_store.record_install('first', 'windows', '0.5.0') is True
     assert firebase_store.record_install('first', 'windows', '0.5.0') is False
@@ -134,3 +145,19 @@ def test_update_receipt_retry_does_not_duplicate_or_store_installation_id(databa
     assert len(receipt) == 1 and set(receipt[0]) == {'expires_at'}
     totals = [value for (name, key), value in database.rows.items() if name == 'daily_updates']
     assert len(totals) == 1 and totals[0]['download_verified'] == 1
+
+
+def test_stable_beta_and_pulled_release_fallback_survive_sync(database, monkeypatch):
+    monkeypatch.setattr(firebase_store, 'get_all_releases', lambda: [value for (name, key), value in database.rows.items() if name == 'releases'])
+    def publish(version, channel, timestamp):
+        firebase_store.upsert_release(version, 'windows', 'ZayaSetup.exe',
+            f'https://github.com/sajancodes/zaya-companion-releases/releases/download/v{version}/ZayaSetup.exe',
+            'a'*64, 2048, published_at=timestamp, channel=channel, build=10007)
+    publish('0.5.0', 'stable', 1)
+    publish('0.5.1', 'stable', 2)
+    publish('0.6.0-beta.1', 'beta', 3)
+    assert firebase_store.get_latest_release(channel='stable')['version'] == '0.5.1'
+    assert firebase_store.get_latest_release(channel='beta')['version'] == '0.6.0-beta.1'
+    firebase_store.set_release_active('0.5.1', 'windows', False)
+    publish('0.5.1', 'stable', 2)
+    assert firebase_store.get_latest_release(channel='stable')['version'] == '0.5.0'

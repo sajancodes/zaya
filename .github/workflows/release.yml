@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Target to release (all, windows, android)'
+        description: 'Target to release, or catalog to retry synchronization of an existing release'
         required: true
         default: 'all'
         type: choice
@@ -15,6 +15,7 @@ on:
           - all
           - windows
           - android
+          - catalog
       channel:
         description: 'Release channel (stable, beta)'
         required: true
@@ -232,8 +233,26 @@ jobs:
           name: Zaya-Companion-aab
           path: dist/android-release/Zaya-Companion.aab
 
+  sync_catalog:
+    name: Retry existing release catalog synchronization
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'catalog' }}
+    runs-on: ubuntu-latest
+    needs: version
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync immutable, already published artifacts
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+        run: python tools/sync_release_catalog.py --tag "$RELEASE_TAG"
+
   publish:
     name: Aggregate & Publish Release
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     needs: [version, build_windows, build_android]
     if: |
@@ -344,3 +363,6 @@ jobs:
             --notes-file unified-notes.md \
             $FLAG \
             "${assets[@]}"
+
+      - name: Synchronize verified platform manifests into the website catalog
+        run: python tools/sync_release_catalog.py --tag "${{ needs.version.outputs.release_tag }}"

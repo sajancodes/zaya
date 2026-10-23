@@ -299,7 +299,7 @@ def upsert_release(
         conn.close()
 
 
-def sync_releases_from_github() -> None:
+def sync_releases_from_github(strict=False, tag=None):
     """Sync bounded official stable/beta platform manifests, preserving pulled releases."""
     import json
     import urllib.request
@@ -313,19 +313,27 @@ def sync_releases_from_github() -> None:
                 raise ValueError('Release metadata is too large.')
             return json.loads(raw)
     try:
-        rows = read('https://api.github.com/repos/sajancodes/zaya-companion-releases/releases?per_page=15')
+        base = 'https://api.github.com/repos/sajancodes/zaya-companion-releases/releases'
+        if tag is not None:
+            from web.release_identity import TAG
+            if not isinstance(tag, str) or not TAG.fullmatch(tag):
+                raise ValueError('Invalid release tag')
+        rows = [read(base + '/tags/' + tag)] if tag else read(base + '?per_page=15')
         seen = set()
+        processed = []
         for release in rows:
             if release.get('draft'):
                 continue
             channel = 'beta' if release.get('prerelease') else 'stable'
             assets = {asset['name']: asset for asset in release.get('assets', [])}
-            for platform, manifest_name in [('windows', 'desktop-update.json'), ('android', 'update.json')]:
+            for platform, manifest_name in [('windows', 'desktop-update.json'), ('android', 'update.json'), ('linux', 'linux-update.json')]:
                 if (platform, channel) in seen or manifest_name not in assets:
                     continue
                 data = read(assets[manifest_name]['browser_download_url'])
-                version = data.get('version') if platform == 'windows' else data.get('version_name')
-                filename = data.get('filename', 'ZayaSetup.exe') if platform == 'windows' else 'Zaya-Companion.apk'
+                if platform == 'linux' and data.get('public_release_verified') is not True:
+                    raise ValueError('Unverified Linux candidates cannot enter the public catalog')
+                version = data.get('version_name') if platform == 'android' else data.get('version')
+                filename = 'Zaya-Companion.apk' if platform == 'android' else data.get('filename', 'ZayaSetup.exe' if platform == 'windows' else 'Zaya.deb')
                 artifact = assets.get(filename)
                 if not artifact:
                     continue
@@ -339,8 +347,14 @@ def sync_releases_from_github() -> None:
                                published_at=int(datetime.fromisoformat(release['published_at'].replace('Z', '+00:00')).timestamp()),
                                release_notes=(release.get('body') or '')[:8000])
                 seen.add((platform, channel))
+                processed.append({'platform':platform, 'version':version, 'channel':channel})
+        if tag and not processed:
+            raise ValueError('No verified platform manifests found for this release')
+        return {'status':'ok', 'releases':processed}
     except Exception as error:
         logger.warning('Release sync unavailable (%s); retaining verified catalog.', type(error).__name__)
+        if strict:
+            raise RuntimeError('Verified release synchronization failed') from None
 
 
 def get_all_releases(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:

@@ -17,10 +17,11 @@ def bucket_id(subject: str, scope: str, window: int, now: int) -> str:
     secret = os.environ.get('ZAYA_RATE_LIMIT_SECRET', '')
     if not secret:
         try:
-            secret = json.loads(os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '{}')).get('private_key', '')
+            credential = json.loads(os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '{}'))
+            secret = credential.get('private_key', '') if isinstance(credential, dict) else ''
         except (ValueError, TypeError):
             secret = ''
-    if len(secret) < 32:
+    if not isinstance(secret, str) or len(secret) < 32:
         raise RateLimitUnavailable('Shared request protection is not configured')
     # The identifier changes every window; no raw or stable address is persisted.
     message = f'{scope}:{now // window}:{subject}'.encode()

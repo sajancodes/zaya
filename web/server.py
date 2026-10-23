@@ -168,6 +168,30 @@ class ReleaseActivation(BaseModel):
     active: bool
 
 
+class CatalogSyncPayload(BaseModel):
+    model_config = {'extra':'forbid'}
+    tag: str = Field(..., min_length=6, max_length=80)
+
+
+@app.post('/api/internal/releases/sync')
+async def release_catalog_sync(payload: CatalogSyncPayload, request: Request):
+    header = request.headers.get('authorization', '')
+    if not header.startswith('Bearer '):
+        raise HTTPException(401, 'Release workflow authentication required.')
+    if is_rate_limited(request.client.host if request.client else 'unknown'):
+        raise HTTPException(429, 'Rate limit exceeded.')
+    from web.release_identity import authenticate
+    try:
+        authenticate(header[7:], payload.tag)
+    except PermissionError:
+        raise HTTPException(401, 'Release workflow authentication required.')
+    from starlette.concurrency import run_in_threadpool
+    try:
+        return await run_in_threadpool(sync_releases_from_github, strict=True, tag=payload.tag)
+    except Exception:
+        raise HTTPException(503, 'Verified release catalog synchronization did not complete.')
+
+
 @app.get('/api/admin/releases')
 async def admin_releases(request: Request, zaya_admin_session: Optional[str] = Cookie(None)):
     if not is_admin_enabled() or not validate_session(zaya_admin_session):
