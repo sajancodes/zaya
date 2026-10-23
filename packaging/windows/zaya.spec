@@ -4,6 +4,7 @@ Created and developed by Sajan Rai for Zaya.
 """
 import os
 import sys
+import runpy
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -129,6 +130,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_path,
+    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'Zaya.exe'),
 )
 
 coll = COLLECT(

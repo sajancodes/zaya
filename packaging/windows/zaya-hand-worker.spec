@@ -6,6 +6,7 @@ Produces ZayaHandWorker.exe wrapping core.gesture.worker for bounded stdin/stdou
 """
 import os
 import sys
+import runpy
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
@@ -67,6 +68,7 @@ exe = EXE(
     a.datas,
     [],
     name='ZayaHandWorker',
+    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'ZayaHandWorker.exe'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
