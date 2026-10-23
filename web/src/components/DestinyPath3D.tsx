@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { createCrystalCastle } from './CrystalCastle3D';
 
 interface DestinyPath3DProps {
   currentSection?: string;
@@ -222,7 +223,9 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
       new THREE.Vector3(-1, -2.2, -48),
       new THREE.Vector3(3, -1.5, -66),
       new THREE.Vector3(0, -0.5, -88),
-      new THREE.Vector3(1, 1.2, -110)
+      new THREE.Vector3(1, 1.2, -110),
+      new THREE.Vector3(1, 4.65, -117.25), // Enters the crystal castle causeway
+      new THREE.Vector3(1, 8.1, -124.5)    // Crosses through the grand ice arch gate
     ];
 
     const groundCurve = new THREE.CatmullRomCurve3(groundPathPoints);
@@ -391,7 +394,7 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
     scene.add(frostParticles);
 
     // 13. Aurora Borealis at the Horizon End of the Pass
-    const auroraGeom = new THREE.PlaneGeometry(180, 50, 48, 12);
+    const auroraGeom = new THREE.PlaneGeometry(240, 75, 48, 12);
     const aPos = auroraGeom.attributes.position;
     for (let i = 0; i < aPos.count; i++) {
       const x = aPos.getX(i);
@@ -424,8 +427,19 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
       depthWrite: false
     });
     const auroraMesh = new THREE.Mesh(auroraGeom, auroraMat);
-    auroraMesh.position.set(0, 22, -125);
+    auroraMesh.position.set(0, 32, -175);
     scene.add(auroraMesh);
+
+    // 13b. THE BIG 3D CRYSTAL CASTLE (THE ICE CITADEL OF ZAYA)
+    const crystalCastle = createCrystalCastle();
+    scene.add(crystalCastle.group);
+
+    // Directional rim light behind the crystal castle to illuminate its facets against the aurora
+    const castleRimLight = new THREE.DirectionalLight(0x5feaff, 2.4);
+    castleRimLight.position.set(1, 45, -170);
+    castleRimLight.target.position.set(1, 25, -132);
+    scene.add(castleRimLight);
+    scene.add(castleRimLight.target);
 
     // 14. Scroll and Mouse Event Handlers
     const handleScroll = () => {
@@ -486,14 +500,23 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
       camera.position.y += (targetCamY - camera.position.y) * 0.06;
       camera.position.z += (targetCamZ - camera.position.z) * 0.06;
 
-      // Look ahead along the mountain pathway with responsive mouse steering
+      // Look ahead along the mountain pathway with smooth framing of the Crystal Castle near the destination
+      const castleFocus = new THREE.Vector3(1.0, 18.0, -132.0);
+      const castleBlend = THREE.MathUtils.smoothstep(t, 0.72, 1.0);
+      const lookX = THREE.MathUtils.lerp(lookTargetPos.x, castleFocus.x, castleBlend);
+      const lookY = THREE.MathUtils.lerp(lookTargetPos.y - 0.2, castleFocus.y, castleBlend);
+      const lookZ = THREE.MathUtils.lerp(lookTargetPos.z, castleFocus.z, castleBlend);
+
       camera.lookAt(
-        lookTargetPos.x + mouseRef.current.x * 1.8,
-        lookTargetPos.y - 0.2 + mouseRef.current.y * 1.0,
-        lookTargetPos.z
+        lookX + mouseRef.current.x * 1.8,
+        lookY + mouseRef.current.y * 1.0,
+        lookZ
       );
 
       if (!prefersReducedMotion) {
+        // Animate the Big 3D Crystal Castle (pulsing Heart of Ice, rotating rings & floating shards)
+        crystalCastle.update(elapsed);
+
         // Animate traveling energy pulses along the ground pathway
         pulses.forEach((p) => {
           p.progress += p.speed;
@@ -565,6 +588,7 @@ export const DestinyPath3D: React.FC<DestinyPath3DProps> = ({
       auroraMat.dispose();
       sparkTexture.dispose();
       auroraTexture.dispose();
+      crystalCastle.dispose();
     };
   }, [interactive]);
 
