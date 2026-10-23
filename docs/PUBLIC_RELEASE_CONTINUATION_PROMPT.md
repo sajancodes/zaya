@@ -1,0 +1,19 @@
+Continue Zaya's first serious public distribution release in C:\Users\ab429\Desktop\Zaya.
+
+Read docs/public-release-readiness.md first. It records actual verified results and missing work; do not repeat a broad audit. The original full requirement is the owner's 82-section public-release specification at C:\Users\ab429\.codex\attachments\852e739d-7888-44d9-8221-0361786d67aa\Pasted text.txt. Implement the remaining requirements in coherent verified slices; do not call the release complete after deploying only the website.
+
+Owner instructions: sajancodes <ab4290025@gmail.com>; verify git var GIT_AUTHOR_IDENT; commit/push main after checks. Preserve settings, history, WhatsApp credentials, private DBs and untracked todo.txt, tools/calculator.py, zaya.cmd. Never stage secrets or weaken owner confirmation/trust boundaries. Branding Zaya, creator Sajan Rai. Keep source private, public artifact channel sajancodes/zaya-companion-releases.
+
+Current website is https://zayaxyz.vercel.app, Vercel project web. Firebase is zaya-c502a under the owner's second Google account beginning xy…, NOT oppsajan…. Firestore client rules deny all. FIREBASE_SERVICE_ACCOUNT_JSON is already in Vercel sensitive production environment storage; never print or commit it. Its local recovery copy is DPAPI protected at %LOCALAPPDATA%\ZayaRelease\service-account.dpapi. The working public key expires 2027-10-23. Two unused export keys were removed with owner approval. Do not generate another credential unnecessarily.
+
+Completed: canonical desktop version.json 0.5.0/build10007/stable; hardened Windows updater; optional pinned/checksummed OpenCode installer and controls; source-data packaging safeguards; Firebase backend; real downloads rather than fictional release hashes; site SEO/consent groundwork; authenticated release pull API; dependency security upgrade. Read the report for exact limitations.
+
+Proof: all 183 tests passed with both the original and upgraded dependency set; website build passed; npm audit zero; resolved release-requirements pip-audit zero. Real isolated OpenCode 1.19.2 install/version passed. Live API releases and Android redirect worked. Existing APK downloaded and hash/signature verified, BUT its certificate is Android Debug; do not pretend it is production signing.
+
+Blocking external requirements: GitHub Actions refuses to start because of account billing/spending settings; trusted Windows Authenticode certificate is absent; administrator credential is not configured; GA/Search Console configuration absent. Do not bypass signing, reputation checks, pay for services, accept terms or delete credentials without applicable owner approval. Owner explicitly approved Firebase-to-Vercel connection and accepted Google Cloud terms during this session; don't ask again for those same actions.
+
+Prioritize: full Windows PE metadata/frozen-resource review and clean install/upgrade/uninstall/update proof; real Linux package/runtime support; production Android signing migration (preserve existing owner-channel compatibility); secure admin setup/live verification; update health/adoption telemetry, retention and distributed abuse limits; release publish/catalog/beta/rollback end-to-end proof; SEO/docs/GA/Search Console finishing. Details are numbered in the readiness report.
+
+The normal source .venv still has older loaded binary dependencies because several Zaya processes were running. Do not replace locked libraries or kill user work. Requirements are updated; .venv-release-audit contains upgraded libraries used for successful validation. dist/release-requirements-audit.json and dist/dependency-audit.json are local audit reports. Keep build/test secrets out of all artifacts.
+
+Use focused reads/checks and avoid re-running successful broad checks without new changes. Finish remaining code autonomously, clearly label external/manual blockers, and leave a precise next prompt before usage runs out.

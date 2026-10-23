@@ -13,6 +13,14 @@ import sys
 from pathlib import Path
 
 
+def _run_signing(command):
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as error:
+        # CalledProcessError includes argv, which can contain the PFX password.
+        raise RuntimeError(f'Code signing failed (exit {error.returncode}); signing credentials withheld.') from None
+
+
 def calculate_sha256(file_path: Path) -> str:
     sha = hashlib.sha256()
     with file_path.open("rb") as f:
@@ -75,13 +83,13 @@ def prepare_windows_release(
             if cert_password:
                 cmd.extend(["/p", cert_password])
             cmd.append(str(zaya_exe))
-            subprocess.run(cmd, check=True)
+            _run_signing(cmd)
             subprocess.run([signtool, 'verify', '/pa', '/all', str(zaya_exe)], check=True)
 
             if worker_exe.is_file():
                 print(f"Signing {worker_exe.name}...")
                 cmd_w = list(cmd[:-1]) + [str(worker_exe)]
-                subprocess.run(cmd_w, check=True)
+                _run_signing(cmd_w)
                 subprocess.run([signtool, 'verify', '/pa', '/all', str(worker_exe)], check=True)
 
     # Locate ISCC compiler
@@ -122,7 +130,7 @@ def prepare_windows_release(
             if cert_password:
                 cmd_inst.extend(["/p", cert_password])
             cmd_inst.append(str(installer))
-            subprocess.run(cmd_inst, check=True)
+            _run_signing(cmd_inst)
             subprocess.run([signtool, 'verify', '/pa', '/all', str(installer)], check=True)
 
     # 2. Mirror the signed installer to the backward-compatible alias Zaya-Setup.exe

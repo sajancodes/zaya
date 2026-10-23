@@ -56,3 +56,13 @@ def test_vercel_cannot_use_ephemeral_sqlite(monkeypatch):
     monkeypatch.setenv('VERCEL', '1')
     with pytest.raises(RuntimeError, match='Firebase'):
         get_db_path()
+
+
+def test_signing_failure_does_not_expose_certificate_password():
+    import subprocess
+    from tools.prepare_windows_release import _run_signing
+    command = ['signtool.exe', 'sign', '/p', 'fixture-private-password']
+    with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, command)):
+        with pytest.raises(RuntimeError) as caught:
+            _run_signing(command)
+    assert 'fixture-private-password' not in str(caught.value)

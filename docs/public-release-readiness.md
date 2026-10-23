@@ -1,0 +1,53 @@
+# Zaya public release readiness — 23 October 2026
+
+**Not yet ready for a general public desktop launch.** The website and Firebase connection are live; a complete signed desktop/Linux distribution has not been produced or validated.
+
+Implementation commits include `c3d2a80` (desktop release safeguards), `7eca31b` (Firebase/website), `213fb87` (dependency/security follow-up), and `3466453` (real Windows signature verification/admin analytics isolation). Creator/publisher: Sajan Rai. Branding: Zaya. The final report/check follow-up commit is listed in Git history.
+
+## Verified work
+
+- Canonical desktop version: `version.json`, candidate `0.5.0`, build `10007`, stable. CI reads this file rather than inventing versions. Existing Android 0.4.6 remains a separate legacy companion release.
+- Windows updater accepts the actual installer filename, requires immutable official HTTPS artifact URLs, compares SemVer/channel/build, bounds downloads, checks size and SHA-256, and rechecks immediately before execution. Packaged Windows builds require a valid Authenticode signature with the expected publisher. Stable/beta selection persists locally. Startup checks can open the update dialog; Later and View changes are available.
+- Optional Coding Skill can be installed/repaired/removed from desktop controls or selected during installation. Official OpenCode 1.19.2 Windows archive is pinned by SHA-256. A real isolated install returned `Installed · 1.19.2`. Existing global OpenCode, authentication and user projects are preserved.
+- Packaging no longer copies the owner's configuration folder or unrelated plugin installers. Data directories remain separate from binaries; uninstall data removal defaults to No. Frozen memory/config paths were corrected. Windows packaging refuses to produce a public unsigned installer.
+- Vercel project `web`, production URL: https://zayaxyz.vercel.app . The Firebase-backed deployment completed successfully. Public releases API returned only the actual Android release. The Android redirect resolved to its immutable GitHub asset; unpublished Windows metadata returned HTTP 404. Sitemap and robots returned the proper XML/text content types.
+- Firebase project `zaya-c502a` was created under the owner's requested second Google account. Firestore is in production mode, denying all direct client reads/writes. Only the server uses the Admin SDK. Authenticated server read and published-release metadata write both returned HTTP 200.
+- Backend credential is a sensitive production Vercel environment variable. The local recovery copy is Windows-DPAPI protected outside the repository. Plaintext was removed. Two unused export-attempt keys were deleted with explicit owner approval; only the working uploaded key remains. Rotate the current key before **23 October 2027**.
+- Public download/release pages use server metadata instead of fabricated hashes, sizes or Windows releases. Linux is explicitly unavailable until validated. The cinematic homepage is preserved; its 3D component is lazy loaded. Major public routes receive static title, description, canonical, social metadata and JSON-LD; sitemap excludes admin/API routes.
+- Analytics remains opt-in. UUIDs are random, not hardware fingerprints. The heartbeat carries installation ID/platform/version, at most every two minutes; online means seen within three minutes. Download counters contain no raw or deterministic IP identity. Firestore stores aggregate downloads, limited installation metadata and hashed admin-session tokens, never conversation/media/contact/key contents.
+- Admin release activation endpoints require authentication; pulled releases stay pulled across metadata sync. Binaries remain immutable. Admin remains disabled until a strong server-side administrator credential is configured.
+- GA integration is prepared behind separate website consent and a public measurement-ID environment variable. No GA measurement ID has been configured; GA is not active. Privacy copy reflects optional collection.
+
+## Artifact inventory
+
+| Platform | Artifact / version | Size / SHA-256 | Signing / readiness |
+|---|---|---|---|
+| Windows | Intended `ZayaSetup.exe`, candidate 0.5.0 | Not built; no size/hash to report | Requires a trusted production certificate, Windows SDK/Inno Setup build and clean-machine verification |
+| Linux | Intended AppImage/deb | No artifact | Packaging and Linux compatibility verification not completed |
+| Android | Existing `Zaya-Companion.apk`, 0.4.6 | 3,318,779 bytes; `3bd1e75a5baac0c4f8cf742aa6fa5101e79eec5776b115dc328ed31c6c85fb2e` | Downloaded hash matches; apksigner verification succeeds, but DN is **CN=Android Debug** |
+
+Android signer SHA-256: `b54d592e8e1e7da30cc07a6937cb9a399e012dbfc0aa7634d2fd19248c86a8e2`. Keep existing owner-channel upgrade compatibility. Do not silently replace that identity: prepare a production key and an explicit migration/new-package plan. Unified production CI now rejects the debug identity. Play Store enrollment, AAB publishing and Play App Signing are not completed. Neither Play Protect nor SmartScreen trust/reputation is claimed.
+
+## Validation evidence
+
+- Full repository tests: **183 passed**, one existing warning. Repeated with upgraded Pillow 13.0.0, cryptography 50.0.2 and pypdf 6.21.2: **183 passed**.
+- Website TypeScript/Vite production build passed. npm audit: **zero known vulnerabilities**. The separately resolved web/Firebase Python requirements also audit clean.
+- Initial installed-environment audit found 39 advisories in certifi, cryptography, Pillow and retired PyPDF2. Release requirements were upgraded; PDF consumers now use maintained pypdf. Full resolved **release requirements audit: zero known vulnerabilities**. Audit JSON is local under `dist/`.
+- Existing running Zaya Python processes were detected. Their loaded binary libraries were not replaced. Refresh that environment after closing those processes; do not mistake the old installed environment for the newly audited release dependency set.
+- Fatal Python lint checks and compilation passed. Local dependency consistency check passed before dependency migration. OpenCode isolated installation smoke check passed. A real Microsoft-signed binary (including a staged .tmp filename) passed Windows signature verification; the wrong publisher was rejected. The verifier now uses the system PowerShell executable/modules, avoiding incompatible inherited PowerShell 7 module paths.
+- GitHub hosted CI **did not run**: both jobs were rejected before execution because account payments/spending settings block Actions. Evidence: https://github.com/sajancodes/zaya/actions/runs/39882042105 . Local checks are not presented as hosted-CI success.
+- Windows clean install, update on an installed old build, uninstall, physical device/camera verification, Linux execution and production Defender scanning: **not performed**. Production signing/Defender/test gates are prepared, not certified as executed.
+
+## Remaining release requirements
+
+1. Configure a trusted Windows signing certificate/service and CI secrets `ZAYA_WINDOWS_PFX_BASE64`, `ZAYA_WINDOWS_PFX_PASSWORD`; make the Windows SDK signtool available. Build/sign/verify the main binary, worker and installer. Add complete PE version metadata and verify frozen startup/resource paths across all features before public release.
+2. Resolve GitHub Actions account billing/spending restrictions. Re-run all release gates, including Python dependency audit/secret scanning and Defender. Do not weaken those gates to publish.
+3. Complete native Linux packaging, platform capability guards, secure Linux key storage, native update behavior and real Linux checks. Do not ship Windows executables as Linux downloads.
+4. Complete Android production signing migration while preserving the existing owner channel. Verify versionCode progression, minimum Android requirements, AAB/Play permissions and Data Safety declarations. Existing signed debug APK is not a production-ready public identity.
+5. Set the administrator's strong credential through Vercel secret settings. Verify login/logout, protected metrics, CSRF and release pull/reactivation against live Firebase. Add practical release readiness/update-health views and complete metric definitions.
+6. Complete privacy-safe update-event reporting/adoption metrics, optional redacted crash reporting, persistent/distributed abuse limits, retention enforcement and aggregate daily installation charts. Firestore expiry timestamps are prepared, but **90-day TTL enforcement is not enabled**; do not promise it is.
+7. Wire release publication to reliable catalog synchronization; test stable, beta, pulled releases and rollback with actual independently published platform versions. Existing sync scans recent official manifests; it is not proof of a complete release automation chain.
+8. Provide GA measurement ID if wanted, verify consent/event behavior, configure Search Console/domain verification, expand unique docs SEO and verify all public navigation, 404/mobile/performance behavior. No Search Console verification or custom-domain ownership is claimed.
+9. Perform clean Windows installation without Python/Git/OpenCode; optional coding failure/retry; upgrade preserving settings/history/keys/phone/WhatsApp/projects; uninstall with data retained; offline/corrupt-update and safe application restart tests. Produce final immutable artifact hashes/sizes and a complete release report only after these pass.
+
+The public launch remains gated by the above work. No certificate, billing resolution, Play approval, reputation approval, clean-machine result or unbuilt artifact is fabricated.
