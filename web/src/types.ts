@@ -31,6 +31,8 @@ export interface AnalyticsMetrics {
   daily_downloads: Array<{ day: string; count: number }>;
   daily_installs_since?: number;
   retention?: {mode: string; last_completed: number | null; limitation: string};
+  update_health?: Array<{day:string; platform:string; target_version:string | null; available?:number; download_verified?:number; installer_started?:number; failed?:number}>;
+  update_health_definition?: string;
   updated_at: number;
 }
 

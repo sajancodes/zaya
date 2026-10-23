@@ -66,6 +66,24 @@ def record_download(platform, version, client_ip=None):
     batch.commit()
 
 
+def record_update_event(event_id, platform, target_version, stage):
+    from google.cloud import firestore
+    now = datetime.now(timezone.utc)
+    day = now.date().isoformat()
+    # Event receipts store expiry only, with no installation UUID or other content.
+    receipt = collection('update_receipts').document(hashlib.sha256(event_id.encode()).hexdigest())
+    totals = collection('daily_updates').document(f'{day}:{platform}:{target_version or "unknown"}')
+    @firestore.transactional
+    def record(transaction):
+        if receipt.get(transaction=transaction).exists:
+            return False
+        transaction.create(receipt, {'expires_at': now + timedelta(days=1)})
+        transaction.set(totals, {'day':day, 'platform':platform, 'target_version':target_version,
+                               stage:firestore.Increment(1)}, merge=True)
+        return True
+    return record(client().transaction())
+
+
 def get_all_releases(db_path=None):
     return [doc.to_dict() for doc in collection('releases').order_by('published_at', direction='DESCENDING').limit(200).stream()]
 
@@ -133,7 +151,9 @@ def get_analytics_metrics():
             daily_installs.append({'day': day.isoformat(), 'count': installs_day.get('total', 0)})
     maintenance = collection('maintenance').document('retention').get().to_dict() or {}
     last_cleanup = maintenance.get('last_completed')
-    return {'retention': {'mode': 'traffic-driven', 'last_completed': int(last_cleanup.timestamp()) if last_cleanup else None,
+    recent_updates = [doc.to_dict() for doc in collection('daily_updates').where(filter=FieldFilter('day', '>=', (datetime.now(timezone.utc).date() - timedelta(days=13)).isoformat())).order_by('day', direction='DESCENDING').limit(100).stream()]
+    return {'update_health':recent_updates, 'update_health_definition':'Opt-in reports only. Installer started means process launch, not completed installation. Version adoption comes from later heartbeats.',
+            'retention': {'mode': 'traffic-driven', 'last_completed': int(last_cleanup.timestamp()) if last_cleanup else None,
                           'last_deleted': maintenance.get('deleted', {}),
                           'limitation': 'Runs on protected request traffic; idle deployments require a scheduled caller. Up to 100 expired records per collection per pass.'},
             'downloads': {k: downloads.get(k, 0) for k in ('total', *platforms)},

@@ -21,6 +21,30 @@ def test_shared_quota_outage_returns_safe_503(monkeypatch):
     assert 'internal credential detail' not in response.text
 
 
+def test_update_health_is_opt_in_and_uses_only_allowed_fields(tmp_path, monkeypatch):
+    from core import telemetry
+    monkeypatch.setenv('ZAYA_USER_DATA_DIR', str(tmp_path))
+    calls = []
+    monkeypatch.setattr(telemetry, '_post_json', lambda url, data: calls.append(data) or True)
+    assert telemetry.report_update_event('available', '0.5.1') is False
+    assert calls == []
+    telemetry.set_telemetry_enabled(True)
+    assert telemetry.report_update_event('download_verified', '0.5.1') is True
+    assert set(calls[0]) == {'installation_id', 'platform', 'version', 'event_id', 'stage', 'target_version'}
+    assert telemetry.report_update_event('private exception text', '0.5.1') is False
+    assert telemetry.report_update_event('failed', 'private exception text') is False
+    assert len(calls) == 1
+
+
+def test_update_api_rejects_arbitrary_error_content():
+    from fastapi.testclient import TestClient
+    from web.server import app
+    payload = {'installation_id':'12345678-1234-4123-8123-123456789abc', 'event_id':'12345678-1234-4123-8123-123456789abd',
+               'platform':'windows', 'version':'0.5.0', 'target_version':'0.5.1', 'stage':'failed', 'error':'private message'}
+    response = TestClient(app).post('/api/telemetry/update', json=payload)
+    assert response.status_code == 422
+
+
 def metadata(**changes):
     return dict(schema=1, platform='windows', channel='stable', version='1.0.0', build=10008,
                 filename='ZayaSetup.exe', size=2000, sha256='a'*64,

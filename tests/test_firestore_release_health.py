@@ -124,4 +124,13 @@ def test_cleanup_preserves_concurrently_refreshed_installation(database):
     assert ('installations', 'old') not in database.rows
     assert ('admin_sessions', 'expired') not in database.rows
     assert ('request_limits', 'expired') not in database.rows
-    assert database.rows['maintenance', 'retention']['deleted'] == {'installations': 1, 'admin_sessions': 1, 'request_limits': 1}
+    assert database.rows['maintenance', 'retention']['deleted'] == {'installations': 1, 'admin_sessions': 1, 'request_limits': 1, 'update_receipts': 0}
+
+
+def test_update_receipt_retry_does_not_duplicate_or_store_installation_id(database):
+    assert firebase_store.record_update_event('event-id', 'windows', '0.5.1', 'download_verified') is True
+    assert firebase_store.record_update_event('event-id', 'windows', '0.5.1', 'download_verified') is False
+    receipt = [value for (name, key), value in database.rows.items() if name == 'update_receipts']
+    assert len(receipt) == 1 and set(receipt[0]) == {'expires_at'}
+    totals = [value for (name, key), value in database.rows.items() if name == 'daily_updates']
+    assert len(totals) == 1 and totals[0]['download_verified'] == 1

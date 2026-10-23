@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,6 +152,13 @@ class DownloadEventPayload(BaseModel):
     version: str = Field(..., min_length=1, max_length=30)
 
 
+class UpdateEventPayload(TelemetryPayload):
+    model_config = {'extra': 'forbid'}
+    event_id: str = Field(..., min_length=36, max_length=36)
+    stage: Literal['available', 'download_verified', 'installer_started', 'failed']
+    target_version: Optional[str] = Field(None, min_length=1, max_length=30)
+
+
 class AdminLoginPayload(BaseModel):
     username: str
     password: str
@@ -228,6 +235,22 @@ async def api_download_event(payload: DownloadEventPayload, request: Request):
 
     record_download(platform, payload.version.strip(), client_ip)
     return {"status": "ok"}
+
+
+@app.post('/api/telemetry/update')
+async def api_update_event(payload: UpdateEventPayload, request: Request):
+    from web.database import firebase_enabled
+    from web.telemetry_service import UUID_PATTERN, VERSION_PATTERN
+    if is_rate_limited(request.client.host if request.client else 'unknown'):
+        raise HTTPException(429, 'Rate limit exceeded.')
+    valid, message = validate_telemetry_payload(payload.model_dump())
+    if not valid or not UUID_PATTERN.fullmatch(payload.event_id) or (payload.target_version is not None and not VERSION_PATTERN.fullmatch(payload.target_version)):
+        raise HTTPException(400, 'Invalid update event metadata.')
+    if not firebase_enabled():
+        raise HTTPException(503, 'Update health requires the configured production backend.')
+    from web.firebase_store import record_update_event
+    recorded = record_update_event(payload.event_id, payload.platform, payload.target_version, payload.stage)
+    return {'status':'ok', 'recorded':recorded}
 
 
 # ---------------------------------------------------------------------------

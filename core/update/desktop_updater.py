@@ -195,11 +195,27 @@ class DesktopUpdater:
     def _set_status(self, status: UpdateStatus, message: str = "") -> None:
         self.status = status
         self.error_message = message if status == UpdateStatus.FAILED else ""
+        stage = {UpdateStatus.AVAILABLE:'available', UpdateStatus.READY:'download_verified', UpdateStatus.FAILED:'failed'}.get(status)
+        if stage:
+            self._report_update_stage(stage)
         for callback in list(self.listeners):
             try:
                 callback(status, message)
             except Exception:
                 pass
+
+    def _report_update_stage(self, stage: str):
+        # Source/developer runs must not pollute public release-health metrics.
+        if not getattr(sys, 'frozen', False) or os.name != 'nt':
+            return
+        target = self.available_manifest.version if self.available_manifest else None
+        def report():
+            try:
+                from core.telemetry import report_update_event
+                report_update_event(stage, target)
+            except Exception:
+                pass  # Optional reporting must never interfere with an update.
+        threading.Thread(target=report, daemon=True, name='ZayaUpdateHealth').start()
 
     def check(self, force: bool = False) -> Optional[DesktopUpdateManifest]:
         """Check for updates synchronously (call from background thread)."""
@@ -345,6 +361,7 @@ class DesktopUpdater:
             # Spawn installer as detached process
             flags = subprocess.DETACHED_PROCESS if os.name == "nt" else 0
             subprocess.Popen(cmd, creationflags=flags)
+            self._report_update_stage('installer_started')
 
             if restart:
                 from PyQt6.QtWidgets import QApplication

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from core.runtime_paths import get_user_data_dir
-from core.version import VERSION
+from core.version import VERSION, semver_key
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,23 @@ def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) 
         except Exception:
             pass
     return success
+
+
+def report_update_event(stage: str, target_version: Optional[str] = None, base_url: Optional[str] = None) -> bool:
+    """Best-effort update health; no URLs, exceptions, paths or message content."""
+    if target_version is not None:
+        try:
+            if not isinstance(target_version, str) or len(target_version) > 30:
+                return False
+            semver_key(target_version)
+        except (TypeError, ValueError):
+            return False
+    if stage not in {'available', 'download_verified', 'installer_started', 'failed'} or not is_telemetry_enabled():
+        return False
+    info = get_or_create_installation_info()
+    payload = {'installation_id': info['installation_id'], 'platform': info['platform'], 'version': VERSION,
+               'event_id': str(uuid.uuid4()), 'stage': stage, 'target_version': target_version}
+    return _post_json((base_url or DEFAULT_TELEMETRY_BASE_URL).rstrip('/') + '/api/telemetry/update', payload)
 
 
 class TelemetryClient:

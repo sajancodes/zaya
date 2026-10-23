@@ -8,7 +8,7 @@ import time
 
 _lock = threading.Lock()
 _next_local_check = 0.0
-COLLECTIONS = ('installations', 'admin_sessions', 'request_limits')
+COLLECTIONS = ('installations', 'admin_sessions', 'request_limits', 'update_receipts')
 
 
 def maybe_cleanup():

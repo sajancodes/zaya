@@ -269,6 +269,15 @@ export const Admin: React.FC = () => {
             </div>
 
             {/* Privacy Guarantee Note */}
+            <div className="card" style={{marginBottom:24, overflowX:'auto'}}>
+              <h3>Recent update health (UTC)</h3>
+              <p>{metrics.update_health_definition || 'No production update-health reports received yet.'}</p>
+              <table className="data-table"><thead><tr><th>Day / target</th><th>Offered</th><th>Verified downloads</th><th>Installer launches</th><th>Failures</th></tr></thead>
+                <tbody>{(metrics.update_health || []).map(row => <tr key={row.day + row.platform + row.target_version}>
+                  <td>{row.day} · {row.platform} · {row.target_version || 'unknown'}</td><td>{row.available || 0}</td><td>{row.download_verified || 0}</td><td>{row.installer_started || 0}</td><td>{row.failed || 0}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
             {metrics.retention && <div className="card" style={{marginBottom:24}}>
               <h3>Retention health</h3>
               <p>Last completed cleanup: {metrics.retention.last_completed ? new Date(metrics.retention.last_completed * 1000).toLocaleString() : 'Not recorded yet'}</p>
