@@ -1,9 +1,9 @@
-"""Secure local key storage using Windows DPAPI (Data Protection API).
+"""Secure local key storage using Windows DPAPI or Linux Secret Service.
 Created and developed by Sajan Rai for Zaya.
 
 Guarantees:
-- API keys are protected at rest using Windows DPAPI tied to the current user account.
-- Keys cannot be read by another user account or transferred to another computer.
+- API keys use Windows DPAPI, or authenticated encryption with a Linux desktop-vault key.
+- New secrets never fall back to reversible base64 when secure storage is unavailable.
 - Secrets are never logged or exposed in plain text in persistent storage files.
 - Masking helper ensures safe UI display (e.g. ••••••••••••XYZ).
 """
@@ -13,12 +13,35 @@ import base64
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.runtime_paths import get_config_dir
 
 _IS_WINDOWS = sys.platform == "win32"
+_KEY_LOCK = threading.Lock()
+
+
+def _secret_service_key(create: bool = False) -> str:
+    """Use the desktop vault explicitly; never choose a plaintext keyring backend."""
+    if not sys.platform.startswith('linux'):
+        raise RuntimeError('Secure credential storage is unavailable on this platform')
+    try:
+        from cryptography.fernet import Fernet
+        from keyring.backends.SecretService import Keyring
+        with _KEY_LOCK:
+            vault = Keyring()
+            key = vault.get_password('Zaya', 'credential-encryption-v1')
+            if not key and create:
+                key = Fernet.generate_key().decode('ascii')
+                vault.set_password('Zaya', 'credential-encryption-v1', key)
+            if not key:
+                raise RuntimeError('No credential encryption key')
+            Fernet(key.encode('ascii'))  # Validate without logging key material.
+            return key
+    except Exception:
+        raise RuntimeError('Unlock your Linux Secret Service keyring before saving credentials') from None
 
 if _IS_WINDOWS:
     import ctypes
@@ -32,7 +55,7 @@ if _IS_WINDOWS:
 
 
 def encrypt_secret(plaintext: str) -> str:
-    """Encrypt a secret string using Windows DPAPI (or local fallback on non-Windows).
+    """Encrypt with DPAPI or a key held by Linux Secret Service; fail closed.
 
     Returns a prefixed base64-encoded payload, e.g. 'dpapi:<b64>'.
     """
@@ -66,7 +89,9 @@ def encrypt_secret(plaintext: str) -> str:
         except Exception as exc:
             raise RuntimeError(f"Windows DPAPI encryption failed: {exc}") from exc
 
-    return "b64:" + base64.b64encode(raw_bytes).decode("ascii")
+    from cryptography.fernet import Fernet
+    key = _secret_service_key(create=True)
+    return 'secretservice:' + Fernet(key.encode('ascii')).encrypt(raw_bytes).decode('ascii')
 
 
 def decrypt_secret(ciphertext: str) -> str:
@@ -76,6 +101,14 @@ def decrypt_secret(ciphertext: str) -> str:
     """
     if not ciphertext:
         return ""
+
+    if ciphertext.startswith('secretservice:'):
+        try:
+            from cryptography.fernet import Fernet
+            key = _secret_service_key()
+            return Fernet(key.encode('ascii')).decrypt(ciphertext[len('secretservice:'):].encode('ascii')).decode('utf-8')
+        except Exception:
+            return ''
 
     # Legacy plain key (e.g. standard AIzaSy... key without prefix)
     if not (ciphertext.startswith("dpapi:") or ciphertext.startswith("b64:")):

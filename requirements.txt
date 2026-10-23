@@ -53,6 +53,7 @@ reportlab                    # doc_generator — PDF document generation
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
 cryptography>=50,<51
+keyring>=25.7,<26; sys_platform == "linux"  # encrypted desktop Secret Service; no plaintext fallback
 certifi>=2026.10.19
 python-multipart>=0.0.9,<1
 qrcode[pil]>=7,<9
