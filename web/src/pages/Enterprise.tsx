@@ -1,4 +1,5 @@
 import React from 'react';
+import { ContactLinks } from '../components/ContactLinks';
 
 const contact = 'mailto:ab4290025@gmail.com?subject=Custom%20AI%20assistant%20enquiry&body=Hello%20Sajan%2C%0A%0AI%27d%20like%20to%20discuss%20a%20custom%20AI%20agent%20or%20assistant.%0A%0ABusiness%20or%20project%3A%0AWhat%20it%20should%20do%3A%0AExisting%20tools%20to%20connect%3A%0ATimeline%3A%0ABudget%20range%3A%0A';
 
@@ -22,4 +23,5 @@ export const Enterprise: React.FC = () => <div className="wrap enterprise-page">
     ['3','Build, review, refine','Work toward an agreed implementation with feedback and validation against your requirements.'],
   ].map(([number,title,body]) => <div key={number}><span className="step-number">{number}</span><h3>{title}</h3><p>{body}</p></div>)}</div></section>
   <section className="premium-cta"><p className="eyebrow">Contact support · Project enquiries</p><h2>What would you<br /><em>like to make?</em></h2><p>Tell Sajan about your use case, integrations, timeline and budget range. Please leave passwords, API keys and private customer data out of your first enquiry.</p><a className="btn btn-primary" href={contact}>Start a conversation ↗</a><a className="enterprise-email" href="mailto:ab4290025@gmail.com">ab4290025@gmail.com</a><p className="yatra-credit">Co-powered by Yatra Technologies</p></section>
+  <section className="enterprise-contacts" aria-labelledby="contact-title"><p className="eyebrow">Let’s connect</p><h2 id="contact-title">Talk to Sajan.</h2><p>Reach out about a custom AI assistant, a project idea or support.</p><ContactLinks /></section>
 </div>;
