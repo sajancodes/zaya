@@ -29,6 +29,8 @@ export interface AnalyticsMetrics {
   version_distribution: Record<string, number>;
   daily_installs: Array<{ day: string; count: number }>;
   daily_downloads: Array<{ day: string; count: number }>;
+  daily_installs_since?: number;
+  retention?: {mode: string; last_completed: number | null; limitation: string};
   updated_at: number;
 }
 

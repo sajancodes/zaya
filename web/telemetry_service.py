@@ -24,6 +24,10 @@ _lock = threading.Lock()
 
 def is_rate_limited(client_ip: str) -> bool:
     """Check if the requesting client IP has exceeded the telemetry rate limit."""
+    from web.database import firebase_enabled
+    if firebase_enabled():
+        from web.shared_limits import consume
+        return consume(client_ip, 'telemetry', _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW_SECONDS)
     if not client_ip:
         return False
 

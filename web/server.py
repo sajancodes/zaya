@@ -45,6 +45,7 @@ from web.database import (
 )
 from web.telemetry_service import is_rate_limited, validate_telemetry_payload
 from web.release_validation import validate_release
+from web.shared_limits import RateLimitUnavailable
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("zaya-web")
@@ -79,6 +80,11 @@ app = FastAPI(
     version="0.5.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RateLimitUnavailable)
+async def limits_unavailable(request: Request, error: RateLimitUnavailable):
+    return JSONResponse({'detail': 'Request protection is temporarily unavailable. Please retry later.'}, status_code=503)
 
 # CORS restricted to official production origin and local development hosts
 ALLOWED_ORIGINS = [

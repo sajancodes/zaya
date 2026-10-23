@@ -55,6 +55,9 @@ def is_admin_enabled() -> bool:
 
 def is_login_rate_limited(client_ip: str) -> bool:
     """Check if the requesting client IP has exceeded the failed login threshold."""
+    if firebase_enabled():
+        from web.shared_limits import consume
+        return consume(client_ip, 'admin-login', _LOGIN_RATE_LIMIT_MAX, _LOGIN_RATE_LIMIT_WINDOW)
     if not client_ip:
         return False
     now = time.monotonic()
@@ -67,7 +70,7 @@ def is_login_rate_limited(client_ip: str) -> bool:
 
 def record_login_failure(client_ip: str) -> None:
     """Record a failed login attempt for the client IP."""
-    if not client_ip:
+    if firebase_enabled() or not client_ip:
         return
     now = time.monotonic()
     with _login_lock:
@@ -79,7 +82,7 @@ def record_login_failure(client_ip: str) -> None:
 
 def clear_login_failures(client_ip: str) -> None:
     """Reset failed login attempts for client IP upon successful authentication."""
-    if not client_ip:
+    if firebase_enabled() or not client_ip:
         return
     with _login_lock:
         _login_attempts.pop(client_ip, None)

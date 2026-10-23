@@ -8,6 +8,19 @@ from core.update.desktop_updater import DesktopUpdater, DesktopUpdateManifest
 from web.release_validation import validate_release
 
 
+def test_shared_quota_outage_returns_safe_503(monkeypatch):
+    from fastapi.testclient import TestClient
+    from web import server
+    from web.shared_limits import RateLimitUnavailable
+    def unavailable(subject):
+        raise RateLimitUnavailable('internal credential detail')
+    monkeypatch.setattr(server, 'is_rate_limited', unavailable)
+    response = TestClient(server.app).post('/api/telemetry/heartbeat', json={
+        'installation_id': '12345678-1234-4123-8123-123456789abc', 'platform': 'windows', 'version': '0.5.0'})
+    assert response.status_code == 503
+    assert 'internal credential detail' not in response.text
+
+
 def metadata(**changes):
     return dict(schema=1, platform='windows', channel='stable', version='1.0.0', build=10008,
                 filename='ZayaSetup.exe', size=2000, sha256='a'*64,

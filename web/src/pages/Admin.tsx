@@ -186,7 +186,7 @@ export const Admin: React.FC = () => {
               </div>
 
               <div className="metric-card">
-                <div className="metric-label">Unique Installations</div>
+                <div className="metric-label">Retained Installations</div>
                 <div className="metric-value">{metrics.installations.total}</div>
                 <div className="metric-sub">
                   Windows: {metrics.installations.windows} · Android: {metrics.installations.android}
@@ -243,7 +243,8 @@ export const Admin: React.FC = () => {
 
               {/* Daily Install Timeline */}
               <div className="card">
-                <h3 style={{ color: '#ffffff', fontSize: '16px', marginBottom: '16px' }}>Recent Daily Installs</h3>
+                <h3 style={{ color: '#ffffff', fontSize: '16px', marginBottom: '16px' }}>Daily Registrations (UTC)</h3>
+                <p style={{color:'var(--text-muted)', fontSize:12}}>First-seen anonymous IDs, including returns after retention expiry. Earlier history is not backfilled.</p>
                 {metrics.daily_installs.length === 0 ? (
                   <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No install history recorded yet.</p>
                 ) : (
@@ -251,7 +252,7 @@ export const Admin: React.FC = () => {
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>New Installs</th>
+                        <th>Registrations</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -268,6 +269,11 @@ export const Admin: React.FC = () => {
             </div>
 
             {/* Privacy Guarantee Note */}
+            {metrics.retention && <div className="card" style={{marginBottom:24}}>
+              <h3>Retention health</h3>
+              <p>Last completed cleanup: {metrics.retention.last_completed ? new Date(metrics.retention.last_completed * 1000).toLocaleString() : 'Not recorded yet'}</p>
+              <p>{metrics.retention.limitation}</p>
+            </div>}
             <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '20px' }}>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                 🛡️ <b>Privacy Enforcement</b>: This dashboard displays only high-level anonymous metrics.

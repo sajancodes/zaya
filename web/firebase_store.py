@@ -39,6 +39,13 @@ def record_install(installation_id, platform, version):
                 'expires_at': datetime.now(timezone.utc) + timedelta(days=90)}
         if not existing.exists:
             data.update(first_seen=now, installed_version=version)
+            aggregation = collection('maintenance').document('install_aggregation')
+            if not aggregation.get(transaction=transaction).exists:
+                transaction.create(aggregation, {'started_at': now})
+            # A retried request or duplicate heartbeat cannot count a second install.
+            day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+            transaction.set(collection('daily_installs').document(day), {
+                'total': firestore.Increment(1), platform: firestore.Increment(1)}, merge=True)
         transaction.set(ref, data, merge=True)
         return not existing.exists
     return update(client().transaction())
@@ -113,17 +120,30 @@ def get_analytics_metrics():
     versions = {r['version'] for r in releases}
     distribution = {v: count(installs.where(filter=FieldFilter('current_version', '==', v))) for v in versions}
     daily = []
+    daily_installs = []
+    aggregation = collection('maintenance').document('install_aggregation').get().to_dict() or {}
+    started = aggregation.get('started_at')
+    start_day = datetime.fromtimestamp(started, timezone.utc).date() if started else None
     for offset in range(13, -1, -1):
         day = datetime.now(timezone.utc).date() - timedelta(days=offset)
         item = collection('daily_downloads').document(day.isoformat()).get().to_dict() or {}
         daily.append({'day': day.isoformat(), 'count': item.get('total', 0)})
-    return {'downloads': {k: downloads.get(k, 0) for k in ('total', *platforms)},
+        if start_day is not None and day >= start_day:
+            installs_day = collection('daily_installs').document(day.isoformat()).get().to_dict() or {}
+            daily_installs.append({'day': day.isoformat(), 'count': installs_day.get('total', 0)})
+    maintenance = collection('maintenance').document('retention').get().to_dict() or {}
+    last_cleanup = maintenance.get('last_completed')
+    return {'retention': {'mode': 'traffic-driven', 'last_completed': int(last_cleanup.timestamp()) if last_cleanup else None,
+                          'last_deleted': maintenance.get('deleted', {}),
+                          'limitation': 'Runs on protected request traffic; idle deployments require a scheduled caller. Up to 100 expired records per collection per pass.'},
+            'downloads': {k: downloads.get(k, 0) for k in ('total', *platforms)},
             'installations': totals, 'active': {'online_now': since('last_seen', 180),
             'last_24h': since('last_seen', 86400), 'last_7d': since('last_seen', 7*86400),
             'last_30d': since('last_seen', 30*86400)},
-            'version_distribution': distribution, 'daily_installs': [], 'daily_downloads': daily,
+            'version_distribution': distribution, 'daily_installs': daily_installs, 'daily_downloads': daily, 'daily_installs_since': started,
             'updated_at': now, 'definitions': {'online_now': 'Opted-in installations seen within 3 minutes.',
-            'installations': 'Retained anonymous installations, not people; expires after 90 inactive days.'}}
+            'installations': 'Retained anonymous installations, not people. Expiry cleanup targets 90 inactive days and runs in bounded passes on request traffic.',
+            'daily_installs': 'Anonymous IDs first registered or re-registered after retention expiry per UTC day. History begins when aggregation is enabled.'}}
 
 
 def store_session(token, username, expires):
