@@ -39,6 +39,12 @@ def _snapshot_windows_clipboard() -> List[Tuple[int, bytes]]:
         try:
             fmt = user32.EnumClipboardFormats(0)
             while fmt != 0:
+                # Bitmap, palette and metafile clipboard handles are GDI objects,
+                # not HGLOBAL allocations. Passing them to GlobalSize/GlobalLock
+                # can corrupt the Windows heap. Registered formats use HGLOBAL.
+                if fmt not in {1, 4, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 17} and fmt < 0xC000:
+                    fmt = user32.EnumClipboardFormats(fmt)
+                    continue
                 h_data = user32.GetClipboardData(fmt)
                 if h_data:
                     size = kernel32.GlobalSize(h_data)

@@ -391,19 +391,56 @@ def test_sentinel_cleared_when_originally_empty(monkeypatch):
 # 7. WIN32 CLIPBOARD FORMAT SNAPSHOT & RESTORE
 # ============================================================================
 
-def test_win32_clipboard_format_restoration():
-    """Verify that _snapshot_windows_clipboard and _restore_windows_clipboard function safely on Windows."""
-    if sys.platform != "win32":
-        pytest.skip("Win32 clipboard formats test requires Windows")
+def test_win32_clipboard_format_restoration(monkeypatch):
+    """Exercise native buffer handling without reading or replacing owner data."""
+    import ctypes
+    from types import SimpleNamespace
 
-    # Capture current clipboard
+    class NativeFunction:
+        def __init__(self, callback):
+            self.callback = callback
+
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    original = {13: b'h\x00i\x00\x00\x00', 0xC123: b'<b>hi</b>\x00'}
+    buffers = {key: ctypes.create_string_buffer(data, len(data)) for key, data in original.items()}
+    restored = {}
+    enumerated = [2, 13, 0xC123]  # CF_BITMAP must never reach GlobalSize/Lock.
+
+    def get_data(fmt):
+        assert fmt != 2, 'GDI handles must not be treated as global memory'
+        return fmt
+
+    def allocate(flags, size):
+        handle = max(buffers) + 1
+        buffers[handle] = ctypes.create_string_buffer(size)
+        return handle
+
+    def set_data(fmt, handle):
+        restored[fmt] = buffers[handle].raw
+        return handle
+
+    user32 = SimpleNamespace(**{name: NativeFunction(callback) for name, callback in {
+        'OpenClipboard': lambda _: True,
+        'CloseClipboard': lambda: True,
+        'EmptyClipboard': lambda: True,
+        'EnumClipboardFormats': lambda fmt: enumerated[0] if not fmt else (enumerated + [0])[enumerated.index(fmt) + 1],
+        'GetClipboardData': get_data,
+        'SetClipboardData': set_data,
+    }.items()})
+    kernel32 = SimpleNamespace(**{name: NativeFunction(callback) for name, callback in {
+        'GlobalSize': lambda handle: ctypes.sizeof(buffers[handle]),
+        'GlobalLock': lambda handle: ctypes.addressof(buffers[handle]),
+        'GlobalUnlock': lambda handle: True,
+        'GlobalAlloc': allocate,
+    }.items()})
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(ctypes, 'windll', SimpleNamespace(user32=user32, kernel32=kernel32), raising=False)
     snapshot = _snapshot_windows_clipboard()
-    assert isinstance(snapshot, list)
-
-    # If there is data in the snapshot, verify restore returns True
-    if snapshot:
-        restored = _restore_windows_clipboard(snapshot)
-        assert restored is True
+    assert dict(snapshot) == original
+    assert _restore_windows_clipboard(snapshot) is True
+    assert restored == original
 
 
 # ============================================================================
