@@ -5,6 +5,14 @@ param(
     [string]$Stage = 'Preflight',
     [string]$BuildPython = (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe')
 )
+# Windows PowerShell cannot load modules inherited from a PowerShell 7 host.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = @(
+        ([Environment]::GetFolderPath('MyDocuments') + '\WindowsPowerShell\Modules'),
+        ($env:ProgramFiles + '\WindowsPowerShell\Modules'),
+        ($PSHOME + '\Modules')
+    ) -join ';'
+}
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $mainPython = Join-Path $projectRoot '.venv-local-release\Scripts\python.exe'
