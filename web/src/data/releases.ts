@@ -14,6 +14,7 @@ export interface ReleaseItem {
   fullChangelog: string[];
   knownIssues?: string[];
   requirements: string[];
+  unsigned?: boolean;
 }
 
 // Release details come exclusively from verified server metadata.

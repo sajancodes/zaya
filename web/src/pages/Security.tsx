@@ -15,6 +15,7 @@ export const Security: React.FC = () => {
         </div>
 
         <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: '#8392A6' }}>
+          <p><strong>Windows beta status:</strong> the early Windows beta is unsigned and installed manually. A checksum verifies the downloaded bytes against the published hash; it is not a verified publisher identity or a guarantee that software is safe. Some Windows security policies block unsigned apps. Do not disable protection to use this beta. The mechanisms below do not imply independent security certification.</p>
           <h2 style={{ color: '#F4FAFF', fontSize: '20px', marginBottom: '12px', fontWeight: 600 }}>
             1. The Owner Trust Boundary
           </h2>

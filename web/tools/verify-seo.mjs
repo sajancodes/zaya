@@ -27,5 +27,13 @@ for (const url of urls) {
 assert(fs.readFileSync('dist/robots.txt','utf8').includes('User-agent: *\nAllow: /'));
 const home = fs.readFileSync('dist/index.html','utf8');
 assert(home.includes('google-site-verification'));
-assert(fs.readFileSync('dist/docs/getting-started/index.html','utf8').includes('not published yet'));
+const gettingStarted = fs.readFileSync('dist/docs/getting-started/index.html','utf8');
+assert(gettingStarted.includes('unsigned Windows testing release'));
+assert(gettingStarted.includes('Stable Windows releases are not available yet'));
+const windowsGuide = fs.readFileSync('dist/docs/install-windows/index.html','utf8');
+assert(windowsGuide.includes('Do not turn off antivirus, Smart App Control'));
+for (const name of ['options', 'ready', 'first-run']) {
+  const image = `/assets/install/windows-beta-${name}.png`;
+  assert(windowsGuide.includes(image) && fs.statSync(`dist${image}`).size > 1000, `Missing actual installation screenshot: ${name}`);
+}
 console.log(`SEO proof passed for ${urls.length} public pages: unique metadata, canonical URLs, rendered content, links, schema and sitemap.`);

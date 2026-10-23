@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { DOCS_DATA, DOCS_CATEGORIES, DocItem } from '../data/docsData';
 import { canonicalPath } from '../data/seo';
+import { WindowsBetaGuide } from '../components/WindowsBetaGuide';
 
 interface DocsProps {
   topic?: string;
@@ -259,7 +260,8 @@ export const Docs: React.FC<DocsProps> = ({ topic = 'getting-started', navigate 
           </div>
 
           <article>
-            {renderFormattedMarkdown(currentDoc.content)}
+            {normalizedKey === 'install-windows' && <WindowsBetaGuide />}
+            {renderFormattedMarkdown(normalizedKey === 'install-windows' ? currentDoc.content.replace('# Windows Installation Guide', '') : currentDoc.content)}
           </article>
         </main>
 

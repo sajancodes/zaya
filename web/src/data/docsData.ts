@@ -40,8 +40,8 @@ Zaya is a personal AI system created and developed by **Sajan Rai**. It operates
 
 ## The 8-Step Setup Journey
 
-1. **Check release availability**: Visit [/download](/download). The signed public Windows installer is not published yet; use only an artifact actually listed there after release verification.
-2. **Run Installer**: Double-click \`ZayaSetup.exe\`. It installs binaries to \`%LOCALAPPDATA%\\Programs\\Zaya\` without requiring administrator elevation.
+1. **Check release availability**: Visit [/download](/download). Select Beta for the unsigned Windows testing release and read the installation guide. Stable Windows releases are not available yet.
+2. **Run Installer**: Double-click \`ZayaBetaSetup.exe\`. The beta installs binaries to \`%LOCALAPPDATA%\\Programs\\ZayaBeta\` without requiring administrator elevation.
 3. **Launch Zaya**: Launch from Start Menu or desktop shortcut. The animated companion appears on your taskbar.
 4. **First-Run Wizard**: The onboarding window opens automatically to configure audio devices and provider credentials.
 5. **Add Gemini API Key**:
@@ -68,14 +68,9 @@ Zaya is optimized for Windows 10/11 64-bit desktop environments.
 
 ## Directory Architecture
 
-When installed via \`ZayaSetup.exe\`, files reside in isolated user-space directories:
+The unsigned beta uses \`ZayaBetaSetup.exe\`. Its application files are separate from the planned stable installation. Personal configuration may be shared with existing Zaya installations; back it up before testing upgrades.
 
-| Component | Path |
-| --- | --- |
-| Application Binaries | \`%LOCALAPPDATA%\\Programs\\Zaya\` |
-| User Configuration | \`%LOCALAPPDATA%\\Zaya\\config\\api_keys.json\` (DPAPI encrypted) |
-| Local Memory Archive | \`%LOCALAPPDATA%\\Zaya\\memory\\conversation.db\` |
-| Runtime Diagnostics | \`%LOCALAPPDATA%\\Zaya\\logs\\runtime\\events.jsonl\` |
+The default application folder is \`%LOCALAPPDATA%\\Programs\\ZayaBeta\`. Use Zaya's local settings and diagnostic views to inspect your configuration and logs. Data locations can differ between source and packaged builds. Never publish unredacted logs, provider keys, databases or paired-device credentials.
 
 ---
 
@@ -85,10 +80,10 @@ For enterprise or scripted setup:
 
 \`\`\`powershell
 # Run silent installation
-.\\ZayaSetup.exe /S /ALLUSERS=0
+.\\ZayaBetaSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Verify installation status
-Test-Path "$env:LOCALAPPDATA\\Programs\\Zaya\\Zaya.exe"
+Test-Path "$env:LOCALAPPDATA\\Programs\\ZayaBeta\\Zaya.exe"
 \`\`\`
 `
   },
