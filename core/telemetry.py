@@ -6,7 +6,7 @@ Privacy Guarantees:
 - ZERO hardware fingerprinting (no MAC address, CPU, disk, motherboard, or IP derivation).
 - ZERO personal data, conversations, keys, audio, screen captures, or activity content.
 - Respects the user's telemetry toggle in settings/onboarding.
-- Lightweight daily heartbeat sent at most once every 24 hours.
+- Opt-in heartbeat sent at most once every two minutes.
 """
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def report_install_event(base_url: Optional[str] = None) -> bool:
 
 
 def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) -> bool:
-    """Send a lightweight daily active heartbeat if >= 24h have elapsed."""
+    """Send an opt-in heartbeat after the bounded interval has elapsed."""
     if not is_telemetry_enabled():
         return False
 

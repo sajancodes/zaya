@@ -17,7 +17,9 @@
     {"source": "/security", "destination": "/security/index.html"},
     {"source": "/about", "destination": "/about/index.html"},
     {"source": "/roadmap", "destination": "/roadmap/index.html"},
-    {"source": "/:path*", "destination": "/index.html"}
+    {"source": "/admin", "destination": "/index.html"},
+    {"source": "/docs/:path*", "destination": "/docs/index.html"},
+    {"source": "/", "destination": "/index.html"}
   ],
   "headers": [
     {"source": "/(.*)", "headers": [

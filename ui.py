@@ -3251,6 +3251,7 @@ class MainWindow(QMainWindow):
     _display_request_sig = pyqtSignal(object)
     restart_requested = pyqtSignal()
     hand_settings_requested = pyqtSignal()
+    update_available = pyqtSignal(str)
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
     _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
@@ -4762,6 +4763,15 @@ class MainWindow(QMainWindow):
                 dialog = self._updates_dialog = UpdateDialog(self)
             dialog.show(); dialog.raise_(); dialog.activateWindow()
         updates_btn.clicked.connect(show_updates)
+        self._last_update_notice = ''
+        def notify_update(message):
+            if message != self._last_update_notice:
+                self._last_update_notice = message
+                show_updates()
+        self.update_available.connect(notify_update)
+        from core.update.desktop_updater import desktop_updater, UpdateStatus
+        desktop_updater.add_listener(lambda state, message: self.update_available.emit(message)
+                                    if state == UpdateStatus.AVAILABLE else None)
         coding_btn = _row(QPushButton('Coding Skill'), self._BTN_DIM)
         def show_coding():
             from core.update.coding_ui import CodingSkillDialog

@@ -75,7 +75,7 @@ class UpdateDialog(QDialog):
         self.channel_box = QComboBox()
         self.channel_box.addItems(['Stable', 'Beta'])
         self.channel_box.setCurrentText(desktop_updater.channel.title())
-        self.channel_box.currentTextChanged.connect(lambda value: desktop_updater.set_channel(value.lower()))
+        self.channel_box.currentTextChanged.connect(self.change_channel)
         layout.addWidget(QLabel('Update channel'))
         layout.addWidget(self.channel_box)
 
@@ -118,6 +118,17 @@ class UpdateDialog(QDialog):
         btn_row.addWidget(self.btn_restart)
 
         layout.addLayout(btn_row)
+        changes = QPushButton('View changes')
+        def view_changes():
+            import webbrowser
+            manifest = desktop_updater.available_manifest
+            if manifest:
+                webbrowser.open('https://github.com/sajancodes/zaya-companion-releases/releases/tag/v' + manifest.version)
+        changes.clicked.connect(view_changes)
+        layout.addWidget(changes)
+        later = QPushButton('Later')
+        later.clicked.connect(self.hide)
+        layout.addWidget(later)
 
         self.status_signal.connect(self._on_status_update)
         desktop_updater.add_listener(self._on_updater_event)
@@ -128,11 +139,21 @@ class UpdateDialog(QDialog):
     def _on_updater_event(self, status: UpdateStatus, message: str):
         self.status_signal.emit(status.value, message)
 
+    def change_channel(self, value):
+        self.channel_box.setEnabled(False)
+        def work():
+            try:
+                desktop_updater.set_channel(value.lower())
+            except (OSError, ValueError) as error:
+                desktop_updater._set_status(UpdateStatus.FAILED, str(error))
+        threading.Thread(target=work, daemon=True, name='ZayaUpdateChannel').start()
+
     def _on_status_update(self, status_str: str, message: str):
         self._sync_ui()
 
     def _sync_ui(self):
         st = desktop_updater.status
+        self.channel_box.setEnabled(st not in (UpdateStatus.CHECKING, UpdateStatus.DOWNLOADING))
         msg = desktop_updater.error_message or (
             f"Version {desktop_updater.available_manifest.version} is available."
             if desktop_updater.available_manifest and st == UpdateStatus.AVAILABLE

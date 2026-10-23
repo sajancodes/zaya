@@ -197,6 +197,14 @@ jobs:
           ./gradlew :app:assembleRelease --console=plain --max-workers=2
           ./gradlew :app:bundleRelease --console=plain --max-workers=2
 
+      - name: Verify production Android signing identity
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs mobile/android/app/build/outputs/apk/release/app-release.apk > "$RUNNER_TEMP/android-signature.txt"
+          if grep -qi 'CN=Android Debug' "$RUNNER_TEMP/android-signature.txt"; then
+            echo 'Production publication requires a non-debug signing identity and an owner-approved migration plan.'
+            exit 1
+          fi
+
       - name: Prepare Android release assets
         run: |
           python tools/prepare_android_release.py \

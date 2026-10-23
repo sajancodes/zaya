@@ -39,7 +39,7 @@ pyautogui
 pyperclip
 
 # ── Vision & media ────────────────────────────────────────────────────────────
-pillow>=10,<13
+pillow>=13,<14
 opencv-python>=4.8,<5
 mss>=9,<11
 
@@ -52,7 +52,8 @@ reportlab                    # doc_generator — PDF document generation
 # ── Remote dashboard (control from your phone) ────────────────────────────────
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
-cryptography>=42,<50
+cryptography>=50,<51
+certifi>=2026.10.19
 python-multipart>=0.0.9,<1
 qrcode[pil]>=7,<9
 
@@ -88,7 +89,7 @@ ddgs>=9,<10                  # web_search — the maintained successor to
                              # duckduckgo-search, which is tried first and
                              # falls back to the old name automatically
 pdfplumber                   # file_processor — PDF text and tables
-PyPDF2                       # file_processor — PDF fallback reader
+pypdf>=6.21.2,<7              # maintained PDF fallback reader
 python-docx                  # file_processor — .docx reading
 pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 

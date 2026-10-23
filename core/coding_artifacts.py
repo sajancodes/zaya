@@ -87,7 +87,7 @@ def _valid_artifact(path, extension):
         document = Document(str(path))
         return document.element.body is not None
     if extension == 'pdf':
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
         with path.open('rb') as stream:
             reader = PdfReader(stream, strict=True)
             return not reader.is_encrypted and len(reader.pages) > 0

@@ -112,3 +112,4 @@ web/data/
 *service-account*.json
 .vercel/
 .venv-release-audit/
+updates/
