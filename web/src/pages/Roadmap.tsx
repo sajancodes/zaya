@@ -45,7 +45,7 @@ export const Roadmap: React.FC = () => {
           <h1 className="editorial-title" style={{ fontSize: '48px', marginBottom: '16px' }}>
             The Path Continues Into Darkness
           </h1>
-          <p style={{ color: '#8392A6', fontSize: '16px', lineHeight: '1.7' }}>
+          <p style={{ color: 'var(--site-muted)', fontSize: '16px', lineHeight: '1.7' }}>
             Every milestone builds upon the last. From raw acoustic streaming to persistent 3D spatial agency, track what is shipped, active in development, and envisioned for the future.
           </p>
 
@@ -61,9 +61,9 @@ export const Roadmap: React.FC = () => {
                   fontSize: '11px',
                   fontFamily: "'JetBrains Mono', monospace",
                   cursor: 'pointer',
-                  border: selectedStatus === st ? '1px solid #49DFFF' : '1px solid rgba(73, 223, 255, 0.15)',
+                  border: selectedStatus === st ? '1px solid var(--site-accent)' : '1px solid rgba(73, 223, 255, 0.15)',
                   backgroundColor: selectedStatus === st ? 'rgba(73, 223, 255, 0.15)' : 'transparent',
-                  color: selectedStatus === st ? '#49DFFF' : '#8392A6'
+                  color: selectedStatus === st ? 'var(--site-accent)' : 'var(--site-muted)'
                 }}
               >
                 {st}
@@ -82,7 +82,7 @@ export const Roadmap: React.FC = () => {
               bottom: '10px',
               left: '11px',
               width: '2px',
-              background: 'linear-gradient(to bottom, #49DFFF 0%, rgba(73, 223, 255, 0.5) 70%, transparent 100%)',
+              background: 'linear-gradient(to bottom, var(--site-accent) 0%, rgba(73, 223, 255, 0.5) 70%, transparent 100%)',
               boxShadow: '0 0 10px rgba(73, 223, 255, 0.4)'
             }}
           />
@@ -108,23 +108,23 @@ export const Roadmap: React.FC = () => {
                     width: '14px',
                     height: '14px',
                     borderRadius: '50%',
-                    backgroundColor: m.status === 'SHIPPED' ? '#49DFFF' : '#3478FF',
-                    border: '3px solid #020407',
-                    boxShadow: '0 0 10px #49DFFF'
+                    backgroundColor: m.status === 'SHIPPED' ? 'var(--site-accent)' : '#3478FF',
+                    border: '3px solid var(--site-bg)',
+                    boxShadow: '0 0 10px var(--site-accent)'
                   }}
                 />
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: '#49DFFF' }}>
+                  <span style={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--site-accent)' }}>
                     {m.quarter}
                   </span>
                   {getStatusBadge(m.status)}
                 </div>
 
-                <h3 style={{ fontSize: '20px', color: '#F4FAFF', fontWeight: 600, marginBottom: '8px' }}>
+                <h3 style={{ fontSize: '20px', color: 'var(--site-ink)', fontWeight: 600, marginBottom: '8px' }}>
                   {m.title}
                 </h3>
-                <p style={{ margin: 0, fontSize: '14px', color: '#8392A6', lineHeight: '1.6', marginBottom: '16px' }}>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--site-muted)', lineHeight: '1.6', marginBottom: '16px' }}>
                   {m.summary}
                 </p>
 
@@ -138,7 +138,7 @@ export const Roadmap: React.FC = () => {
                         backgroundColor: 'rgba(73, 223, 255, 0.06)',
                         border: '1px solid rgba(73, 223, 255, 0.15)',
                         fontSize: '11px',
-                        color: '#DDFBFF'
+                        color: 'var(--site-ink)'
                       }}
                     >
                       {d}
@@ -205,10 +205,10 @@ export const Roadmap: React.FC = () => {
               }}
             >
               <div>
-                <span style={{ fontSize: '11px', color: '#49DFFF', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <span style={{ fontSize: '11px', color: 'var(--site-accent)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {activeMilestone.quarter}
                 </span>
-                <h3 style={{ margin: 0, color: '#F4FAFF', fontSize: '20px', fontWeight: 600 }}>
+                <h3 style={{ margin: 0, color: 'var(--site-ink)', fontSize: '20px', fontWeight: 600 }}>
                   {activeMilestone.title}
                 </h3>
               </div>
@@ -217,7 +217,7 @@ export const Roadmap: React.FC = () => {
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#8392A6',
+                  color: 'var(--site-muted)',
                   fontSize: '20px',
                   cursor: 'pointer'
                 }}
@@ -227,15 +227,15 @@ export const Roadmap: React.FC = () => {
             </div>
 
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <p style={{ margin: 0, color: '#F4FAFF', fontSize: '14px', lineHeight: '1.6' }}>
+              <p style={{ margin: 0, color: 'var(--site-ink)', fontSize: '14px', lineHeight: '1.6' }}>
                 {activeMilestone.summary}
               </p>
 
               <div>
-                <h4 style={{ color: '#DDFBFF', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+                <h4 style={{ color: 'var(--site-ink)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
                   Scope & Deliverables
                 </h4>
-                <ul style={{ margin: 0, paddingLeft: '18px', color: '#8392A6', fontSize: '13px', lineHeight: '1.6' }}>
+                <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--site-muted)', fontSize: '13px', lineHeight: '1.6' }}>
                   {activeMilestone.details.map((item, idx) => (
                     <li key={idx} style={{ marginBottom: '6px' }}>{item}</li>
                   ))}
@@ -246,7 +246,7 @@ export const Roadmap: React.FC = () => {
             <div
               style={{
                 padding: '16px 24px',
-                backgroundColor: '#020407',
+                backgroundColor: 'var(--site-bg)',
                 borderTop: '1px solid rgba(73, 223, 255, 0.1)',
                 display: 'flex',
                 justifyContent: 'flex-end'

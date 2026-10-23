@@ -10,13 +10,13 @@ export const About: React.FC = () => {
             "Zaya started as a question:{' '}
             <span className="editorial-italic">What if a computer could become something more personal?"</span>
           </h1>
-          <p style={{ color: '#8392A6', fontSize: '16px', lineHeight: '1.7' }}>
+          <p style={{ color: 'var(--site-muted)', fontSize: '16px', lineHeight: '1.7' }}>
             Created and developed by <strong>Sajan Rai</strong> — <a href="https://github.com/sajancodes" target="_blank" rel="noopener noreferrer">sajancodes</a>.
           </p>
         </div>
 
-        <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: '#8392A6' }}>
-          <h2 style={{ color: '#F4FAFF', fontSize: '22px', marginBottom: '16px', fontWeight: 600 }}>
+        <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: 'var(--site-muted)' }}>
+          <h2 style={{ color: 'var(--site-ink)', fontSize: '22px', marginBottom: '16px', fontWeight: 600 }}>
             The Journey to Agentic Personal Computing
           </h2>
           <p style={{ marginBottom: '20px' }}>
@@ -26,7 +26,7 @@ export const About: React.FC = () => {
             Sajan Rai built Zaya to break past these artificial boundaries. Rather than creating a chatbot wrapper, the goal from day one was to build a cohesive personal computing system: an intelligent assistant with sensory perception, voice fluency, physical hand control, and persistent memory that operates with genuine respect for owner sovereignty.
           </p>
 
-          <h2 style={{ color: '#F4FAFF', fontSize: '22px', margin: '36px 0 16px', fontWeight: 600 }}>
+          <h2 style={{ color: 'var(--site-ink)', fontSize: '22px', margin: '36px 0 16px', fontWeight: 600 }}>
             Design & Engineering Principles
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '32px' }}>
@@ -44,14 +44,14 @@ export const About: React.FC = () => {
                 desc: 'External data from websites, OCR, or WhatsApp can never grant itself permission to run commands. Irreversible changes yield directly to the owner confirmation gate.'
               }
             ].map((p) => (
-              <div key={p.title} style={{ borderLeft: '2px solid #49DFFF', paddingLeft: '18px' }}>
-                <strong style={{ color: '#DDFBFF', display: 'block', marginBottom: '4px' }}>{p.title}</strong>
+              <div key={p.title} style={{ borderLeft: '2px solid var(--site-accent)', paddingLeft: '18px' }}>
+                <strong style={{ color: 'var(--site-ink)', display: 'block', marginBottom: '4px' }}>{p.title}</strong>
                 <span>{p.desc}</span>
               </div>
             ))}
           </div>
 
-          <h2 style={{ color: '#F4FAFF', fontSize: '22px', margin: '36px 0 16px', fontWeight: 600 }}>
+          <h2 style={{ color: 'var(--site-ink)', fontSize: '22px', margin: '36px 0 16px', fontWeight: 600 }}>
             Contact & Source
           </h2>
           <p style={{ marginBottom: '16px' }}>
@@ -59,7 +59,7 @@ export const About: React.FC = () => {
           </p>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px' }}>
             <li>
-              • GitHub Repository: <a href="https://github.com/sajancodes/zaya" target="_blank" rel="noopener noreferrer">github.com/sajancodes/zaya</a>
+              • Public downloads: <a href="https://github.com/sajancodes/zaya-companion-releases" target="_blank" rel="noopener noreferrer">Official Zaya releases</a>
             </li>
             <li>
               • Signed Releases: <a href="https://github.com/sajancodes/zaya-companion-releases" target="_blank" rel="noopener noreferrer">github.com/sajancodes/zaya-companion-releases</a>

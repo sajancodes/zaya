@@ -7,7 +7,7 @@ export const Releases: React.FC = () => {
   const [selectedPlatform, setSelectedPlatform] = useState<'ALL' | 'windows' | 'android'>('ALL');
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
-  if (loading) return <section className="section container"><h1>Releases</h1><p>Loading verified releases…</p></section>;
+  if (loading && !RELEASES_DATA.length) return <section className="section container"><h1>Releases</h1><p>Loading published releases…</p></section>;
   if (!RELEASES_DATA.length) return <section className="section container"><h1>Releases</h1><p>No verified releases are available from the release service right now. Please try again later.</p></section>;
   const filteredReleases = RELEASES_DATA.filter((r) => {
     if (selectedPlatform === 'ALL') return true;
@@ -29,7 +29,7 @@ export const Releases: React.FC = () => {
           <h1 className="editorial-title" style={{ fontSize: '48px', marginBottom: '16px' }}>
             Changelogs & Version History
           </h1>
-          <p style={{ color: '#8392A6', fontSize: '16px', lineHeight: '1.7' }}>
+          <p style={{ color: 'var(--site-muted)', fontSize: '16px', lineHeight: '1.7' }}>
             Granular build notes, architectural enhancements, security disclosures, and verified SHA-256 binary checksums.
           </p>
 
@@ -47,9 +47,9 @@ export const Releases: React.FC = () => {
                   textTransform: 'uppercase',
                   letterSpacing: '1px',
                   cursor: 'pointer',
-                  border: selectedPlatform === plat ? '1px solid #49DFFF' : '1px solid rgba(73, 223, 255, 0.15)',
+                  border: selectedPlatform === plat ? '1px solid var(--site-accent)' : '1px solid rgba(73, 223, 255, 0.15)',
                   backgroundColor: selectedPlatform === plat ? 'rgba(73, 223, 255, 0.15)' : 'transparent',
-                  color: selectedPlatform === plat ? '#49DFFF' : '#8392A6'
+                  color: selectedPlatform === plat ? 'var(--site-accent)' : 'var(--site-muted)'
                 }}
               >
                 {plat === 'ALL' ? 'All Platforms' : plat}
@@ -81,15 +81,15 @@ export const Releases: React.FC = () => {
               >
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                    <h2 style={{ fontSize: '24px', color: '#F4FAFF', fontWeight: 600, margin: 0 }}>
+                    <h2 style={{ fontSize: '24px', color: 'var(--site-ink)', fontWeight: 600, margin: 0 }}>
                       Zaya v{rel.version}
                     </h2>
                     <span className="badge badge-stable">{rel.channel}</span>
-                    <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: '#8392A6', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--site-muted)', border: '1px solid rgba(255,255,255,0.1)' }}>
                       {rel.platformName}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#8392A6' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--site-muted)' }}>
                     Published on {rel.date} · {rel.sizeFormatted}
                   </div>
                 </div>
@@ -105,13 +105,13 @@ export const Releases: React.FC = () => {
 
               {/* Highlights */}
               <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '13px', color: '#DDFBFF', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+                <h3 style={{ fontSize: '13px', color: 'var(--site-ink)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
                   Release Highlights
                 </h3>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {rel.highlights.map((h, i) => (
-                    <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', color: '#DDFBFF' }}>
-                      <span style={{ color: '#49DFFF' }}>•</span>
+                    <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', color: 'var(--site-ink)' }}>
+                      <span style={{ color: 'var(--site-accent)' }}>•</span>
                       {h}
                     </li>
                   ))}
@@ -120,10 +120,10 @@ export const Releases: React.FC = () => {
 
               {/* Full Changelog */}
               <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '13px', color: '#DDFBFF', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+                <h3 style={{ fontSize: '13px', color: 'var(--site-ink)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
                   Detailed Changes
                 </h3>
-                <ul style={{ paddingLeft: '20px', margin: 0, color: '#8392A6', fontSize: '13px', lineHeight: '1.6' }}>
+                <ul style={{ paddingLeft: '20px', margin: 0, color: 'var(--site-muted)', fontSize: '13px', lineHeight: '1.6' }}>
                   {rel.fullChangelog.map((c, i) => (
                     <li key={i} style={{ marginBottom: '4px' }}>{c}</li>
                   ))}
@@ -156,7 +156,7 @@ export const Releases: React.FC = () => {
               <div
                 style={{
                   padding: '12px 16px',
-                  backgroundColor: '#020407',
+                  backgroundColor: 'var(--site-bg)',
                   borderRadius: '6px',
                   border: '1px solid rgba(73, 223, 255, 0.1)',
                   display: 'flex',
@@ -168,12 +168,12 @@ export const Releases: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ color: '#8392A6' }}>SHA-256:</span>
-                  <code style={{ color: '#49DFFF', fontSize: '10px' }}>{rel.sha256}</code>
+                  <span style={{ color: 'var(--site-muted)' }}>SHA-256:</span>
+                  <code style={{ color: 'var(--site-accent)', fontSize: '10px' }}>{rel.sha256}</code>
                 </div>
                 <span
                   onClick={() => handleCopy(rel.sha256)}
-                  style={{ color: '#49DFFF', cursor: 'pointer', fontWeight: 600 }}
+                  style={{ color: 'var(--site-accent)', cursor: 'pointer', fontWeight: 600 }}
                 >
                   {copiedSha === rel.sha256 ? '✓ Copied' : 'Copy Hash'}
                 </span>

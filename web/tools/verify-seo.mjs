@@ -17,7 +17,7 @@ for (const url of urls) {
   assert(html.includes('href="/docs/getting-started"'), `Crawlable navigation: ${route}`);
   const schema = JSON.parse(html.match(/<script data-zaya-schema type="application\/ld\+json">(.*?)<\/script>/s)[1]);
   assert(schema['@graph'].some(item => item['@type'] === 'WebPage' && item.url === url));
-  if (route.startsWith('/docs/')) assert(html.includes('<article>') && html.includes('BreadcrumbList'));
+  if (route.startsWith('/docs/')) assert(/<article(?:\s|>)/.test(html) && html.includes('BreadcrumbList'));
   assert(!html.includes('zaya.sajan.codes'), `Stale origin: ${route}`);
   for (const [, href] of html.matchAll(/href="(\/[^"?#]*)/g)) {
     if (href.startsWith('/assets/') || href === '/favicon.ico') continue;

@@ -23,12 +23,18 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
+      const previousFocus = document.activeElement as HTMLElement | null;
+      const focusTimer = setTimeout(() => inputRef.current?.focus(), 50);
       setQuery('');
       setSelectedIndex(0);
+      return () => {
+        clearTimeout(focusTimer);
+        if (previousFocus?.isConnected) previousFocus.focus();
+      };
     }
   }, [isOpen]);
 
@@ -43,6 +49,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
         }
       } else if (e.key === 'Escape' && isOpen) {
         onClose();
+      } else if (e.key === 'Tab' && isOpen) {
+        const controls = dialogRef.current?.querySelectorAll<HTMLElement>('button, input, a[href], [tabindex="0"]');
+        if (!controls?.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -229,12 +245,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search Zaya documentation"
         style={{
           width: '100%',
           maxWidth: '640px',
-          backgroundColor: '#050b14',
+          backgroundColor: 'var(--site-surface)',
           border: '1px solid rgba(73, 223, 255, 0.28)',
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(73, 223, 255, 0.1)',
+          boxShadow: '0 24px 70px rgba(0, 0, 0, 0.2)',
           borderRadius: '12px',
           overflow: 'hidden'
         }}
@@ -250,7 +270,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
             gap: '12px'
           }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#49DFFF" strokeWidth="2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--site-accent)" strokeWidth="2">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
@@ -266,10 +286,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
             placeholder="Search capabilities, documentation, providers, or architecture..."
             style={{
               flex: 1,
+              minWidth: 0,
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              color: '#F4FAFF',
+              color: 'var(--site-ink)',
               fontSize: '16px',
               fontFamily: "'Inter', sans-serif"
             }}
@@ -281,19 +302,20 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
               borderRadius: '4px',
               padding: '2px 8px',
               fontSize: '11px',
-              color: '#49DFFF',
+              color: 'var(--site-accent)',
               fontFamily: 'monospace'
             }}
           >
             ESC
           </kbd>
+          <button type="button" className="icon-button" aria-label="Close search" onClick={onClose}>×</button>
         </div>
 
         {/* Results List */}
         <div style={{ maxHeight: '420px', overflowY: 'auto', padding: '8px' }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: '36px', textAlign: 'center', color: '#8392A6', fontSize: '14px' }}>
-              No matches found for <span style={{ color: '#49DFFF' }}>"{query}"</span>
+            <div style={{ padding: '36px', textAlign: 'center', color: 'var(--site-muted)', fontSize: '14px' }}>
+              No matches found for <span style={{ color: 'var(--site-accent)' }}>"{query}"</span>
             </div>
           ) : (
             filtered.map((item, index) => {
@@ -316,7 +338,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#F4FAFF', fontWeight: 600, fontSize: '14px' }}>
+                    <span style={{ color: 'var(--site-ink)', fontWeight: 600, fontSize: '14px' }}>
                       {item.title}
                     </span>
                     <span
@@ -327,7 +349,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
                         padding: '2px 6px',
                         borderRadius: '4px',
                         backgroundColor: 'rgba(52, 120, 255, 0.2)',
-                        color: '#49DFFF',
+                        color: 'var(--site-accent)',
                         border: '1px solid rgba(73, 223, 255, 0.2)'
                       }}
                     >
@@ -337,7 +359,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
                   <p
                     style={{
                       margin: 0,
-                      color: '#8392A6',
+                      color: 'var(--site-muted)',
                       fontSize: '12px',
                       lineHeight: '1.4',
                       overflow: 'hidden',
@@ -357,18 +379,18 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, navig
         <div
           style={{
             padding: '10px 16px',
-            backgroundColor: '#020407',
+            backgroundColor: 'var(--site-bg)',
             borderTop: '1px solid rgba(73, 223, 255, 0.1)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             fontSize: '11px',
-            color: '#8392A6'
+            color: 'var(--site-muted)'
           }}
         >
-          <span>Use <kbd style={{ color: '#49DFFF' }}>↑</kbd> <kbd style={{ color: '#49DFFF' }}>↓</kbd> to navigate</span>
-          <span>Press <kbd style={{ color: '#49DFFF' }}>ENTER</kbd> to open</span>
-          <span><kbd style={{ color: '#49DFFF' }}>ESC</kbd> to close</span>
+          <span>Use <kbd style={{ color: 'var(--site-accent)' }}>↑</kbd> <kbd style={{ color: 'var(--site-accent)' }}>↓</kbd> to navigate</span>
+          <span>Press <kbd style={{ color: 'var(--site-accent)' }}>ENTER</kbd> to open</span>
+          <span><kbd style={{ color: 'var(--site-accent)' }}>ESC</kbd> to close</span>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const WindowsBetaGuide: React.FC = () => <aside style={{margin:'24px 0',padding:24,border:'1px solid #b58256',borderRadius:16,lineHeight:1.8}}>
+export const WindowsBetaGuide: React.FC = () => <div className="beta-guide">
   <h1 className="editorial-title" style={{fontSize:36}}>Windows beta installation guide</h1>
   <p>This is an early testing release, created by Sajan Rai. It has no verified Windows publisher signature. Expect bugs; start with a small project and keep Full Access off while learning the controls. Automatic installation of beta updates is not supported.</p>
   <h3>1. Download and check the file</h3>
@@ -28,4 +28,4 @@ export const WindowsBetaGuide: React.FC = () => <aside style={{margin:'24px 0',p
     <li><strong>Uninstalling:</strong> use Windows Installed apps. Choose No when asked whether to remove local Zaya data if you want to keep your configuration and history.</li>
   </ul>
   <p>Report reproducible problems to <a href="mailto:ab4290025@gmail.com">ab4290025@gmail.com</a> with your Windows version, Zaya beta version, steps and a redacted screenshot. This is a limited beta, not a fully verified stable release.</p>
-</aside>;
+</div>;
