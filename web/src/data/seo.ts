@@ -1,17 +1,17 @@
 import { DOCS_DATA } from './docsData';
 
 export const PUBLIC_PAGES: Record<string, {title: string; description: string}> = {
-  '/enterprise': {title: 'Custom AI Agents & Assistants — Zaya Enterprise | Yatra Technologies', description: 'Discuss custom AI agents, business assistants and workflow integrations with Sajan Rai. Co-powered by Yatra Technologies. Contact support for an individually scoped project.'},
-  '/': {title: 'Zaya AI Assistant — Voice, Desktop & Android | Sajan Rai', description: 'Meet Zaya, the personal AI assistant created by Sajan Rai: voice conversations, Windows computer control, optional local AI, supervised OpenCode coding and an Android companion.'},
+  '/enterprise': {title: 'Custom AI Agents & Assistants — Zaya Enterprise | Yatra Technologies', description: 'Discuss custom AI agents, business assistants and workflow integrations with Yatra Technologies. Contact support for an individually scoped project.'},
+  '/': {title: 'Zaya AI Assistant — Voice, Desktop & Android | Yatra Technologies', description: 'Meet Zaya, the personal AI assistant by Yatra Technologies: voice conversations, Windows computer control, optional local AI, supervised OpenCode coding and an Android companion.'},
   '/features': {title: 'Zaya AI Assistant Features — Voice, Computer Control & Coding', description: 'Explore Zaya voice assistance, screen understanding, owner-controlled desktop actions, OpenCode coding, local AI options and Android companion calls.'},
   '/docs': {title: 'Zaya Documentation — Setup, Voice & Android Pairing', description: 'Learn how Zaya works: Windows setup, AI providers, voice configuration, Android pairing, optional hand controls and owner permissions.'},
-  '/download': {title: 'Download Zaya — Windows Beta & Android Companion', description: 'Try the Zaya Windows beta. Get the official installer, setup screenshots, published checksum and honest beta requirements. Created by Sajan Rai.'},
-  '/releases': {title: 'Zaya Releases — Versions, Checksums & Changes', description: 'Official Zaya release metadata, published platform downloads, version changes and known limitations. Created by Sajan Rai.'},
+  '/download': {title: 'Download Zaya — Windows Beta & Android Companion', description: 'Try the Zaya Windows beta. Get the official installer, setup screenshots, published checksum and honest beta requirements.'},
+  '/releases': {title: 'Zaya Releases — Versions, Checksums & Changes', description: 'Official Zaya release metadata, published platform downloads, version changes and known limitations.'},
   '/roadmap': {title: 'Zaya Roadmap — Planned AI Assistant Improvements', description: 'Follow planned Zaya improvements and current platform limitations. Planned features are distinct from published releases.'},
   '/security': {title: 'Zaya Security — Owner Permissions & Verified Updates', description: 'Understand Zaya owner authorization, credential protection, verified update requirements and release security limitations.'},
   '/privacy': {title: 'Zaya Privacy — Local Data & AI Providers', description: 'How Zaya handles local conversation archives, external AI providers, optional analytics, device pairing and retention.'},
   '/terms': {title: 'Zaya Terms of Use', description: 'Zaya software terms, third-party AI services, user responsibilities and beta limitations.'},
-  '/about': {title: 'About Zaya AI Assistant — Created by Sajan Rai', description: 'Zaya is a personal AI assistant created and developed by Sajan Rai. Learn about its voice, desktop, coding and Android companion approach.'},
+  '/about': {title: 'About Zaya AI Assistant — Yatra Technologies', description: 'Zaya is a personal AI assistant developed by Yatra Technologies. Learn about its voice, desktop, coding and Android companion approach.'},
 };
 
 export function canonicalPath(path: string) {
@@ -33,7 +33,7 @@ export function pageSchema(path: string, origin: string) {
   const url = origin + path;
   return {'@context':'https://schema.org', '@graph': [
       {'@type':'WebSite', '@id':origin + '/#website', name:'Zaya AI Assistant', url:origin},
-      {'@type':'Person', '@id':origin + '/about#creator', name:'Sajan Rai', url:origin + '/about', sameAs:['https://github.com/sajancodes']},
+      {'@type':'Organization', '@id':origin + '/about#creator', name:'Yatra Technologies', url:origin + '/about', sameAs:['https://www.instagram.com/yatratech.2/']},
       {'@type':'WebPage', '@id':url + '#page', name:title, description, url, isPartOf:{'@id':origin + '/#website'}},
       ...(path === '/' ? [{'@type':'SoftwareApplication', '@id':origin + '/#zaya', name:'Zaya', alternateName:'Zaya AI Assistant', description, url:origin, applicationCategory:'ProductivityApplication', operatingSystem:'Windows; Android companion', creator:{'@id':origin + '/about#creator'}}] : []),
       ...(path.startsWith('/docs/') ? [{'@type':'BreadcrumbList', itemListElement:[

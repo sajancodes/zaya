@@ -18,8 +18,8 @@ export const CoffeeSupport: React.FC<{onClose: () => void}> = ({onClose}) => {
     <span className="coffee-cup" aria-hidden="true">☕</span>
     <p className="eyebrow">A little warmth for the ice</p>
     <h2 id="coffee-title">Buy me a coffee.</h2>
-    <p id="coffee-description">Enjoying Zaya? Support Sajan Rai’s work with an optional contribution through eSewa.</p>
-    <figure className="coffee-qr"><img src="/assets/support/esewa-qr.jpeg" alt="eSewa payment QR supplied by Sajan Rai for supporting Zaya" width="467" height="450" /><figcaption>Scan with eSewa · Choose your amount</figcaption></figure>
+    <p id="coffee-description">Enjoying Zaya? Support Zaya’s development with an optional contribution through eSewa.</p>
+    <figure className="coffee-qr"><img src="/assets/support/esewa-qr.jpeg" alt="eSewa payment QR for supporting Zaya" width="467" height="450" /><figcaption>Scan with eSewa · Choose your amount</figcaption></figure>
     <p className="coffee-payment-note">Check the recipient shown in eSewa before confirming. Contributions are voluntary and do not purchase a service or subscription.</p>
     <a className="btn btn-primary" href="/assets/support/esewa-qr.jpeg" download="zaya-esewa-support.jpeg">Save QR image <span aria-hidden="true">↓</span></a>
     <p className="coffee-thanks">Thank you for helping Zaya grow. ♡</p>

@@ -28,7 +28,7 @@ export const DOCS_DATA: Record<string, DocItem> = {
     content: `
 # Getting Started with Zaya
 
-Zaya is a personal AI system created and developed by **Sajan Rai**. It operates directly on your Windows desktop, combining full-duplex conversational voice, screen perception, optical hand tracking, and 3D spatial intelligence into a single cohesive runtime.
+Zaya is a personal AI system developed by **Yatra Technologies**. It operates directly on your Windows desktop, combining full-duplex conversational voice, screen perception, optical hand tracking, and 3D spatial intelligence into a single cohesive runtime.
 
 > **System Requirements Checklist**:
 > - Windows 10 (64-bit 1903+) or Windows 11

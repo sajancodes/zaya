@@ -19,7 +19,7 @@ export const Terms: React.FC = () => {
             1. Software License
           </h2>
           <p style={{ marginBottom: '20px' }}>
-            Zaya is created and developed by <strong>Sajan Rai</strong>. The software is provided under its open-source license. You may use, inspect, modify, and distribute the software subject to the terms of the project license and attribution notices.
+            Zaya is developed by <strong>Yatra Technologies</strong>. The software is provided under its open-source license. You may use, inspect, modify, and distribute the software subject to the terms of the project license and attribution notices.
           </p>
 
           <h2 style={{ color: 'var(--site-ink)', fontSize: '20px', margin: '32px 0 12px', fontWeight: 600 }}>

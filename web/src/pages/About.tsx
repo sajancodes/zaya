@@ -5,15 +5,15 @@ export const About: React.FC = () => {
     <section className="section" style={{ minHeight: '100vh', paddingTop: '60px' }}>
       <div className="container" style={{ maxWidth: '860px' }}>
         <div style={{ textAlign: 'center', maxWidth: '780px', margin: '0 auto 50px auto' }}>
-          <div className="section-label">Meet the Founder</div>
+          <div className="section-label">About Zaya</div>
           <h1 className="editorial-title" style={{ fontSize: '46px', marginBottom: '20px' }}>
             "Zaya started as a question:{' '}
             <span className="editorial-italic">What if a computer could become something more personal?"</span>
           </h1>
           <p style={{ color: 'var(--site-muted)', fontSize: '16px', lineHeight: '1.7' }}>
-            Created and developed by <strong>Sajan Rai</strong> — <a href="https://github.com/sajancodes" target="_blank" rel="noopener noreferrer">sajancodes</a>.
+            A personal AI companion by <strong>Yatra Technologies</strong>.
           </p>
-          <p className="yatra-credit" style={{marginTop:12}}>Co-powered by Yatra Technologies</p>
+
         </div>
 
         <div className="glass-panel" style={{ padding: '48px', fontSize: '15px', lineHeight: '1.8', color: 'var(--site-muted)' }}>
@@ -24,7 +24,7 @@ export const About: React.FC = () => {
             Most contemporary AI assistants remain isolated inside browser tabs or mobile chat bubbles. They cannot observe your desktop errors, understand the context of your open projects, touch your operating system controls, or continue with you seamlessly onto your phone.
           </p>
           <p style={{ marginBottom: '24px' }}>
-            Sajan Rai built Zaya to break past these artificial boundaries. Rather than creating a chatbot wrapper, the goal from day one was to build a cohesive personal computing system: an intelligent assistant with sensory perception, voice fluency, physical hand control, and persistent memory that operates with genuine respect for owner sovereignty.
+            Yatra Technologies develops Zaya to break past these artificial boundaries. Rather than creating a chatbot wrapper, the goal from day one was to build a cohesive personal computing system: an intelligent assistant with sensory perception, voice fluency, physical hand control, and persistent memory that operates with genuine respect for owner sovereignty.
           </p>
 
           <h2 style={{ color: 'var(--site-ink)', fontSize: '22px', margin: '36px 0 16px', fontWeight: 600 }}>

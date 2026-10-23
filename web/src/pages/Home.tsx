@@ -27,7 +27,7 @@ export const Home: React.FC<{navigate:(path:string)=>void; latestVersion?:string
         <figcaption><span className="status-dot"/> Your first hello. Actual Windows beta setup.</figcaption>
       </figure>
     </section>
-    <div className="home-principles wrap"><span>Created by <strong>Sajan Rai</strong><span className="home-yatra-credit">Co-powered by Yatra Technologies</span></span><span>Voice, desktop & optional coding</span><span>Provider choices. Your permissions.</span></div>
+    <div className="home-principles wrap"><span>A personal AI companion</span><span>Voice, desktop & optional coding</span><span>Provider choices. Your permissions.</span></div>
     <section id="meet-zaya" className="home-section wrap">
       <div className="section-heading"><div><p className="eyebrow">A companion with something to do</p><h2>Start with your everyday.</h2></div><p>Three ways to get to know Zaya. These are example requests—not recorded conversations or guaranteed outcomes.</p></div>
       <div className="usecase-list">{examples.map(item=><article className="usecase" key={item.number}><span className="item-number">{item.number}</span><div><h3>{item.title}</h3><p className="example-prompt">{item.prompt}</p></div><div><p>{item.body}</p><a className="text-link" href={item.href}>{item.link} <span aria-hidden="true">↗</span></a></div></article>)}</div>
@@ -105,11 +105,6 @@ export const Home: React.FC<{navigate:(path:string)=>void; latestVersion?:string
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '13px', color: '#8193a6' }}>Created and built by</span>
-                  <strong style={{ color: '#ebfcff', fontSize: '15px', letterSpacing: '0.5px' }}>Sajan Rai</strong>
-                </div>
-                  <p className="yatra-credit" style={{marginTop:12}}>Co-powered by Yatra Technologies</p>
               </div>
 
               {/* Right Column: The Exact Character Image from assets/standby.png */}

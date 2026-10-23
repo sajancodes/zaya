@@ -2,7 +2,7 @@ import React from 'react';
 
 export const WindowsBetaGuide: React.FC = () => <div className="beta-guide">
   <h1 className="editorial-title" style={{fontSize:36}}>Windows beta installation guide</h1>
-  <p>This is an early testing release, created by Sajan Rai. It has no verified Windows publisher signature. Expect bugs; start with a small project and keep Full Access off while learning the controls. Automatic installation of beta updates is not supported.</p>
+  <p>This is an early testing release. It has no verified Windows publisher signature. Expect bugs; start with a small project and keep Full Access off while learning the controls. Automatic installation of beta updates is not supported.</p>
   <h3>1. Download and check the file</h3>
   <p>Use the Windows Beta download on this website or the linked sajancodes/zaya-companion-releases GitHub release. The file is <code>ZayaBetaSetup.exe</code>. Compare its SHA-256 with the release before opening it:</p>
   <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>Get-FileHash -Algorithm SHA256 "$HOME\Downloads\ZayaBetaSetup.exe"</pre>
