@@ -20,7 +20,7 @@ jobs:
           python-version: '3.13'
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt -r web/requirements.txt ruff pytest httpx
+        run: python -m pip install -r requirements.txt -r web/requirements.txt ruff pytest httpx pip-audit
       - name: Check syntax and undefined names
         run: python -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py dashboard plugins tools
       - name: Compile application sources
@@ -29,6 +29,8 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests -q --disable-warnings
+      - name: Audit release dependencies
+        run: python -m pip_audit -r requirements.txt
   website:
     runs-on: ubuntu-latest
     defaults:

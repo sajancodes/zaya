@@ -120,14 +120,24 @@ def verify_authenticode_signature(file_path: Path, expected_publisher: Optional[
         return True
 
     try:
-        environment = {**os.environ, 'ZAYA_VERIFY_FILE': str(file_path)}
+        import ctypes
+        system_directory = ctypes.create_unicode_buffer(32768)
+        if not ctypes.windll.kernel32.GetSystemDirectoryW(system_directory, len(system_directory)):
+            return False
+        powershell = Path(system_directory.value) / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'
+        # A launcher running PowerShell 7 can export an incompatible module
+        # path. Use only the Windows-provided modules for trust verification.
+        environment = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+        environment.update(ZAYA_VERIFY_FILE=str(file_path), PSModulePath=str(powershell.parent / 'Modules'))
         cmd = [
-            "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+            str(powershell), "-NoProfile", "-NonInteractive", "-Command",
             "$s = Get-AuthenticodeSignature -LiteralPath $env:ZAYA_VERIFY_FILE; "
             "@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject} | ConvertTo-Json -Compress"
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=environment,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode != 0:
+            return False
         signature = json.loads(result.stdout)
         status = signature.get('status')
         if status != "Valid":

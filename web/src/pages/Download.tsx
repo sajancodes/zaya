@@ -26,6 +26,7 @@ export const Download: React.FC<{navigate: (path: string) => void}> = ({navigate
               : <p>{loading ? 'Checking published releases…' : `No verified ${channel.toLowerCase()} ${platform} package is published yet.`}</p>}
             {platform === 'windows' && <p>Coding with OpenCode is optional. Signing and clean installation checks are required before the first public Windows release.</p>}
             {platform === 'linux' && <p>Linux packaging is not yet validated. Windows-only computer control features are not promised on Linux.</p>}
+            {platform === 'android' && <p>The current companion is the existing owner testing channel. Production signing migration is pending.</p>}
           </article>;
         })}
       </div>

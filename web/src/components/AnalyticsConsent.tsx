@@ -4,7 +4,7 @@ export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
   const id = (import.meta as any).env.VITE_GA_MEASUREMENT_ID || '';
   const [consent, setConsent] = useState(() => localStorage.getItem('zaya-site-analytics') || 'unset');
   useEffect(() => {
-    if (consent !== 'yes' || !/^G-[A-Z0-9]+$/.test(id)) return;
+    if (path.startsWith('/admin') || consent !== 'yes' || !/^G-[A-Z0-9]+$/.test(id)) return;
     const win = window as any;
     if (!win.gtag) {
       win.dataLayer = win.dataLayer || [];
@@ -17,7 +17,7 @@ export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
     // Never include query strings, search phrases, referrers or app content.
     win.gtag('event','page_view',{page_location:location.origin + path,page_referrer:''});
   },[consent,id,path]);
-  if (!/^G-[A-Z0-9]+$/.test(id)) return null;
+  if (path.startsWith('/admin') || !/^G-[A-Z0-9]+$/.test(id)) return null;
   return <aside style={{position:'fixed',bottom:12,left:12,maxWidth:350,padding:14,zIndex:100,background:'#101725',border:'1px solid #7eabd0',borderRadius:8}}>
     <p>{consent === 'unset' ? 'Allow optional website analytics? Your Zaya conversations and app content are never sent.' : 'Website analytics preference'}</p>
     <button onClick={()=>{localStorage.setItem('zaya-site-analytics','yes');setConsent('yes');}}>Allow</button>{' '}

@@ -11,7 +11,7 @@
 
 #define MyAppName "Zaya"
 #define MyAppPublisher "Sajan Rai"
-#define MyAppURL "https://zaya.sajan.codes"
+#define MyAppURL "https://zayaxyz.vercel.app"
 #define MyAppExeName "Zaya.exe"
 #ifndef SourceAppDir
 #define SourceAppDir "..\..\dist\windows\Zaya"

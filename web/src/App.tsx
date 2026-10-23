@@ -40,6 +40,10 @@ export const App: React.FC = () => {
   }, []);
 
   const navigate = (path: string) => {
+    if (path.startsWith('/admin') || currentPath.startsWith('/admin')) {
+      window.location.assign(path);
+      return;
+    }
     window.history.pushState(null, '', path);
     setCurrentPath(path);
     window.scrollTo({ top: 0, behavior: 'smooth' });

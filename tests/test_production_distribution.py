@@ -244,13 +244,13 @@ def test_authenticode_verification(monkeypatch):
 
     # Mock successful Valid signature
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout='{"status":"Valid","subject":"CN=Sajan Rai"}')
+        mock_run.return_value = MagicMock(stdout='{"status":"Valid","subject":"CN=Sajan Rai"}', returncode=0)
         with tempfile.NamedTemporaryFile(suffix=".exe") as tmp:
             assert verify_authenticode_signature(Path(tmp.name)) is True
 
     # Mock signature failure
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout='{"status":"NotSigned","subject":""}')
+        mock_run.return_value = MagicMock(stdout='{"status":"NotSigned","subject":""}', returncode=0)
         with tempfile.NamedTemporaryFile(suffix=".exe") as tmp:
             assert verify_authenticode_signature(Path(tmp.name)) is False
 

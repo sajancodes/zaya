@@ -73,6 +73,8 @@ datas = [
     # Never bundle the owner's provider keys, pairing credentials or settings.
     (str(REPO_ROOT / 'config' / 'jarvis.ico'), 'config'),
     (str(REPO_ROOT / 'core' / 'prompt.txt'), 'core'),
+    (str(REPO_ROOT / 'LICENSE'), '.'),
+    (str(REPO_ROOT / 'CREDITS.md'), '.'),
 ]
 for package in ('actions', 'plugins'):
     datas.extend((str(source), package) for source in (REPO_ROOT / package).glob('*.py'))
