@@ -61,7 +61,12 @@ def prepare_windows_release(
     if not worker_exe.is_file():
         print(f"[Warning] ZayaHandWorker.exe not found in {app_dir}; hand features will rely on runtime fallback.")
 
-    # Optional code signing of binaries before packaging
+    # Public releases fail closed; unsigned builds are local previews only.
+    if not cert_path or not Path(cert_path).is_file():
+        raise RuntimeError('A production Authenticode certificate is required; no unsigned installer will be published.')
+    if not (shutil.which('signtool.exe') or shutil.which('signtool')):
+        raise RuntimeError('Windows SDK signtool is required for signing and verification.')
+    # Sign binaries before packaging.
     if cert_path and Path(cert_path).is_file():
         signtool = shutil.which("signtool.exe") or shutil.which("signtool")
         if signtool:
@@ -71,11 +76,13 @@ def prepare_windows_release(
                 cmd.extend(["/p", cert_password])
             cmd.append(str(zaya_exe))
             subprocess.run(cmd, check=True)
+            subprocess.run([signtool, 'verify', '/pa', '/all', str(zaya_exe)], check=True)
 
             if worker_exe.is_file():
                 print(f"Signing {worker_exe.name}...")
                 cmd_w = list(cmd[:-1]) + [str(worker_exe)]
                 subprocess.run(cmd_w, check=True)
+                subprocess.run([signtool, 'verify', '/pa', '/all', str(worker_exe)], check=True)
 
     # Locate ISCC compiler
     compiler = Path(iscc_path) if iscc_path else find_iscc()
@@ -116,6 +123,7 @@ def prepare_windows_release(
                 cmd_inst.extend(["/p", cert_password])
             cmd_inst.append(str(installer))
             subprocess.run(cmd_inst, check=True)
+            subprocess.run([signtool, 'verify', '/pa', '/all', str(installer)], check=True)
 
     # 2. Mirror the signed installer to the backward-compatible alias Zaya-Setup.exe
     shutil.copyfile(installer, output_dir / "Zaya-Setup.exe")
@@ -124,11 +132,8 @@ def prepare_windows_release(
     installer_size = installer.stat().st_size
 
     # URL resolution: beta releases are prereleases (not latest), requiring tag-specific URL
-    if channel == "beta":
-        release_tag = tag or f"v{version}"
-        download_url = f"https://github.com/sajancodes/zaya-companion-releases/releases/download/{release_tag}/ZayaSetup.exe"
-    else:
-        download_url = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/ZayaSetup.exe"
+    release_tag = tag or f"v{version}"
+    download_url = f"https://github.com/sajancodes/zaya-companion-releases/releases/download/{release_tag}/ZayaSetup.exe"
 
     # Write desktop-update.json pointing to canonical installer
     update_manifest = {
@@ -155,6 +160,7 @@ def prepare_windows_release(
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.version import VERSION, BUILD
 
     parser = argparse.ArgumentParser(description="Build Inno Setup installer and update metadata.")
@@ -165,8 +171,8 @@ if __name__ == "__main__":
     parser.add_argument("--channel", default="stable", choices=["stable", "beta"], help="Release channel.")
     parser.add_argument("--tag", default=None, help="Explicit release tag (e.g. v0.5.1).")
     parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
-    parser.add_argument("--cert", default=None, help="Optional PFX certificate path.")
-    parser.add_argument("--cert-password", default=None, help="Password for PFX certificate.")
+    parser.add_argument("--cert", default=os.environ.get('ZAYA_SIGNING_CERT_PATH'), help="Production PFX certificate path.")
+    parser.add_argument("--cert-password", default=os.environ.get('ZAYA_SIGNING_CERT_PASSWORD'), help="Prefer the signing password environment variable.")
     args = parser.parse_args()
 
     prepare_windows_release(

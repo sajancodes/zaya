@@ -72,7 +72,8 @@ hidden_imports = [
 datas = [
     (str(REPO_ROOT / 'actions'), 'actions'),
     (str(REPO_ROOT / 'plugins'), 'plugins'),
-    (str(REPO_ROOT / 'config'), 'config'),
+    # Never bundle the owner's provider keys, pairing credentials or settings.
+    (str(REPO_ROOT / 'config' / 'jarvis.ico'), 'config'),
     (str(REPO_ROOT / 'core' / 'prompt.txt'), 'core'),
 ]
 

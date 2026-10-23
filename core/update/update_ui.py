@@ -7,7 +7,7 @@ import threading
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QFrame, QWidget
+    QProgressBar, QFrame, QWidget, QComboBox
 )
 from core.version import version_string
 from .desktop_updater import desktop_updater, UpdateStatus
@@ -72,6 +72,12 @@ class UpdateDialog(QDialog):
         self.current_label = QLabel(f"Installed: {version_string()}")
         self.current_label.setStyleSheet("color: #a894a4; font-size: 11px;")
         layout.addWidget(self.current_label)
+        self.channel_box = QComboBox()
+        self.channel_box.addItems(['Stable', 'Beta'])
+        self.channel_box.setCurrentText(desktop_updater.channel.title())
+        self.channel_box.currentTextChanged.connect(lambda value: desktop_updater.set_channel(value.lower()))
+        layout.addWidget(QLabel('Update channel'))
+        layout.addWidget(self.channel_box)
 
         # Card container
         card = QFrame(self)

@@ -4754,6 +4754,22 @@ class MainWindow(QMainWindow):
         restart_btn.clicked.connect(self.restart_requested.emit)
         hands_btn=_row(QPushButton('Hand controls & 3D workspace'),self._BTN_DIM)
         hands_btn.clicked.connect(self.hand_settings_requested.emit)
+        updates_btn = _row(QPushButton('Zaya updates'), self._BTN_DIM)
+        def show_updates():
+            from core.update.update_ui import UpdateDialog
+            dialog = getattr(self, '_updates_dialog', None)
+            if dialog is None:
+                dialog = self._updates_dialog = UpdateDialog(self)
+            dialog.show(); dialog.raise_(); dialog.activateWindow()
+        updates_btn.clicked.connect(show_updates)
+        coding_btn = _row(QPushButton('Coding Skill'), self._BTN_DIM)
+        def show_coding():
+            from core.update.coding_ui import CodingSkillDialog
+            dialog = getattr(self, '_coding_dialog', None)
+            if dialog is None:
+                dialog = self._coding_dialog = CodingSkillDialog(self)
+            dialog.show(); dialog.raise_(); dialog.activateWindow()
+        coding_btn.clicked.connect(show_coding)
 
         self._brief_btn = _row(QPushButton())
         self._brief_btn.clicked.connect(self._toggle_brief)

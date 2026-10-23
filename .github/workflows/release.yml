@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-      - 'android-*'
   workflow_dispatch:
     inputs:
       target:
@@ -42,25 +41,19 @@ jobs:
       release_tag: ${{ steps.ver.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
-      - name: Calculate next version from public releases
+      - name: Read canonical version and verify immutable release tag
         id: ver
         shell: python
         run: |
-          import json, os, urllib.request, urllib.error
-          url = 'https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/update.json'
-          try:
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  previous = json.load(response).get('version_code', 0)
-          except urllib.error.HTTPError as error:
-              if error.code == 404:
-                  previous = 0
-              else:
-                  raise RuntimeError(f"Failed to query public releases: HTTP {error.code}") from error
-          except Exception as error:
-              raise RuntimeError(f"Network error verifying release version: {error}") from error
-          code = max(10001, int(previous) + 1)
-          name = f"0.5.{code - 10000}"
+          import os
+          from core.version import VERSION, BUILD, CHANNEL
+          code, name = BUILD, VERSION
+          requested = '${{ github.event.inputs.channel }}'
+          if requested and requested != CHANNEL:
+              raise SystemExit('Channel differs from version.json')
           tag = f"v{name}"
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != tag:
+              raise SystemExit('Tag differs from version.json')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version_code={code}\n")
               f.write(f"version_name={name}\n")
@@ -97,8 +90,18 @@ jobs:
         shell: powershell
         working-directory: spatial_renderer
         run: |
-          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build
+
+      - name: Restore production signing certificate
+        shell: powershell
+        env:
+          SIGNING_CERT: ${{ secrets.ZAYA_WINDOWS_PFX_BASE64 }}
+        run: |
+          if (-not $env:SIGNING_CERT) { throw 'Configure the production Windows signing certificate first.' }
+          $certPath = Join-Path $env:RUNNER_TEMP 'zaya-signing.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SIGNING_CERT))
+          "ZAYA_SIGNING_CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Generate version.json for build
         shell: powershell
@@ -118,6 +121,8 @@ jobs:
 
       - name: Compile Inno Setup installer and generate desktop-update.json
         shell: powershell
+        env:
+          ZAYA_SIGNING_CERT_PASSWORD: ${{ secrets.ZAYA_WINDOWS_PFX_PASSWORD }}
         run: |
           python tools/prepare_windows_release.py `
             --app-dir dist/windows/Zaya `
@@ -126,6 +131,19 @@ jobs:
             --build ${{ needs.version.outputs.version_code }} `
             --channel ${{ github.event.inputs.channel || 'stable' }} `
             --tag ${{ needs.version.outputs.release_tag }}
+
+      - name: Scan with Windows Defender
+        shell: powershell
+        run: |
+          Start-MpScan -ScanType CustomScan -ScanPath (Resolve-Path dist/windows)
+          if (Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -gt (Get-Date).AddHours(-2) }) { throw 'Defender detected a threat; publication blocked.' }
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: powershell
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP 'zaya-signing.pfx'
+          if (Test-Path -LiteralPath $certPath) { Remove-Item -LiteralPath $certPath -Force }
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4

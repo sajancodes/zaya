@@ -244,13 +244,13 @@ def test_authenticode_verification(monkeypatch):
 
     # Mock successful Valid signature
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="Valid\n")
+        mock_run.return_value = MagicMock(stdout='{"status":"Valid","subject":"CN=Sajan Rai"}')
         with tempfile.NamedTemporaryFile(suffix=".exe") as tmp:
             assert verify_authenticode_signature(Path(tmp.name)) is True
 
     # Mock signature failure
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="NotSigned\n")
+        mock_run.return_value = MagicMock(stdout='{"status":"NotSigned","subject":""}')
         with tempfile.NamedTemporaryFile(suffix=".exe") as tmp:
             assert verify_authenticode_signature(Path(tmp.name)) is False
 
@@ -271,7 +271,8 @@ def test_inno_setup_script_structure():
     assert "[Files]" in content
     assert "[Icons]" in content
     assert "[Run]" in content
-    assert "[UninstallDelete]" in content
+    assert 'Name: "{app}\\*"' not in content
+    assert 'MB_DEFBUTTON2' in content
 
     # Key security & non-admin install requirements
     assert "PrivilegesRequired=lowest" in content
@@ -484,6 +485,9 @@ def test_beta_windows_release_update_url(tmp_path, monkeypatch):
 
     fake_iscc = tmp_path / "fake_iscc.exe"
     fake_iscc.write_bytes(b"MZfakeiscc")
+    fake_cert = tmp_path / 'signing.pfx'
+    fake_cert.write_bytes(b'fixture-only')
+    monkeypatch.setattr('tools.prepare_windows_release.shutil.which', lambda name: str(fake_iscc))
 
     # Mock ISCC compiler so prepare_windows_release succeeds without Inno Setup installed
     monkeypatch.setattr("tools.prepare_windows_release.find_iscc", lambda: fake_iscc)
@@ -497,6 +501,7 @@ def test_beta_windows_release_update_url(tmp_path, monkeypatch):
         channel="beta",
         tag="v0.5.2-beta.1",
         iscc_path=fake_iscc,
+        cert_path=fake_cert,
     )
 
     assert manifest["channel"] == "beta"

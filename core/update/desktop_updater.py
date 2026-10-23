@@ -22,12 +22,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
-from core.version import VERSION, BUILD, CHANNEL
+from core.version import VERSION, BUILD, CHANNEL, semver_key
 from core.runtime_paths import get_update_dir
 
 APPROVED_HOST = "github.com"
 APPROVED_REPO_PATH = "/sajancodes/zaya-companion-releases/"
-DEFAULT_MANIFEST_URL = "https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/desktop-update.json"
+DEFAULT_MANIFEST_URL = "https://zayaxyz.vercel.app/api/updates/desktop"
 MAX_INSTALLER_SIZE = 500 * 1024 * 1024  # 500 MB max
 MAX_MANIFEST_SIZE = 64 * 1024  # 64 KB max
 
@@ -70,22 +70,23 @@ class DesktopUpdateManifest:
 
         channel = str(data.get("channel", "stable")).strip().lower()
         version = str(data.get("version", "")).strip()
-        if not re.match(r"^[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.]+)?$", version):
-            raise ValueError(f"Invalid manifest version format: {version}")
+        precedence = semver_key(version)
+        if channel not in ('stable', 'beta') or (channel == 'stable' and not precedence[3]):
+            raise ValueError('Manifest channel/version mismatch.')
 
         build = int(data.get("build", 0))
         if build <= 0:
             raise ValueError(f"Invalid manifest build number: {build}")
 
         filename = str(data.get("filename", "")).strip()
-        if filename != "Zaya-Setup.exe":
+        if filename not in ("ZayaSetup.exe", "Zaya-Setup.exe"):
             raise ValueError(f"Unexpected installer filename: {filename}")
 
         url = str(data.get("url", "")).strip()
         parsed_url = urllib.parse.urlparse(url)
         if parsed_url.scheme != "https":
             raise ValueError(f"Update URL must be HTTPS: {url}")
-        if parsed_url.netloc.lower() != APPROVED_HOST or APPROVED_REPO_PATH not in parsed_url.path:
+        if parsed_url.netloc.lower() != APPROVED_HOST or not parsed_url.path.startswith(APPROVED_REPO_PATH + 'releases/download/') or parsed_url.path.rsplit('/', 1)[-1] != filename or parsed_url.query or parsed_url.fragment:
             raise ValueError(f"Update URL host/path not approved: {url}")
 
         sha256 = str(data.get("sha256", "")).strip().lower()
@@ -113,27 +114,27 @@ def verify_authenticode_signature(file_path: Path, expected_publisher: Optional[
     if os.name != "nt":
         return True
 
-    # If code signing is not yet enforced or certificate is unconfigured, return True
-    if os.environ.get("ZAYA_REQUIRE_AUTHENTICODE") != "1":
+    # Source checkouts can explicitly exercise unsigned local fixtures. Packaged
+    # applications always require a trusted signature and matching publisher.
+    if not getattr(sys, 'frozen', False) and os.environ.get("ZAYA_REQUIRE_AUTHENTICODE") != "1":
         return True
 
     try:
+        environment = {**os.environ, 'ZAYA_VERIFY_FILE': str(file_path)}
         cmd = [
             "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-            f"(Get-AuthenticodeSignature -LiteralPath '{file_path}').Status.ToString()"
+            "$s = Get-AuthenticodeSignature -LiteralPath $env:ZAYA_VERIFY_FILE; "
+            "@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject} | ConvertTo-Json -Compress"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        status = result.stdout.strip()
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=environment,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        signature = json.loads(result.stdout)
+        status = signature.get('status')
         if status != "Valid":
             return False
 
         if expected_publisher:
-            cmd_subj = [
-                "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                f"(Get-AuthenticodeSignature -LiteralPath '{file_path}').SignerCertificate.Subject"
-            ]
-            res_subj = subprocess.run(cmd_subj, capture_output=True, text=True, timeout=15)
-            if expected_publisher.lower() not in res_subj.stdout.lower():
+            if not re.search(r'(?:^|,\s*)CN=' + re.escape(expected_publisher) + r'(?:,|$)', signature.get('subject', ''), re.I):
                 return False
 
         return True
@@ -155,6 +156,27 @@ class DesktopUpdater:
         self._lock = threading.Lock()
         self._check_timer: Optional[threading.Timer] = None
         self.last_check_time: float = 0
+        self.channel = CHANNEL
+        self.preferences_file = get_update_dir() / 'preferences.json'
+        try:
+            saved = json.loads(self.preferences_file.read_text(encoding='utf-8'))
+            if saved.get('channel') in ('stable', 'beta'):
+                self.channel = saved['channel']
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def set_channel(self, channel):
+        if channel not in ('stable', 'beta'):
+            raise ValueError('Choose stable or beta updates.')
+        with self._lock:
+            self.channel = channel
+            self.available_manifest = self.ready_installer = None
+            self.last_check_time = 0
+            self.preferences_file.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.preferences_file.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'channel': channel}), encoding='utf-8')
+            temporary.replace(self.preferences_file)
+            self._set_status(UpdateStatus.IDLE)
 
     def add_listener(self, callback: Callable[[UpdateStatus, str], None]) -> None:
         if callback not in self.listeners:
@@ -181,7 +203,7 @@ class DesktopUpdater:
 
             try:
                 req = urllib.request.Request(
-                    self.manifest_url,
+                    self.manifest_url + ('&' if '?' in self.manifest_url else '?') + 'channel=' + self.channel,
                     headers={"User-Agent": f"Zaya-Desktop/{VERSION} (build {BUILD})"}
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
@@ -195,9 +217,7 @@ class DesktopUpdater:
                 manifest = DesktopUpdateManifest.parse(raw_data.decode("utf-8"))
 
                 # Check if build/version is newer than current
-                is_newer = (manifest.build > BUILD) or (
-                    manifest.build == BUILD and manifest.version != VERSION
-                )
+                is_newer = manifest.channel == self.channel and semver_key(manifest.version) > semver_key(VERSION) and manifest.build > BUILD
 
                 if is_newer:
                     self.available_manifest = manifest
@@ -208,6 +228,11 @@ class DesktopUpdater:
                     self._set_status(UpdateStatus.UP_TO_DATE, f"Zaya v{VERSION} is up to date.")
                     return None
 
+            except urllib.error.HTTPError as e:
+                self.available_manifest = self.ready_installer = None
+                self._set_status(UpdateStatus.UP_TO_DATE if e.code == 404 else UpdateStatus.FAILED,
+                                 'No desktop release is published yet.' if e.code == 404 else 'Update service unavailable. Try again later.')
+                return None
             except Exception as e:
                 self.available_manifest = None
                 self._set_status(UpdateStatus.FAILED, f"Update check failed: {e}")
@@ -226,8 +251,9 @@ class DesktopUpdater:
 
             updates_dir = get_update_dir()
             updates_dir.mkdir(parents=True, exist_ok=True)
-            target_installer = updates_dir / "Zaya-Setup.exe"
-            temp_installer = updates_dir / "Zaya-Setup.exe.tmp"
+            self.ready_installer = None
+            target_installer = updates_dir / manifest.filename
+            temp_installer = updates_dir / (manifest.filename + ".tmp")
 
             try:
                 req = urllib.request.Request(
@@ -290,17 +316,27 @@ class DesktopUpdater:
             return False
 
         try:
+            manifest = self.available_manifest
+            if not manifest or self.ready_installer.stat().st_size != manifest.size or hashlib.sha256(self.ready_installer.read_bytes()).hexdigest() != manifest.sha256:
+                raise ValueError('Staged update changed after verification.')
+            if not verify_authenticode_signature(self.ready_installer, 'Sajan Rai'):
+                raise ValueError('Staged update signature is no longer valid.')
+            if os.name != 'nt':
+                raise ValueError('Windows installer updates are unavailable on this platform.')
             cmd = [str(self.ready_installer)]
             if silent:
                 # Inno Setup silent install parameters
-                cmd.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+                cmd.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/ZAYARESTART=1"])
 
             # Spawn installer as detached process
             flags = subprocess.DETACHED_PROCESS if os.name == "nt" else 0
             subprocess.Popen(cmd, creationflags=flags)
 
             if restart:
-                sys.exit(0)
+                from PyQt6.QtWidgets import QApplication
+                app = QApplication.instance()
+                if app:
+                    app.quit()
             return True
         except Exception as e:
             self._set_status(UpdateStatus.FAILED, f"Could not launch installer: {e}")

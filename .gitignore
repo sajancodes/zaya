@@ -107,3 +107,7 @@ web/*.tmp
 !.env.example
 installation.json
 web/data/
+*.pfx
+*.p12
+*service-account*.json
+.vercel/

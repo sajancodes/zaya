@@ -1,6 +1,20 @@
 """Zaya desktop assistant — created and developed by Sajan Rai."""
 import platform as _platform
 import subprocess as _subprocess
+import sys as _bootstrap_sys
+
+if '--install-coding-skill' in _bootstrap_sys.argv:
+    from core.coding_skill import install as _install_coding_skill
+    try:
+        _install_coding_skill()
+    except Exception:
+        if _platform.system() == 'Windows':
+            import ctypes as _bootstrap_ctypes
+            _bootstrap_ctypes.windll.user32.MessageBoxW(None,
+                'Zaya installed successfully. Coding Skill could not be installed. Try again from Coding Skill settings.',
+                'Zaya Coding Skill', 0x30)
+        raise SystemExit(1)
+    raise SystemExit(0)
 
 # ── Nuclear: force CREATE_NO_WINDOW on EVERY subprocess call on Windows ───────
 # This patches Popen itself, so no per-file flag is needed anywhere.
@@ -3198,6 +3212,9 @@ def main():
         try:
             from core.telemetry import telemetry_client
             telemetry_client.start()
+            from core.update.desktop_updater import desktop_updater
+            if _sys.platform == 'win32':
+                desktop_updater.start_background_poller()
         except Exception:
             pass
 
