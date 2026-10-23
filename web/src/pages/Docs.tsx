@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { DOCS_DATA, DOCS_CATEGORIES, DocItem } from '../data/docsData';
+import { canonicalPath } from '../data/seo';
 
 interface DocsProps {
   topic?: string;
@@ -139,7 +140,7 @@ export const Docs: React.FC<DocsProps> = ({ topic = 'getting-started', navigate 
   };
 
   const handleSelectDoc = (docId: string) => {
-    navigate(`/docs/${docId}`);
+    navigate(canonicalPath(`/docs/${docId}`));
   };
 
   return (
@@ -218,7 +219,7 @@ export const Docs: React.FC<DocsProps> = ({ topic = 'getting-started', navigate 
                       return (
                         <li key={doc.id}>
                           <a
-                            href={'/docs/' + doc.id}
+                            href={canonicalPath('/docs/' + doc.id)}
                             onClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) { e.preventDefault(); handleSelectDoc(doc.id); } }}
                             style={{
                               display: 'block',

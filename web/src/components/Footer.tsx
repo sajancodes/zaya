@@ -123,7 +123,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
                 </a>
               </li>
               <li>
-                <a href="/docs/install/windows" style={{ color: '#8392A6', cursor: 'pointer' }}>
+                <a href="/docs/install-windows" style={{ color: '#8392A6', cursor: 'pointer' }}>
                   Windows Installation
                 </a>
               </li>

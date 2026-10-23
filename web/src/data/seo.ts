@@ -13,7 +13,12 @@ export const PUBLIC_PAGES: Record<string, {title: string; description: string}> 
   '/about': {title: 'About Zaya AI Assistant — Created by Sajan Rai', description: 'Zaya is a personal AI assistant created and developed by Sajan Rai. Learn about its voice, desktop, coding and Android companion approach.'},
 };
 
+export function canonicalPath(path: string) {
+  return path.replace(/^\/docs\/install\//, '/docs/install-').replace(/\/+$/, '') || '/';
+}
+
 export function pageMetadata(path: string) {
+  path = canonicalPath(path);
   if (PUBLIC_PAGES[path]) return PUBLIC_PAGES[path];
   const key = path.replace(/^\/docs\//, '').replace(/^install\//, 'install-');
   const doc = path.startsWith('/docs/') ? DOCS_DATA[key] : undefined;
@@ -22,6 +27,7 @@ export function pageMetadata(path: string) {
 }
 
 export function pageSchema(path: string, origin: string) {
+  path = canonicalPath(path);
   const {title, description} = pageMetadata(path);
   const url = origin + path;
   return {'@context':'https://schema.org', '@graph': [

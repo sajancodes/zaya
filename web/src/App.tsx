@@ -14,7 +14,7 @@ import { Security } from './pages/Security';
 import { About } from './pages/About';
 import { Admin } from './pages/Admin';
 import { AnalyticsConsent } from './components/AnalyticsConsent';
-import { pageMetadata, pageSchema } from './data/seo';
+import { canonicalPath, pageMetadata, pageSchema } from './data/seo';
 
 export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
   const [currentPath, setCurrentPath] = useState<string>(initialPath ?? (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
@@ -23,7 +23,7 @@ export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
   useEffect(() => {
     const metadata = pageMetadata(currentPath);
     document.title = metadata.title;
-    const url = new URL(currentPath, import.meta.env.VITE_PUBLIC_SITE_URL || 'https://zayaxyz.vercel.app').href;
+    const url = new URL(canonicalPath(currentPath), import.meta.env.VITE_PUBLIC_SITE_URL || 'https://zayaxyz.vercel.app').href;
     document.querySelector('link[rel="canonical"]')?.setAttribute('href', url);
     for (const [selector, value] of [
       ['meta[name="description"]', metadata.description],

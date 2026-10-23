@@ -19,6 +19,10 @@ for (const url of urls) {
   assert(schema['@graph'].some(item => item['@type'] === 'WebPage' && item.url === url));
   if (route.startsWith('/docs/')) assert(html.includes('<article>') && html.includes('BreadcrumbList'));
   assert(!html.includes('zaya.sajan.codes'), `Stale origin: ${route}`);
+  for (const [, href] of html.matchAll(/href="(\/[^"?#]*)/g)) {
+    if (href.startsWith('/assets/') || href === '/favicon.ico') continue;
+    assert(urls.includes(new URL(href, url).href), `Broken public navigation: ${route} -> ${href}`);
+  }
 }
 assert(fs.readFileSync('dist/robots.txt','utf8').includes('User-agent: *\nAllow: /'));
 const home = fs.readFileSync('dist/index.html','utf8');
