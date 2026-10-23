@@ -174,7 +174,7 @@ class HandTracker:
         previous={}
         try:
             flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
-            if runtime.name.lower().endswith('.exe') and 'python' not in runtime.stem.lower():
+            if runtime.name.lower() in {'zayahandworker', 'zayahandworker.exe'}:
                 cmd = [str(runtime), str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]
             else:
                 cmd = [str(runtime), '-u', '-m', 'core.gesture.worker', str(Path(model_path).resolve()), str(device), str(fps), '1' if mirror else '0', str(confidence)]

@@ -203,6 +203,10 @@ class DesktopUpdater:
 
     def check(self, force: bool = False) -> Optional[DesktopUpdateManifest]:
         """Check for updates synchronously (call from background thread)."""
+        if os.name != 'nt':
+            self.available_manifest = self.ready_installer = None
+            self._set_status(UpdateStatus.IDLE, 'Use your native package manager to update Zaya; Windows installer updates are unavailable here.')
+            return None
         now = time.monotonic()
         if not force and (now - self.last_check_time < 3600):
             return self.available_manifest

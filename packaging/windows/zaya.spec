@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 block_cipher = None
 
 SPEC_ROOT = Path(SPECPATH).resolve()
-REPO_ROOT = SPEC_ROOT.parents[1] if (SPEC_ROOT.name == 'windows' and SPEC_ROOT.parent.name == 'packaging') else SPEC_ROOT
+REPO_ROOT = SPEC_ROOT.parents[1] if SPEC_ROOT.parent.name == 'packaging' else SPEC_ROOT
 
 # Discover all action and plugin modules to prevent silent omissions
 action_modules = []
@@ -69,6 +69,10 @@ hidden_imports = [
     'core.update.update_ui',
     'services.spatial_server',
 ] + action_modules + plugin_modules
+
+if sys.platform != 'win32':
+    hidden_imports = [name for name in hidden_imports if name not in {'comtypes', 'win10toast', 'wmi', 'pywinauto'}]
+    hidden_imports += ['keyring.backends.SecretService', 'secretstorage', 'jeepney']
 
 datas = [
     # Never bundle the owner's provider keys, pairing credentials or settings.
@@ -130,7 +134,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_path,
-    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'Zaya.exe'),
+    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'Zaya.exe') if sys.platform == 'win32' else None,
 )
 
 coll = COLLECT(

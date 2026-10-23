@@ -110,17 +110,19 @@ def find_hand_worker() -> Optional[Path]:
     """Locate the isolated hand worker executable or development runtime."""
     # 1. Packaged ZayaHandWorker.exe next to application executable or in app root
     app_root = get_app_root()
-    candidate = app_root / "ZayaHandWorker.exe"
+    worker_name = 'ZayaHandWorker.exe' if sys.platform == 'win32' else 'ZayaHandWorker'
+    candidate = app_root / worker_name
     if candidate.is_file():
         return candidate
 
     # 2. Inside resource directory
-    candidate_res = get_resource_dir() / "ZayaHandWorker.exe"
+    candidate_res = get_resource_dir() / worker_name
     if candidate_res.is_file():
         return candidate_res
 
     # 3. Development .venv-hands runtime
-    dev_runtime = Path(__file__).resolve().parents[1] / ".venv-hands" / "Scripts" / "python.exe"
+    relative_runtime = Path('Scripts/python.exe') if sys.platform == 'win32' else Path('bin/python')
+    dev_runtime = Path(__file__).resolve().parents[1] / '.venv-hands' / relative_runtime
     if dev_runtime.is_file():
         return dev_runtime
 

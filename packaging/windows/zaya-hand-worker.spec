@@ -13,10 +13,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 block_cipher = None
 
 SPEC_ROOT = Path(SPECPATH).resolve()
-REPO_ROOT = SPEC_ROOT.parents[1] if (SPEC_ROOT.name == 'windows' and SPEC_ROOT.parent.name == 'packaging') else SPEC_ROOT
+REPO_ROOT = SPEC_ROOT.parents[1] if SPEC_ROOT.parent.name == 'packaging' else SPEC_ROOT
 
 # Entry point script
-entry_script = REPO_ROOT / 'core' / 'gesture' / 'worker.py'
+entry_script = REPO_ROOT / 'packaging' / 'hand_worker_entry.py'
 
 hidden_imports = [
     'mediapipe',
@@ -68,7 +68,7 @@ exe = EXE(
     a.datas,
     [],
     name='ZayaHandWorker',
-    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'ZayaHandWorker.exe'),
+    version=runpy.run_path(str(REPO_ROOT / 'tools' / 'windows_version_info.py'))['build_version_info'](REPO_ROOT, 'ZayaHandWorker.exe') if sys.platform == 'win32' else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
