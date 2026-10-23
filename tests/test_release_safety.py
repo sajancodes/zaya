@@ -88,6 +88,32 @@ def test_missing_signing_certificate_blocks_public_packaging(tmp_path):
         prepare_windows_release(tmp_path, tmp_path / 'out', '1.0.0', 10008)
 
 
+def test_unsigned_beta_is_manual_only_and_cannot_use_stable_channel(tmp_path, monkeypatch):
+    from tools.prepare_windows_release import prepare_windows_release
+    (tmp_path / 'Zaya.exe').write_bytes(b'MZ')
+    compiler = tmp_path / 'iscc.exe'
+    compiler.write_bytes(b'test compiler')
+    output = tmp_path / 'out'
+    with pytest.raises(ValueError, match='beta channel'):
+        prepare_windows_release(tmp_path, output, '1.0.0', 10008, unsigned_beta=True)
+
+    def compile_beta(args, **kwargs):
+        assert '/DUnsignedBeta=1' in args
+        (output / 'ZayaBetaSetup.exe').write_bytes(b'MZbeta installer')
+
+    monkeypatch.setattr('tools.prepare_windows_release.subprocess.run', compile_beta)
+    result = prepare_windows_release(tmp_path, output, '1.0.0', 10008,
+                                     channel='beta', unsigned_beta=True, iscc_path=compiler)
+    assert result['manual_install_only'] is True
+    assert result['signature_status'] == 'unsigned'
+    assert (output / 'windows-beta.json').is_file()
+    assert not (output / 'desktop-update.json').exists()
+    (tmp_path / 'owner.log').write_text('private runtime data')
+    with pytest.raises(ValueError, match='private files'):
+        prepare_windows_release(tmp_path, output, '1.0.0', 10008,
+                                channel='beta', unsigned_beta=True, iscc_path=compiler)
+
+
 def test_vercel_cannot_use_ephemeral_sqlite(monkeypatch):
     from web.database import get_db_path
     monkeypatch.setenv('VERCEL', '1')

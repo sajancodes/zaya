@@ -18,18 +18,26 @@
 #endif
 
 [Setup]
+#ifdef UnsignedBeta
+AppId={{10498B53-1AE2-4B37-B4AB-DB30F18D09CA}
+AppName=Zaya Beta
+AppVerName=Zaya Beta v{#MyAppVersion} (unsigned)
+DefaultDirName={localappdata}\Programs\ZayaBeta
+OutputBaseFilename=ZayaBetaSetup
+#else
 AppId={{9F5781E2-A23C-4C7D-8946-7DF45F60B8E1}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} v{#MyAppVersion}
+DefaultDirName={localappdata}\Programs\Zaya
+OutputBaseFilename=ZayaSetup
+#endif
+AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL=https://github.com/sajancodes/zaya-companion-releases
-DefaultDirName={localappdata}\Programs\Zaya
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputBaseFilename=ZayaSetup
 OutputDir=..\..\dist\windows
 SetupIconFile=..\..\config\jarvis.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}

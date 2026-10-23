@@ -80,7 +80,10 @@ datas = [
     (str(REPO_ROOT / 'core' / 'prompt.txt'), 'core'),
     (str(REPO_ROOT / 'LICENSE'), '.'),
     (str(REPO_ROOT / 'CREDITS.md'), '.'),
+    (str(REPO_ROOT / 'zayabar.json'), '.'),
 ]
+if (REPO_ROOT / 'sad.png').is_file():
+    datas.append((str(REPO_ROOT / 'sad.png'), '.'))
 for package in ('actions', 'plugins'):
     datas.extend((str(source), package) for source in (REPO_ROOT / package).glob('*.py'))
 
@@ -115,6 +118,12 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Qt uses the Windows system ICU ABI. A generic ICU DLL found on a build
+# machine's PATH (for example Poppler's version-suffixed ABI) shadows the OS
+# library in frozen apps and prevents QtCore from loading.
+if sys.platform == 'win32':
+    a.binaries = [entry for entry in a.binaries if Path(entry[0]).name.lower() != 'icuuc.dll']
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

@@ -56,6 +56,7 @@ def prepare_windows_release(
     iscc_path: str | Path | None = None,
     cert_path: str | Path | None = None,
     cert_password: str | None = None,
+    unsigned_beta: bool = False,
 ) -> dict:
     app_dir = Path(app_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -69,10 +70,20 @@ def prepare_windows_release(
     if not worker_exe.is_file():
         print(f"[Warning] ZayaHandWorker.exe not found in {app_dir}; hand features will rely on runtime fallback.")
 
-    # Public releases fail closed; unsigned builds are local previews only.
-    if not cert_path or not Path(cert_path).is_file():
+    if unsigned_beta and (channel != 'beta' or cert_path):
+        raise ValueError('Unsigned installers require the beta channel and no signing certificate.')
+    if unsigned_beta:
+        private_files = [path for path in app_dir.rglob('*') if path.is_file() and
+                         (path.suffix.lower() in {'.log', '.jsonl', '.db', '.sqlite', '.sqlite3', '.pfx', '.p12'}
+                          or path.name in {'api_keys.json', 'installation.json', 'desktop-process.json'})]
+        if private_files:
+            raise ValueError('Runtime or private files found in the beta payload. Use a clean staging folder.')
+        if (output_dir / 'desktop-update.json').exists():
+            raise ValueError('Use a fresh beta output folder without automatic-update metadata.')
+    # Stable and automatic-update releases continue to require Authenticode.
+    if not unsigned_beta and (not cert_path or not Path(cert_path).is_file()):
         raise RuntimeError('A production Authenticode certificate is required; no unsigned installer will be published.')
-    if not (shutil.which('signtool.exe') or shutil.which('signtool')):
+    if not unsigned_beta and not (shutil.which('signtool.exe') or shutil.which('signtool')):
         raise RuntimeError('Windows SDK signtool is required for signing and verification.')
     # Sign binaries before packaging.
     if cert_path and Path(cert_path).is_file():
@@ -110,7 +121,23 @@ def prepare_windows_release(
         f"/O{output_dir}",
         str(iss_script)
     ]
+    if unsigned_beta:
+        iscc_cmd.insert(1, '/DUnsignedBeta=1')
     subprocess.run(iscc_cmd, check=True)
+
+    if unsigned_beta:
+        installer = output_dir / 'ZayaBetaSetup.exe'
+        if not installer.is_file():
+            raise FileNotFoundError(f'Beta installer was not created: {installer}')
+        manifest = dict(schema=1, platform='windows', channel='beta', version=version, build=int(build),
+                        filename=installer.name, sha256=calculate_sha256(installer), size=installer.stat().st_size,
+                        url=f'https://github.com/sajancodes/zaya-companion-releases/releases/download/{tag or "windows-" + version + "-beta.1"}/{installer.name}',
+                        signature_status='unsigned', manual_install_only=True)
+        (output_dir / 'windows-beta.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        (output_dir / 'SHA256SUMS.txt').write_text(f'{manifest["sha256"]}  {installer.name}\n', encoding='utf-8')
+        if (output_dir / 'desktop-update.json').exists():
+            raise RuntimeError('Unsigned beta output must not contain automatic-update metadata; use a fresh output directory.')
+        return manifest
 
     installer = output_dir / "ZayaSetup.exe"
     if not installer.is_file():
@@ -178,6 +205,7 @@ if __name__ == "__main__":
     parser.add_argument("--build", type=int, default=BUILD, help="Integer build code.")
     parser.add_argument("--channel", default=CHANNEL, choices=["stable", "beta"], help="Release channel from canonical version.json.")
     parser.add_argument("--tag", default=None, help="Explicit release tag (e.g. v0.5.1).")
+    parser.add_argument('--unsigned-beta', action='store_true', help='Explicit manual-install beta only; no updater manifest.')
     parser.add_argument("--iscc", default=None, help="Explicit path to ISCC.exe.")
     parser.add_argument("--cert", default=os.environ.get('ZAYA_SIGNING_CERT_PATH'), help="Production PFX certificate path.")
     parser.add_argument("--cert-password", default=os.environ.get('ZAYA_SIGNING_CERT_PASSWORD'), help="Prefer the signing password environment variable.")
@@ -193,4 +221,5 @@ if __name__ == "__main__":
         iscc_path=args.iscc,
         cert_path=args.cert,
         cert_password=args.cert_password,
+        unsigned_beta=args.unsigned_beta,
     )
