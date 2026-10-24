@@ -201,4 +201,65 @@ sealed class AndroidAction(
     data class QueryMemory(
         val query: String,
     ) : AndroidAction("query_memory", ActionRisk.LOW)
+
+    // ── Expanded PC & OpenJarvis Functions ──────────────────────────────────
+    data class EvaluateMath(
+        val expression: String,
+    ) : AndroidAction("evaluate_math", ActionRisk.LOW)
+
+    data object GetDeviceDiagnostics : AndroidAction("get_device_diagnostics", ActionRisk.LOW)
+
+    data class WebSearch(
+        val query: String,
+        val openInBrowser: Boolean = false,
+    ) : AndroidAction("web_search", ActionRisk.LOW)
+
+    data class GetWeather(
+        val location: String? = null,
+    ) : AndroidAction("get_weather", ActionRisk.LOW)
+
+    data object GetDailyBriefing : AndroidAction("get_daily_briefing", ActionRisk.LOW)
+
+    data class SetTimer(
+        val seconds: Int,
+        val label: String = "Timer",
+    ) : AndroidAction("set_timer", ActionRisk.LOW)
+
+    data class SetAlarm(
+        val hour: Int,
+        val minutes: Int,
+        val label: String = "Alarm",
+        val skipUi: Boolean = true,
+    ) : AndroidAction("set_alarm", ActionRisk.MEDIUM)
+
+    data object GetClipboard : AndroidAction("get_clipboard", ActionRisk.LOW)
+
+    data class SetClipboard(
+        val text: String,
+    ) : AndroidAction("set_clipboard", ActionRisk.LOW)
+
+    data class SendWhatsAppMessage(
+        val recipient: String,
+        val message: String,
+        val confirmed: Boolean = false,
+    ) : AndroidAction("send_whatsapp_message", ActionRisk.HIGH, requiresConfirmation = true)
+
+    data class InspectStorage(
+        val path: String? = null,
+    ) : AndroidAction("inspect_storage", ActionRisk.LOW)
+
+    data class SetVolume(
+        val level: Int,
+        val streamType: String = "media",
+    ) : AndroidAction("set_volume", ActionRisk.LOW)
+
+    data class SetRingerMode(
+        val mode: String,
+    ) : AndroidAction("set_ringer_mode", ActionRisk.LOW)
+
+    data class ExecutePcCommand(
+        val command: String,
+        val parameters: Map<String, Any?> = emptyMap(),
+        val confirmed: Boolean = false,
+    ) : AndroidAction("execute_pc_command", ActionRisk.HIGH, requiresConfirmation = true)
 }

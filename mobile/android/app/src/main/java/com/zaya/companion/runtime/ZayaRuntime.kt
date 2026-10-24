@@ -1210,6 +1210,51 @@ class ZayaRuntime(
             "query_memory" -> com.zaya.companion.action.AndroidAction.QueryMemory(
                 query = args.optString("query", "")
             )
+            "evaluate_math" -> com.zaya.companion.action.AndroidAction.EvaluateMath(
+                expression = args.optString("expression", "")
+            )
+            "get_device_diagnostics" -> com.zaya.companion.action.AndroidAction.GetDeviceDiagnostics
+            "web_search" -> com.zaya.companion.action.AndroidAction.WebSearch(
+                query = args.optString("query", ""),
+                openInBrowser = args.optBoolean("open_in_browser", false)
+            )
+            "get_weather" -> com.zaya.companion.action.AndroidAction.GetWeather(
+                location = args.optString("location", "").ifBlank { null }
+            )
+            "get_daily_briefing" -> com.zaya.companion.action.AndroidAction.GetDailyBriefing
+            "set_timer" -> com.zaya.companion.action.AndroidAction.SetTimer(
+                seconds = args.optInt("seconds", 60),
+                label = args.optString("label", "Timer")
+            )
+            "set_alarm" -> com.zaya.companion.action.AndroidAction.SetAlarm(
+                hour = args.optInt("hour", 8),
+                minutes = args.optInt("minutes", 0),
+                label = args.optString("label", "Alarm"),
+                skipUi = args.optBoolean("skip_ui", true)
+            )
+            "get_clipboard" -> com.zaya.companion.action.AndroidAction.GetClipboard
+            "set_clipboard" -> com.zaya.companion.action.AndroidAction.SetClipboard(
+                text = args.optString("text", "")
+            )
+            "send_whatsapp_message" -> com.zaya.companion.action.AndroidAction.SendWhatsAppMessage(
+                recipient = args.optString("recipient", ""),
+                message = args.optString("message", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "inspect_storage" -> com.zaya.companion.action.AndroidAction.InspectStorage(
+                path = args.optString("path", "").ifBlank { null }
+            )
+            "set_volume" -> com.zaya.companion.action.AndroidAction.SetVolume(
+                level = args.optInt("level", 50),
+                streamType = args.optString("stream_type", "media")
+            )
+            "set_ringer_mode" -> com.zaya.companion.action.AndroidAction.SetRingerMode(
+                mode = args.optString("mode", "normal")
+            )
+            "execute_pc_command" -> com.zaya.companion.action.AndroidAction.ExecutePcCommand(
+                command = args.optString("command", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
             else -> {
                 val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
                 val report = JSONObject()
@@ -1223,6 +1268,13 @@ class ZayaRuntime(
 
         scope.launch {
             val result = actionExecutor.execute(action)
+            if (action is com.zaya.companion.action.AndroidAction.ExecutePcCommand && result.status == com.zaya.companion.action.ActionResultStatus.SUCCESS) {
+                val pcCmdMsg = JSONObject()
+                    .put("type", "pc.command")
+                    .put("payload", JSONObject().put("command", action.command).put("parameters", JSONObject(action.parameters)))
+                    .put("timestamp", System.currentTimeMillis() / 1000.0)
+                socket?.send(pcCmdMsg.toString())
+            }
             val report = JSONObject()
                 .put("type", Protocol.Control.ACTION_RESULT)
                 .put("payload", result.toJsonObject())

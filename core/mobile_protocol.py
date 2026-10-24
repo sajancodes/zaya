@@ -264,6 +264,12 @@ def normalize_event(event) -> list[dict]:
             'jpeg': event.get('jpeg', ''),
         }, timestamp=stamp)]
 
+    if name == 'pc.command':
+        return [envelope('pc.command', {
+            'command': clip(event.get('command'), 60),
+            'parameters': event.get('parameters', {}) if isinstance(event.get('parameters'), dict) else {},
+        }, timestamp=stamp)]
+
     return []
 
 

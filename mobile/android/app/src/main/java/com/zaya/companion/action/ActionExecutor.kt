@@ -64,6 +64,7 @@ class ActionExecutor(
     val screenCaptureManager: ScreenCaptureManager = ScreenCaptureManager(context),
     val memoryStore: com.zaya.companion.memory.PersonalMemoryStore = com.zaya.companion.memory.PersonalMemoryStore(context),
     val deduplicator: ConsequentialActionDeduplicator = ConsequentialActionDeduplicator(),
+    val systemUtils: com.zaya.companion.service.SystemUtilitiesController = com.zaya.companion.service.SystemUtilitiesController(context),
 ) {
     val taskCoordinator: TaskCoordinator by lazy { TaskCoordinator(this) }
 
@@ -114,6 +115,20 @@ class ActionExecutor(
             is AndroidAction.RememberMemory -> executeRememberMemory(action)
             is AndroidAction.ForgetMemory -> executeForgetMemory(action)
             is AndroidAction.QueryMemory -> executeQueryMemory(action)
+            is AndroidAction.EvaluateMath -> executeEvaluateMath(action)
+            is AndroidAction.GetDeviceDiagnostics -> executeGetDeviceDiagnostics()
+            is AndroidAction.WebSearch -> executeWebSearch(action)
+            is AndroidAction.GetWeather -> executeGetWeather(action)
+            is AndroidAction.GetDailyBriefing -> executeGetDailyBriefing()
+            is AndroidAction.SetTimer -> executeSetTimer(action)
+            is AndroidAction.SetAlarm -> executeSetAlarm(action)
+            is AndroidAction.GetClipboard -> executeGetClipboard()
+            is AndroidAction.SetClipboard -> executeSetClipboard(action)
+            is AndroidAction.SendWhatsAppMessage -> executeSendWhatsAppMessage(action)
+            is AndroidAction.InspectStorage -> executeInspectStorage(action)
+            is AndroidAction.SetVolume -> executeSetVolume(action)
+            is AndroidAction.SetRingerMode -> executeSetRingerMode(action)
+            is AndroidAction.ExecutePcCommand -> executeExecutePcCommand(action)
         }
     }
 
@@ -1224,5 +1239,211 @@ class ActionExecutor(
                 )
             )
         }
+    }
+
+    // ── Expanded PC & OpenJarvis Handlers ───────────────────────────────────
+
+    private fun executeEvaluateMath(action: AndroidAction.EvaluateMath): ActionResult {
+        val res = systemUtils.evaluateMath(action.expression)
+        return if (res.success && res.result != null) {
+            ActionResult.success(
+                spoken = "The answer is ${res.formatted}.",
+                data = mapOf(
+                    "expression" to action.expression,
+                    "result" to res.result,
+                    "formatted" to res.formatted
+                )
+            )
+        } else {
+            ActionResult.failure(
+                spoken = res.formatted,
+                error = res.error ?: "math_evaluation_error"
+            )
+        }
+    }
+
+    private fun executeGetDeviceDiagnostics(): ActionResult {
+        val diag = systemUtils.getDeviceDiagnostics()
+        val battery = diag["battery_level"] as? Int ?: 0
+        val isCharging = diag["is_charging"] as? Boolean ?: false
+        val chargeStr = if (isCharging) " and charging" else ""
+        val availStorage = diag["storage_available_gb"]
+        val ramUsed = diag["ram_used_percent"]
+        val net = diag["network_type"]
+        val spoken = "Battery is at $battery percent$chargeStr. Network is $net. Storage has $availStorage GB free, with $ramUsed percent RAM in use."
+        return ActionResult.success(spoken, diag)
+    }
+
+    private fun executeWebSearch(action: AndroidAction.WebSearch): ActionResult {
+        val res = systemUtils.searchWeb(action.query, action.openInBrowser)
+        return ActionResult.success(
+            spoken = res.summary,
+            data = mapOf(
+                "query" to res.query,
+                "url" to res.searchUrl,
+                "opened_in_browser" to res.openedInBrowser
+            )
+        )
+    }
+
+    private fun executeGetWeather(action: AndroidAction.GetWeather): ActionResult {
+        val weather = systemUtils.getWeather(action.location)
+        return ActionResult.success(
+            spoken = weather.summary,
+            data = mapOf(
+                "location" to weather.location,
+                "temperature_c" to weather.temperatureC,
+                "condition" to weather.condition,
+                "humidity" to weather.humidity,
+                "wind_kmh" to weather.windKmh,
+                "is_live" to weather.isLive
+            )
+        )
+    }
+
+    private fun executeGetDailyBriefing(): ActionResult {
+        val activeCount = taskCoordinator.getActiveTask()?.let { 1 } ?: 0
+        val unreadNotifs = com.zaya.companion.service.ZayaNotificationListener.getRecentNotifications().size
+        val briefing = systemUtils.getDailyBriefing(activeCount, unreadNotifs)
+        val speech = briefing["spoken_briefing"] as? String ?: "Briefing compiled successfully."
+        return ActionResult.success(speech, briefing)
+    }
+
+    private fun executeSetTimer(action: AndroidAction.SetTimer): ActionResult {
+        if (action.seconds <= 0) {
+            return ActionResult.failure("Timer duration must be greater than zero.", error = "invalid_timer_duration")
+        }
+        val ok = systemUtils.setTimer(action.seconds, action.label)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Timer set for ${action.seconds} seconds.",
+                data = mapOf("seconds" to action.seconds, "label" to action.label)
+            )
+        } else {
+            ActionResult.failure("Could not start timer.", error = "timer_failed")
+        }
+    }
+
+    private fun executeSetAlarm(action: AndroidAction.SetAlarm): ActionResult {
+        if (action.hour !in 0..23 || action.minutes !in 0..59) {
+            return ActionResult.failure("Invalid alarm time. Hour must be 0-23 and minutes 0-59.", error = "invalid_alarm_time")
+        }
+        val ok = systemUtils.setAlarm(action.hour, action.minutes, action.label, action.skipUi)
+        val timeFormatted = String.format(java.util.Locale.US, "%02d:%02d", action.hour, action.minutes)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Alarm set for $timeFormatted.",
+                data = mapOf("hour" to action.hour, "minutes" to action.minutes, "label" to action.label)
+            )
+        } else {
+            ActionResult.failure("Could not set alarm.", error = "alarm_failed")
+        }
+    }
+
+    private fun executeGetClipboard(): ActionResult {
+        val text = systemUtils.getClipboardText()
+        return if (text.isNullOrBlank()) {
+            ActionResult.success("The clipboard is currently empty.", mapOf("empty" to true))
+        } else {
+            val preview = if (text.length > 80) text.take(77) + "..." else text
+            ActionResult.success(
+                spoken = "Clipboard contains: '$preview'.",
+                data = mapOf("text" to text, "empty" to false, "length" to text.length)
+            )
+        }
+    }
+
+    private fun executeSetClipboard(action: AndroidAction.SetClipboard): ActionResult {
+        val ok = systemUtils.setClipboardText(action.text)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Copied text to clipboard.",
+                data = mapOf("length" to action.text.length)
+            )
+        } else {
+            ActionResult.failure("Could not copy to clipboard.", error = "clipboard_failed")
+        }
+    }
+
+    private fun executeSendWhatsAppMessage(action: AndroidAction.SendWhatsAppMessage): ActionResult {
+        if (!action.confirmed) {
+            return ActionResult.needsConfirmation(
+                spoken = "Would you like me to open WhatsApp and send '${action.message}' to ${action.recipient}?",
+                actionId = "send_whatsapp_message",
+                payload = mapOf(
+                    "recipient" to action.recipient,
+                    "message" to action.message
+                )
+            )
+        }
+
+        val sig = "whatsapp:${action.recipient}:${action.message}"
+        if (deduplicator.isDuplicate(sig)) {
+            return ActionResult.failure(
+                spoken = "A WhatsApp message to ${action.recipient} was already recently dispatched.",
+                error = "duplicate_dispatched"
+            )
+        }
+        deduplicator.record(sig)
+
+        val ok = systemUtils.sendWhatsAppMessage(action.recipient, action.message)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Opened WhatsApp to send message to ${action.recipient}.",
+                data = mapOf("recipient" to action.recipient, "message" to action.message)
+            )
+        } else {
+            ActionResult.failure("Could not launch WhatsApp.", error = "whatsapp_failed")
+        }
+    }
+
+    private fun executeInspectStorage(action: AndroidAction.InspectStorage): ActionResult {
+        val info = systemUtils.inspectStorage(action.path)
+        val freeMb = info["free_storage_mb"]
+        val fileCount = info["file_count"]
+        val dir = info["directory_inspected"]
+        val spoken = "Inspected storage at $dir. Free space: $freeMb MB. Found $fileCount files."
+        return ActionResult.success(spoken, info)
+    }
+
+    private fun executeSetVolume(action: AndroidAction.SetVolume): ActionResult {
+        val ok = systemUtils.setVolume(action.level, action.streamType)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Set ${action.streamType} volume to ${action.level.coerceIn(0, 100)} percent.",
+                data = mapOf("level" to action.level, "stream_type" to action.streamType)
+            )
+        } else {
+            ActionResult.failure("Could not adjust volume.", error = "volume_failed")
+        }
+    }
+
+    private fun executeSetRingerMode(action: AndroidAction.SetRingerMode): ActionResult {
+        val ok = systemUtils.setRingerMode(action.mode)
+        return if (ok) {
+            ActionResult.success(
+                spoken = "Phone ringer mode set to ${action.mode}.",
+                data = mapOf("mode" to action.mode)
+            )
+        } else {
+            ActionResult.failure("Could not change ringer mode.", error = "ringer_mode_failed")
+        }
+    }
+
+    private fun executeExecutePcCommand(action: AndroidAction.ExecutePcCommand): ActionResult {
+        if (!action.confirmed) {
+            return ActionResult.needsConfirmation(
+                spoken = "Do you want me to execute the remote PC command '${action.command}'?",
+                actionId = "execute_pc_command",
+                payload = mapOf(
+                    "command" to action.command,
+                    "parameters" to action.parameters
+                )
+            )
+        }
+        return ActionResult.success(
+            spoken = "Dispatched remote PC command '${action.command}'.",
+            data = mapOf("command" to action.command, "parameters" to action.parameters, "relayed" to true)
+        )
     }
 }

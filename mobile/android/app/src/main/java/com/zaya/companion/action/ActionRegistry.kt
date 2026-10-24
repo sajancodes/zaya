@@ -488,6 +488,199 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
+        // ── Expanded PC & OpenJarvis Functions ──────────────────────────────
+        // 13. Evaluate Math (PC terminal_exec & OpenJarvis Math Tool)
+        list.add(
+            ActionCapability(
+                actionId = "evaluate_math",
+                purpose = "Evaluate mathematical and arithmetic calculations (arithmetic, percentages, square roots, trigonometry)",
+                requiredArguments = listOf("expression"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 14. Device Diagnostics (PC system_monitor & OpenJarvis Hardware)
+        list.add(
+            ActionCapability(
+                actionId = "get_device_diagnostics",
+                purpose = "Inspect phone hardware health: battery level, temperature, RAM usage, storage stats, and network state",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 15. Web Search (PC web_search & OpenJarvis Web Search)
+        list.add(
+            ActionCapability(
+                actionId = "web_search",
+                purpose = "Execute web search query with optional browser deep linking",
+                requiredArguments = listOf("query"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 16. Weather Report (PC weather_report & OpenJarvis Weather)
+        list.add(
+            ActionCapability(
+                actionId = "get_weather",
+                purpose = "Fetch current weather conditions, temperature, humidity, and forecast",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 17. Daily Briefing (PC doc_generator & OpenJarvis Morning Briefing)
+        list.add(
+            ActionCapability(
+                actionId = "get_daily_briefing",
+                purpose = "Synthesize an executive spoken morning briefing with date, battery, weather, tasks, and notifications",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 18. Set Timer (PC reminder & OpenJarvis Scheduled Monitors)
+        list.add(
+            ActionCapability(
+                actionId = "set_timer",
+                purpose = "Set countdown timer via Android AlarmClock service",
+                requiredArguments = listOf("seconds"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 19. Set Alarm (PC reminder & OpenJarvis Alarms)
+        list.add(
+            ActionCapability(
+                actionId = "set_alarm",
+                purpose = "Set wake-up or scheduled alarm clock with label",
+                requiredArguments = listOf("hour", "minutes"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 20. Clipboard Operations (PC computer_control & OpenJarvis Clipboard)
+        list.add(
+            ActionCapability(
+                actionId = "get_clipboard",
+                purpose = "Read active text from Android system clipboard",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "set_clipboard",
+                purpose = "Copy text into Android system clipboard",
+                requiredArguments = listOf("text"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 21. WhatsApp Direct Messaging (PC whatsapp & OpenJarvis Messaging)
+        list.add(
+            ActionCapability(
+                actionId = "send_whatsapp_message",
+                purpose = "Compose direct WhatsApp message to phone number or contact",
+                requiredArguments = listOf("recipient", "message"),
+                risk = ActionRisk.HIGH,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 22. Inspect Storage (PC file_controller & OpenJarvis File I/O)
+        list.add(
+            ActionCapability(
+                actionId = "inspect_storage",
+                purpose = "Inspect device storage capacity and list files in Downloads or Documents directory",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 23. Audio Stream Volume & Ringer Controls
+        list.add(
+            ActionCapability(
+                actionId = "set_volume",
+                purpose = "Set audio volume level percentage for media, ring, or alarm streams",
+                requiredArguments = listOf("level"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "set_ringer_mode",
+                purpose = "Set phone ringer mode to normal, vibrate, or silent",
+                requiredArguments = listOf("mode"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 24. PC Telekinesis Command Bridge
+        list.add(
+            ActionCapability(
+                actionId = "execute_pc_command",
+                purpose = "Dispatch remote PC telekinesis command to connected laptop runtime",
+                requiredArguments = listOf("command"),
+                risk = ActionRisk.HIGH,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
         return list
     }
 }

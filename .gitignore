@@ -88,3 +88,5 @@ docs/generated/
 docs/research/
 dashboard/widgets/
 data/
+.jdk/
+.gradle_home/
