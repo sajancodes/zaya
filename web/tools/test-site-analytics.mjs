@@ -25,6 +25,8 @@ test('consent, strict-mode deduplication, session expiry and withdrawal',()=>{
     b.api.trackDownload({target:{closest:()=>({href:'https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.2/'+filename})}},'/download');
     assert.equal(b.events.at(-1).platform,'linux');assert.equal(b.events.at(-1).kind,'download');
   }
+  b.api.trackDownload({target:{closest:()=>({href:'https://zaya.test/api/downloads/beta/windows/exe'})}},'/download');
+  assert.equal(b.events.at(-1).platform,'windows');
   const publicCount=b.events.length;b.api.trackPage('/admin');assert.equal(b.events.length,publicCount);
   b.api.trackPage('/download');assert.equal(b.events.length,publicCount+1);
   const before=b.events.length;

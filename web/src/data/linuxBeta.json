@@ -1,12 +1,12 @@
 {
   "published": true,
-  "version": "0.5.0",
-  "tag": "linux-0.5.0-beta.2",
+  "version": "0.5.1",
+  "tag": "linux-0.5.1-beta.1",
   "date": "2026-10-24",
   "filename": "Zaya.deb",
-  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.1/Zaya.deb",
-  "sha256": "1835cfca0e7799fffb8e58e16dfaa3cc653818635bf298c8072a15223e10c361",
-  "size": 373070924,
+  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.deb",
+  "sha256": "fac1aa652366249b671fedd1bdc24f864ee09bc2e97e368e61ca38ee1eb773f2",
+  "size": 373070464,
   "channel": "beta",
   "platform": "linux",
   "public_release_verified": false,
@@ -15,9 +15,9 @@
       "format": "deb",
       "label": "Ubuntu / Mint",
       "filename": "Zaya.deb",
-      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.1/Zaya.deb",
-      "sha256": "1835cfca0e7799fffb8e58e16dfaa3cc653818635bf298c8072a15223e10c361",
-      "size": 373070924,
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.deb",
+      "sha256": "fac1aa652366249b671fedd1bdc24f864ee09bc2e97e368e61ca38ee1eb773f2",
+      "size": 373070464,
       "commands": [
         "sudo apt install ./Zaya.deb",
         "zaya"
@@ -26,11 +26,11 @@
     },
     {
       "filename": "Zaya.rpm",
-      "sha256": "25002cb9fa1b7364d65af2c620f6f8ef357c5d0001b3260af531b283ea5a31eb",
-      "size": 423431204,
+      "sha256": "85c4f3c6adb4ae66820775f0086d0e9b0c172d42d0a0fe3125182b11a751a54b",
+      "size": 423435288,
       "format": "rpm",
       "label": "Fedora",
-      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.2/Zaya.rpm",
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.rpm",
       "commands": [
         "sudo dnf install ./Zaya.rpm",
         "zaya"
@@ -39,11 +39,11 @@
     },
     {
       "filename": "Zaya-linux-x86_64.tar.gz",
-      "sha256": "aca8a1565f9ade601d21dbe2a46309b5d5171db8f8012b922c70dac7be05d246",
-      "size": 449183715,
+      "sha256": "a8694a7d442edefc7c9454a4845d5cde73c6f20e57f9221e44dead06ec31c03d",
+      "size": 449185493,
       "format": "portable",
       "label": "Other Linux",
-      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.2/Zaya-linux-x86_64.tar.gz",
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya-linux-x86_64.tar.gz",
       "commands": [
         "tar -xzf Zaya-linux-x86_64.tar.gz",
         "./Zaya/Zaya"
