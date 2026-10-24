@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.py": {"includeFiles": "{*.py,templates/**}"}
+    "api/index.py": {"includeFiles": "{*.py,public_routes.json,templates/**}"}
   },
   "redirects": [
     {"source": "/docs/install/:platform", "destination": "/docs/install-:platform", "permanent": true}

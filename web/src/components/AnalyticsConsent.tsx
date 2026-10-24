@@ -1,10 +1,24 @@
 import React, { useEffect, useState } from 'react';
+import {preference, privacySignal, setPreference, trackPage, trackDownload} from '../data/siteAnalytics';
 
 export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
   const id = (import.meta as any).env.VITE_GA_MEASUREMENT_ID || '';
-  const [consent, setConsent] = useState(() => typeof localStorage === 'undefined' ? 'unset' : localStorage.getItem('zaya-site-analytics') || 'unset');
+  const [consent, setConsent] = useState(() => typeof window === 'undefined' ? 'unset' : preference());
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
-    if (path.startsWith('/admin') || consent !== 'yes' || !/^G-[A-Z0-9]+$/.test(id)) return;
+    const sync = (event: StorageEvent) => { if(event.key === 'zaya-site-analytics') { if(preference() !== 'yes') location.reload(); else setConsent(preference()); } };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+  useEffect(() => {
+    if (path.startsWith('/admin') || consent !== 'yes' || privacySignal()) return;
+    trackPage(path);
+    const onClick = (event: MouseEvent) => trackDownload(event, path);
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, [consent, path]);
+  useEffect(() => {
+    if (path.startsWith('/admin') || consent !== 'yes' || privacySignal() || !/^G-[A-Z0-9]+$/.test(id)) return;
     const win = window as any;
     if (!win.gtag) {
       win.dataLayer = win.dataLayer || [];
@@ -17,10 +31,11 @@ export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
     // Never include query strings, search phrases, referrers or app content.
     win.gtag('event','page_view',{page_location:location.origin + path,page_referrer:''});
   },[consent,id,path]);
-  if (path.startsWith('/admin') || !/^G-[A-Z0-9]+$/.test(id)) return null;
-  return <aside style={{position:'fixed',bottom:12,left:12,maxWidth:350,padding:14,zIndex:100,background:'#101725',border:'1px solid #7eabd0',borderRadius:8}}>
-    <p>{consent === 'unset' ? 'Allow optional website analytics? Your Zaya conversations and app content are never sent.' : 'Website analytics preference'}</p>
-    <button onClick={()=>{localStorage.setItem('zaya-site-analytics','yes');setConsent('yes');}}>Allow</button>{' '}
-    <button onClick={()=>{localStorage.setItem('zaya-site-analytics','no');location.reload();}}>Decline / turn off</button>
+  if (path.startsWith('/admin') || privacySignal()) return null;
+  if (consent !== 'unset' && !expanded) return <button className="analytics-preferences" onClick={()=>setExpanded(true)}>Analytics preferences</button>;
+  return <aside className="site-consent" aria-label="Website analytics preferences">
+    <strong>Help improve Zaya?</strong><p>Allow anonymous visit, page and download-click reports, with broad device and traffic-source categories? Your conversations and app content are never included.{/^G-[A-Z0-9]+$/.test(id) ? ' Google Analytics is also enabled only with your permission.' : ''} <a href="/privacy">Privacy details</a></p>
+    <div><button onClick={()=>{setPreference('yes');setConsent(preference());setExpanded(false);}}>Allow analytics</button>
+    <button onClick={()=>{setPreference('no');setConsent('no');location.reload();}}>Decline / turn off</button></div>
   </aside>;
 };

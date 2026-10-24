@@ -37,3 +37,9 @@ for (const name of ['options', 'ready', 'first-run']) {
   assert(windowsGuide.includes(image) && fs.statSync(`dist${image}`).size > 1000, `Missing actual installation screenshot: ${name}`);
 }
 console.log(`SEO proof passed for ${urls.length} public pages: unique metadata, canonical URLs, rendered content, links, schema and sitemap.`);
+
+// The event endpoint accepts only these public paths, even in serverless bundles.
+const analyticsRoutes = JSON.parse(fs.readFileSync('public_routes.json','utf8')).sort();
+const sitemapText = fs.readFileSync('dist/sitemap.xml','utf8');
+const sitemapRoutes = [...sitemapText.matchAll(/<loc>(.*?)<\/loc>/g)].map(match=>new URL(match[1]).pathname).sort();
+if (JSON.stringify(analyticsRoutes) !== JSON.stringify(sitemapRoutes)) throw new Error('Update public_routes.json to match the public sitemap.');

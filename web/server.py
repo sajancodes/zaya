@@ -380,27 +380,55 @@ async def api_admin_logout(response: Response, zaya_admin_session: Optional[str]
     return {"status": "ok", "message": "Logged out"}
 
 
-@app.get("/api/admin/metrics")
-async def api_admin_metrics(
-    zaya_admin_session: Optional[str] = Cookie(None),
-    request: Request = None,
-):
+def _require_admin(request, token):
     if not is_admin_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Admin panel is disabled until an explicit strong ADMIN_PASSWORD is configured in the server environment.",
-        )
-
-    # Check session cookie or Bearer token header
-    token = zaya_admin_session
-    auth_header = request.headers.get("Authorization") if request else None
-    if not token and auth_header and auth_header.startswith("Bearer "):
+        raise HTTPException(503, 'Admin panel is disabled until an explicit strong ADMIN_PASSWORD is configured in the server environment.')
+    auth_header = request.headers.get('Authorization') if request else None
+    if not token and auth_header and auth_header.startswith('Bearer '):
         token = auth_header[7:].strip()
-
     if not validate_session(token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        raise HTTPException(401, 'Unauthorized')
 
+
+@app.get('/api/admin/metrics')
+async def api_admin_metrics(zaya_admin_session: Optional[str] = Cookie(None), request: Request = None):
+    _require_admin(request, zaya_admin_session)
     return get_analytics_metrics()
+
+
+@app.post('/api/site-events', status_code=204)
+async def site_events(request: Request):
+    from pydantic import ValidationError
+    from starlette.concurrency import run_in_threadpool
+    from web.site_analytics import SiteEvent, sanitize, record_event, is_rate_limited as site_limit
+    if request.headers.get('DNT') == '1' or request.headers.get('Sec-GPC') == '1':
+        return Response(status_code=204)
+    origin = request.headers.get('Origin')
+    if origin and origin not in {*ALLOWED_ORIGINS, str(request.base_url).rstrip('/')}:
+        raise HTTPException(403, 'Unexpected origin.')
+    client_ip = request.client.host if request.client else 'unknown'
+    if await run_in_threadpool(site_limit, client_ip):
+        raise HTTPException(429, 'Rate limit exceeded.')
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > 2048:
+            raise HTTPException(413, 'Event too large.')
+        raw.extend(chunk)
+    try:
+        event = sanitize(SiteEvent.model_validate_json(bytes(raw)), request.headers.get('User-Agent', ''))
+    except (ValueError, ValidationError):
+        raise HTTPException(400, 'Invalid analytics event.') from None
+    await run_in_threadpool(record_event, event)
+    return Response(status_code=204)
+
+
+@app.get('/api/admin/site-analytics')
+def site_analytics_report(request: Request, days: int = 30, zaya_admin_session: Optional[str] = Cookie(None)):
+    from web.site_analytics import report
+    _require_admin(request, zaya_admin_session)
+    if days not in (7, 30, 90):
+        raise HTTPException(422, 'Choose 7, 30 or 90 days.')
+    return report(days)
 
 
 # ---------------------------------------------------------------------------

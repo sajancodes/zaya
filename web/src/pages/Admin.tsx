@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnalyticsMetrics } from '../types';
+import { SiteTraffic } from '../components/SiteTraffic';
 
 export const Admin: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -167,6 +168,7 @@ export const Admin: React.FC = () => {
           </div>
         </div>
 
+        <SiteTraffic />
         <section className="admin-releases card"><h2>Release management</h2>
         <p>Deactivate a broken version to stop advertising it. Published binaries remain immutable and are not deleted.</p>
         {releases.map(release => <div className="admin-release-row" key={release.platform + release.version}>
