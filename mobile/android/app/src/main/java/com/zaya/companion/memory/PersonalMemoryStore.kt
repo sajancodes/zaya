@@ -215,7 +215,7 @@ class PersonalMemoryStore(
             _memories.value = currentList.sortedByDescending { it.updatedAt }
             saveToDisk()
 
-            Log.i(TAG, "Saved personal memory [${category.name}]: $cleanKey")
+            Log.d(TAG, "Saved personal memory entry [${category.name}].")
             return MemorySaveResult.Saved(savedEntry, "Remembered: ${savedEntry.key} = \"${savedEntry.value}\".")
         }
     }
@@ -238,7 +238,7 @@ class PersonalMemoryStore(
             if (removed) {
                 _memories.value = currentList
                 saveToDisk()
-                Log.i(TAG, "Forgotten personal memory matching: $key")
+                Log.d(TAG, "Forgotten personal memory matching requested key.")
                 return true
             }
             return false

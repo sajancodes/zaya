@@ -159,10 +159,50 @@ def search_contacts(parameters: dict, **_kwargs) -> str:
     }, indent=2)
 
 
+import time
+
+_recent_consequential_actions: dict[str, float] = {}
+CONSEQUENTIAL_DEDUPLICATION_WINDOW_SECONDS = 10.0
+
+
+def _is_duplicate_consequential(sig: str) -> bool:
+    now = time.monotonic()
+    # Prune old entries
+    to_delete = [k for k, v in _recent_consequential_actions.items() if now - v > CONSEQUENTIAL_DEDUPLICATION_WINDOW_SECONDS * 2]
+    for k in to_delete:
+        del _recent_consequential_actions[k]
+    last = _recent_consequential_actions.get(sig)
+    if last and (now - last) < CONSEQUENTIAL_DEDUPLICATION_WINDOW_SECONDS:
+        return True
+    _recent_consequential_actions[sig] = now
+    return False
+
+
 def make_phone_call(parameters: dict, **_kwargs) -> str:
     """Cellular Phone Call Action."""
     require_owner()
     contact = str(parameters.get("contact") or parameters.get("number") or "").strip()
+    if not contact:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "Call contact or phone number cannot be blank."
+        }, indent=2)
+    if len(contact) > 80:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "Call contact parameter exceeds maximum length."
+        }, indent=2)
+
+    sig = f"call:{contact.lower()}"
+    if _is_duplicate_consequential(sig):
+        return json.dumps({
+            "status": "failed",
+            "error": "duplicate_consequential_action_prevented",
+            "message": f"Prevented duplicate phone call to '{contact}' within safety window."
+        }, indent=2)
+
     return json.dumps({
         "status": "success",
         "target": contact,
@@ -175,6 +215,33 @@ def send_sms_message(parameters: dict, **_kwargs) -> str:
     require_owner()
     contact = str(parameters.get("contact") or parameters.get("recipient") or "").strip()
     message = str(parameters.get("message") or parameters.get("text") or "").strip()
+    if not contact:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "SMS recipient contact cannot be blank."
+        }, indent=2)
+    if not message:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "SMS message text cannot be blank."
+        }, indent=2)
+    if len(contact) > 80 or len(message) > 2000:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "SMS recipient or message length exceeds safety limit."
+        }, indent=2)
+
+    sig = f"sms:{contact.lower()}:{hash(message)}"
+    if _is_duplicate_consequential(sig):
+        return json.dumps({
+            "status": "failed",
+            "error": "duplicate_consequential_action_prevented",
+            "message": f"Prevented duplicate SMS to '{contact}' within safety window."
+        }, indent=2)
+
     return json.dumps({
         "status": "success",
         "recipient": contact,
@@ -188,6 +255,33 @@ def send_whatsapp_message(parameters: dict, **_kwargs) -> str:
     require_owner()
     contact = str(parameters.get("contact") or parameters.get("chat") or "").strip()
     message = str(parameters.get("message") or parameters.get("text") or "").strip()
+    if not contact:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "WhatsApp recipient contact cannot be blank."
+        }, indent=2)
+    if not message:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "WhatsApp message text cannot be blank."
+        }, indent=2)
+    if len(contact) > 80 or len(message) > 2000:
+        return json.dumps({
+            "status": "failed",
+            "error": "malformed_parameters",
+            "message": "WhatsApp contact or message length exceeds safety limit."
+        }, indent=2)
+
+    sig = f"whatsapp:{contact.lower()}:{hash(message)}"
+    if _is_duplicate_consequential(sig):
+        return json.dumps({
+            "status": "failed",
+            "error": "duplicate_consequential_action_prevented",
+            "message": f"Prevented duplicate WhatsApp message to '{contact}' within safety window."
+        }, indent=2)
+
     return json.dumps({
         "status": "success",
         "recipient": contact,
@@ -299,7 +393,11 @@ def manage_personal_memory(parameters: dict, **_kwargs) -> str:
     category = str(parameters.get("category") or "PREFERENCE").upper().strip()
 
     # Sensitive data prevention
-    sensitive_words = ["password", "passwd", "pin", "api_key", "secret", "credit_card", "cvv", "otp"]
+    sensitive_words = [
+        "password", "passwd", "pin", "api_key", "secret", "credit_card", "cvv", "cvc",
+        "otp", "private_key", "ssh_rsa", "bearer", "access_token", "auth_token", "jwt",
+        "ssn", "social_security", "bank_account", "iban", "routing_number"
+    ]
     if any(w in key.lower() or w in value.lower() for w in sensitive_words):
         return json.dumps({
             "status": "blocked",
@@ -312,7 +410,8 @@ def manage_personal_memory(parameters: dict, **_kwargs) -> str:
             "status": "success",
             "action": "forget",
             "key": key,
-            "message": f"Forgotten memory: '{key}'."
+            "message": f"Forgotten memory: '{key}'. Removed from active on-device storage. (Data previously sent to remote cloud models during active sessions cannot be purged retroactively from third-party server logs).",
+            "local_only": True
         }, indent=2)
     elif action in ("query", "search"):
         return json.dumps({

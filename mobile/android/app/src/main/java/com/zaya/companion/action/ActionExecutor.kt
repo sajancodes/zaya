@@ -26,6 +26,30 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Idempotency safeguard preventing accidental duplicate dispatch of sensitive
+ * consequential actions (e.g. rapid double-taps, network retries, or replayed events).
+ */
+class ConsequentialActionDeduplicator(private val windowMillis: Long = 10_000L) {
+    private val recentExecutions = ConcurrentHashMap<String, Long>()
+
+    fun isDuplicate(signature: String, now: Long = System.currentTimeMillis()): Boolean {
+        recentExecutions.entries.removeIf { now - it.value > windowMillis * 2 }
+        val last = recentExecutions[signature] ?: return false
+        return (now - last) < windowMillis
+    }
+
+    fun record(signature: String, now: Long = System.currentTimeMillis()) {
+        recentExecutions[signature] = now
+    }
+
+    fun clear() {
+        recentExecutions.clear()
+    }
+}
+
 /**
  * Central action dispatcher executing validated phone control operations safely.
  */
@@ -39,6 +63,7 @@ class ActionExecutor(
     val contactManager: ContactManager = callManager.contactManager,
     val screenCaptureManager: ScreenCaptureManager = ScreenCaptureManager(context),
     val memoryStore: com.zaya.companion.memory.PersonalMemoryStore = com.zaya.companion.memory.PersonalMemoryStore(context),
+    val deduplicator: ConsequentialActionDeduplicator = ConsequentialActionDeduplicator(),
 ) {
     val taskCoordinator: TaskCoordinator by lazy { TaskCoordinator(this) }
 
@@ -142,11 +167,19 @@ class ActionExecutor(
     }
 
     private fun executeControlMedia(action: String): ActionResult {
-        val ok = mediaController.executeAction(action)
+        val cleanAction = action.lowercase(java.util.Locale.ROOT).trim()
+        val validMedia = setOf("play", "pause", "play_pause", "toggle", "next", "skip", "previous", "prev", "stop")
+        if (cleanAction !in validMedia) {
+            return ActionResult.failure(
+                spoken = "Unsupported media control action: '$action'. Supported actions are: ${validMedia.joinToString(", ")}.",
+                error = "unsupported_media_action"
+            )
+        }
+        val ok = mediaController.executeAction(cleanAction)
         return if (ok) {
-            ActionResult.success("Media $action executed.", mapOf("action" to action))
+            ActionResult.success("Media $cleanAction executed.", mapOf("action" to cleanAction))
         } else {
-            ActionResult.failure("Could not execute media $action.", error = "media_control_failed")
+            ActionResult.failure("Could not execute media $cleanAction.", error = "media_control_failed")
         }
     }
 
@@ -180,11 +213,15 @@ class ActionExecutor(
     }
 
     private fun executeLaunchApp(name: String): ActionResult {
-        if (name.isBlank()) {
-            return ActionResult.failure("App name cannot be empty.", error = "invalid_argument")
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            return ActionResult.failure("App name cannot be empty.", error = "malformed_parameters")
+        }
+        if (cleanName.length > 80 || cleanName.contains("\u0000")) {
+            return ActionResult.failure("Invalid app name specified.", error = "malformed_parameters")
         }
 
-        val targetName = memoryStore.getAppAlias(name) ?: name
+        val targetName = memoryStore.getAppAlias(cleanName) ?: cleanName
         return when (val outcome = appLauncher.resolveAndLaunch(targetName)) {
             is com.zaya.companion.service.AppLaunchOutcome.Success -> {
                 ActionResult.success("Opened ${outcome.appName}.", mapOf("app_name" to outcome.appName, "package" to outcome.packageName))
@@ -275,11 +312,19 @@ class ActionExecutor(
     }
 
     private fun executeInitiateCall(action: AndroidAction.InitiateCall): ActionResult {
+        val query = action.queryOrNumber.trim()
+        if (query.isBlank()) {
+            return ActionResult.failure("Call recipient or phone number cannot be blank.", error = "malformed_parameters")
+        }
+        if (query.length > 80) {
+            return ActionResult.failure("Call query or phone number exceeds maximum length.", error = "malformed_parameters")
+        }
+
         if (!action.confirmed) {
-            val targetLabel = if (action.queryOrNumber.all { it.isDigit() || it in "+-() " }) {
-                action.queryOrNumber
+            val targetLabel = if (query.all { it.isDigit() || it in "+-() " }) {
+                query
             } else {
-                when (val lookup = contactManager.lookupContact(action.queryOrNumber)) {
+                when (val lookup = contactManager.lookupContact(query)) {
                     is ContactLookupResult.SingleMatch -> lookup.contact.displayName
                     is ContactLookupResult.MultipleNumbers -> lookup.contact.displayName
                     is ContactLookupResult.AmbiguousMatches -> {
@@ -297,9 +342,9 @@ class ActionExecutor(
                         )
                     }
                     is ContactLookupResult.NotFound -> {
-                        return ActionResult.failure("Could not find '${action.queryOrNumber}' in contacts.", error = "not_found")
+                        return ActionResult.failure("Could not find '$query' in contacts.", error = "not_found")
                     }
-                    else -> action.queryOrNumber
+                    else -> query
                 }
             }
 
@@ -307,13 +352,24 @@ class ActionExecutor(
                 spoken = "Do you want me to call $targetLabel?",
                 actionId = "initiate_call",
                 payload = mapOf(
-                    "query" to action.queryOrNumber,
+                    "query" to query,
                     "direct_call" to action.directCall,
                 )
             )
         }
 
-        return when (val outcome = callManager.initiateCall(action.queryOrNumber, action.directCall)) {
+        // Deduplication safety check for confirmed calls
+        val callSignature = "initiate_call:${query.lowercase(java.util.Locale.ROOT)}"
+        if (deduplicator.isDuplicate(callSignature)) {
+            return ActionResult.failure(
+                spoken = "Prevented duplicate phone call to '$query' within the safety window.",
+                error = "duplicate_consequential_action_prevented",
+                data = mapOf("query" to query)
+            )
+        }
+        deduplicator.record(callSignature)
+
+        return when (val outcome = callManager.initiateCall(query, action.directCall)) {
             is OutgoingCallOutcome.DirectCallPlaced -> {
                 ActionResult.success(
                     spoken = "Calling ${outcome.targetName}.",
@@ -383,17 +439,33 @@ class ActionExecutor(
     }
 
     private fun executeComposeSms(action: AndroidAction.ComposeSms): ActionResult {
+        val recipient = action.recipient.trim()
+        val message = action.message.trim()
+
+        if (recipient.isBlank()) {
+            return ActionResult.failure("SMS recipient cannot be blank.", error = "malformed_parameters")
+        }
+        if (message.isBlank()) {
+            return ActionResult.failure("SMS message cannot be blank.", error = "malformed_parameters")
+        }
+        if (recipient.length > 80) {
+            return ActionResult.failure("SMS recipient query exceeds maximum length.", error = "malformed_parameters")
+        }
+        if (message.length > 2000) {
+            return ActionResult.failure("SMS message exceeds maximum length of 2000 characters.", error = "malformed_parameters")
+        }
+
         if (!action.confirmed) {
-            val recipientLabel = if (action.recipient.all { it.isDigit() || it in "+-() " }) {
-                action.recipient
+            val recipientLabel = if (recipient.all { it.isDigit() || it in "+-() " }) {
+                recipient
             } else {
-                when (val lookup = contactManager.lookupContact(action.recipient)) {
+                when (val lookup = contactManager.lookupContact(recipient)) {
                     is ContactLookupResult.SingleMatch -> lookup.contact.displayName
                     is ContactLookupResult.MultipleNumbers -> lookup.contact.displayName
                     is ContactLookupResult.AmbiguousMatches -> {
                         val names = lookup.candidates.map { it.displayName }.joinToString(", ")
                         return ActionResult.failure(
-                            spoken = "Found multiple contacts matching '${action.recipient}': $names. Which one would you like to text?",
+                            spoken = "Found multiple contacts matching '$recipient': $names. Which one would you like to text?",
                             error = "ambiguous_contact",
                             data = mapOf("candidates" to lookup.candidates.map { it.displayName })
                         )
@@ -405,29 +477,40 @@ class ActionExecutor(
                         )
                     }
                     is ContactLookupResult.NotFound -> {
-                        return ActionResult.failure("Could not find '${action.recipient}' in contacts.", error = "not_found")
+                        return ActionResult.failure("Could not find '$recipient' in contacts.", error = "not_found")
                     }
-                    else -> action.recipient
+                    else -> recipient
                 }
             }
 
             return ActionResult.needsConfirmation(
-                spoken = "Do you want me to send this text to $recipientLabel: \"${action.message}\"?",
+                spoken = "Do you want me to send this text to $recipientLabel: \"$message\"?",
                 actionId = "compose_sms",
                 payload = mapOf(
-                    "recipient" to action.recipient,
-                    "message" to action.message,
+                    "recipient" to recipient,
+                    "message" to message,
                     "direct_send" to action.directSend,
                 )
             )
         }
 
-        // Resolve recipient number
-        var targetNumber = action.recipient
-        var targetName = action.recipient
+        // Deduplication safety check for confirmed SMS
+        val smsSignature = "compose_sms:${recipient.lowercase(java.util.Locale.ROOT)}:${message.hashCode()}"
+        if (deduplicator.isDuplicate(smsSignature)) {
+            return ActionResult.failure(
+                spoken = "Prevented duplicate SMS to '$recipient' within the safety window.",
+                error = "duplicate_consequential_action_prevented",
+                data = mapOf("recipient" to recipient)
+            )
+        }
+        deduplicator.record(smsSignature)
 
-        if (!action.recipient.all { it.isDigit() || it in "+-() " }) {
-            when (val lookup = contactManager.lookupContact(action.recipient)) {
+        // Resolve recipient number
+        var targetNumber = recipient
+        var targetName = recipient
+
+        if (!recipient.all { it.isDigit() || it in "+-() " }) {
+            when (val lookup = contactManager.lookupContact(recipient)) {
                 is ContactLookupResult.SingleMatch -> {
                     targetName = lookup.contact.displayName
                     targetNumber = lookup.contact.numbers.first().number
@@ -447,7 +530,7 @@ class ActionExecutor(
                     return ActionResult.failure("${lookup.contactName} has no phone number saved.", error = "no_phone_number")
                 }
                 is ContactLookupResult.NotFound -> {
-                    return ActionResult.failure("Could not find '${action.recipient}' in contacts.", error = "not_found")
+                    return ActionResult.failure("Could not find '$recipient' in contacts.", error = "not_found")
                 }
                 else -> {}
             }
@@ -467,23 +550,34 @@ class ActionExecutor(
                     @Suppress("DEPRECATION")
                     SmsManager.getDefault()
                 }
-                val parts = smsManager.divideMessage(action.message)
+                val parts = smsManager.divideMessage(message)
                 if (parts.size > 1) {
                     smsManager.sendMultipartTextMessage(cleanNumber, null, parts, null, null)
                 } else {
-                    smsManager.sendTextMessage(cleanNumber, null, action.message, null, null)
+                    smsManager.sendTextMessage(cleanNumber, null, message, null, null)
                 }
                 ActionResult.success(
                     spoken = "Text message sent to $targetName.",
                     data = mapOf("recipient" to targetName, "direct" to true)
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Direct SMS delivery failed: ${e.message}")
-                openSmsComposer(cleanNumber, targetName, action.message)
+                Log.e(TAG, "Direct SMS delivery encountered an error: ${e.message}")
+                val isAmbiguous = e.message?.contains("timeout", ignoreCase = true) == true ||
+                    e.message?.contains("radio", ignoreCase = true) == true ||
+                    e is SecurityException
+                if (isAmbiguous) {
+                    ActionResult.failure(
+                        spoken = "Message dispatch outcome is uncertain. Please check your messages app to avoid sending twice.",
+                        error = "ambiguous_external_outcome",
+                        data = mapOf("check_device" to true)
+                    )
+                } else {
+                    openSmsComposer(cleanNumber, targetName, message)
+                }
             }
         }
 
-        return openSmsComposer(cleanNumber, targetName, action.message)
+        return openSmsComposer(cleanNumber, targetName, message)
     }
 
     private fun openSmsComposer(number: String, name: String, message: String): ActionResult {
@@ -741,21 +835,40 @@ class ActionExecutor(
             )
         }
 
+        val replyText = action.text.trim()
+        if (replyText.isBlank()) {
+            return ActionResult.failure("Notification reply text cannot be blank.", error = "malformed_parameters")
+        }
+        if (replyText.length > 2000) {
+            return ActionResult.failure("Notification reply text exceeds maximum allowed length.", error = "malformed_parameters")
+        }
+
         if (!action.confirmed) {
             val recipient = targetItem.title.ifBlank { "the sender" }
             return ActionResult.needsConfirmation(
-                spoken = "Do you want me to reply to $recipient on ${targetItem.appName}: \"${action.text}\"?",
+                spoken = "Do you want me to reply to $recipient on ${targetItem.appName}: \"$replyText\"?",
                 actionId = "reply_notification",
                 payload = mapOf(
                     "notification_key" to targetItem.key,
                     "sender" to recipient,
                     "app" to targetItem.appName,
-                    "text" to action.text
+                    "text" to replyText
                 )
             )
         }
 
-        return when (val outcome = ZayaNotificationListener.sendReply(targetItem.key, action.text)) {
+        // Deduplication safety check for confirmed notification replies
+        val replySignature = "reply_notification:${targetItem.key}:${replyText.hashCode()}"
+        if (deduplicator.isDuplicate(replySignature)) {
+            return ActionResult.failure(
+                spoken = "Prevented duplicate reply to ${targetItem.appName} within the safety window.",
+                error = "duplicate_consequential_action_prevented",
+                data = mapOf("app" to targetItem.appName)
+            )
+        }
+        deduplicator.record(replySignature)
+
+        return when (val outcome = ZayaNotificationListener.sendReply(targetItem.key, replyText)) {
             is ReplyOutcome.Success -> {
                 ActionResult.success(
                     spoken = "Reply dispatched to ${targetItem.appName} for ${targetItem.title.ifBlank { "recipient" }}.",

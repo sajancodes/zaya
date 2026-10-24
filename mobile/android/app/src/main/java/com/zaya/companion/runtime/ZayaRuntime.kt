@@ -256,6 +256,8 @@ class ZayaRuntime(
         supervisor = null
         updateChecks?.cancel()
         updateChecks = null
+        taskCoordinator.cancelAll()
+        actionExecutor.screenCaptureManager.stopCapture()
         teardownSession()
         model.connectionLost("Disconnected")
         _connection.value = ConnectionStatus(ConnectionPhase.UNPAIRED, "Disconnected")
@@ -999,6 +1001,8 @@ class ZayaRuntime(
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private fun teardownSession() {
+        taskCoordinator.cancelAll()
+        actionExecutor.screenCaptureManager.stopCapture()
         control?.close(1000, "closed")
         control = null
         voice?.close(1000, "closed")
