@@ -567,25 +567,90 @@ class ZayaRuntime(
         socket.open()
     }
 
+    val taskCoordinator: com.zaya.companion.action.TaskCoordinator get() = actionExecutor.taskCoordinator
+    val memoryStore: com.zaya.companion.memory.PersonalMemoryStore get() = actionExecutor.memoryStore
+
     // ── commands ─────────────────────────────────────────────────────────────
 
     /** True when the command reached the laptop (or was parked for the reconnect). */
     suspend fun send(text: String): Boolean {
-        val started = model.beginCommand(text)
+        val clean = text.trim()
+        val lower = clean.lowercase()
+
+        // 1. Task Cancellation Gate
+        if (taskCoordinator.activeTask.value?.isRunning == true) {
+            if (lower in setOf("cancel", "stop", "abort", "cancel task", "stop task", "never mind")) {
+                val active = taskCoordinator.activeTask.value
+                if (active != null) {
+                    taskCoordinator.cancelTask(active.taskId, "Cancelled by user request")
+                    model.notice("Task stopped by user.")
+                    return true
+                }
+            }
+        }
+
+        // 2. Direct Local Personal Memory Commands
+        if (lower.startsWith("remember ") || lower.startsWith("forget ") || lower.contains("what do you remember")) {
+            val memoryNotice = handleLocalMemoryCommand(clean)
+            if (memoryNotice != null) {
+                model.beginCommand(clean)
+                model.notice(memoryNotice)
+                return true
+            }
+        }
+
+        val started = model.beginCommand(clean)
         if (started == null) return false
         val (requestId, _) = started
         val socket = control
         if (socket == null || !socket.isOpen) {
-            park(requestId, text)
+            park(requestId, clean)
             return false
         }
         val message = JSONObject()
             .put("type", Protocol.Control.COMMAND)
-            .put("text", text)
+            .put("text", clean)
             .put("request_id", requestId)
         val sent = socket.send(message.toString())
-        if (!sent) park(requestId, text)
+        if (!sent) park(requestId, clean)
         return sent
+    }
+
+    private fun handleLocalMemoryCommand(text: String): String? {
+        val lower = text.lowercase().trim()
+        if (lower.startsWith("remember ")) {
+            val raw = text.substring(9).trim()
+            val parts = when {
+                raw.contains(" is ") -> raw.split(" is ", limit = 2)
+                raw.contains(" = ") -> raw.split(" = ", limit = 2)
+                raw.contains(":") -> raw.split(":", limit = 2)
+                else -> listOf(raw, "true")
+            }
+            val key = parts[0].removePrefix("that ").trim()
+            val value = if (parts.size > 1) parts[1].trim() else "true"
+            return when (val res = memoryStore.saveMemory(key, value, confirmed = true)) {
+                is com.zaya.companion.memory.MemorySaveResult.Saved -> res.message
+                is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> "For your privacy, I cannot store sensitive information such as passwords or payment details."
+                is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> res.prompt
+                is com.zaya.companion.memory.MemorySaveResult.Invalid -> res.reason
+            }
+        } else if (lower.startsWith("forget ")) {
+            val key = text.substring(7).trim()
+            val removed = memoryStore.forgetMemory(key)
+            return if (removed) "I have forgotten '$key' and removed it from your saved preferences."
+            else "I couldn't find any saved preference matching '$key'."
+        } else if (lower.contains("what do you remember")) {
+            val query = lower.substringAfter("about", "").trim()
+            val list = if (query.isNotBlank()) memoryStore.getRelevantMemories(query) else memoryStore.memories.value
+            return if (list.isEmpty()) {
+                if (query.isNotBlank()) "I don't have anything remembered about '$query'."
+                else "You have no saved personal preferences yet."
+            } else {
+                val lines = list.take(5).map { "• ${it.key}: ${it.value} (${it.category.displayName})" }
+                "Saved preferences:\n" + lines.joinToString("\n")
+            }
+        }
+        return null
     }
 
     private fun park(requestId: String, text: String) {
@@ -1124,6 +1189,23 @@ class ZayaRuntime(
             )
             "run_task" -> com.zaya.companion.action.AndroidAction.RunTask(args.optString("task_id", ""))
             "cancel_task" -> com.zaya.companion.action.AndroidAction.CancelTask(args.optString("task_id", ""))
+            "plan_and_execute_task" -> com.zaya.companion.action.AndroidAction.PlanAndExecuteTask(
+                prompt = args.optString("prompt", ""),
+                taskId = args.optString("task_id", "")
+            )
+            "remember_memory" -> com.zaya.companion.action.AndroidAction.RememberMemory(
+                key = args.optString("key", ""),
+                value = args.optString("value", ""),
+                category = args.optString("category", "PREFERENCE"),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "forget_memory" -> com.zaya.companion.action.AndroidAction.ForgetMemory(
+                key = args.optString("key", ""),
+                category = args.optString("category", "").ifBlank { null }
+            )
+            "query_memory" -> com.zaya.companion.action.AndroidAction.QueryMemory(
+                query = args.optString("query", "")
+            )
             else -> {
                 val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
                 val report = JSONObject()

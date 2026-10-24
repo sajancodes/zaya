@@ -124,6 +124,38 @@ fun HomeScreen(
                 Spacer(Modifier.height(10.dp))
             }
 
+            val localTask by runtime.taskCoordinator.activeTask.collectAsStateWithLifecycle()
+            if (localTask?.isRunning == true) {
+                SectionCard {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Running: ${localTask?.originalGoal}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "Step ${localTask?.currentStepIndex} of ${localTask?.totalSteps}: ${localTask?.steps?.getOrNull((localTask?.currentStepIndex ?: 1) - 1)?.description ?: ""}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                localTask?.let { runtime.taskCoordinator.cancelTask(it.taskId, "Cancelled by user") }
+                            },
+                        ) {
+                            Text("Stop")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
             CommandInput(runtime, placeholder = "Type to Zaya…")
             Spacer(Modifier.height(10.dp))
 

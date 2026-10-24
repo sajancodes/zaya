@@ -29,4 +29,7 @@
     <string name="label_phone">Phone</string>
     <string name="label_laptop">Laptop</string>
     <string name="label_both">Both</string>
+
+    <string name="accessibility_service_name">Zaya Interaction Companion</string>
+    <string name="accessibility_service_desc">Enables Zaya to perform user-requested scrolling, taps on spoken buttons, and navigation gestures on your behalf.</string>
 </resources>

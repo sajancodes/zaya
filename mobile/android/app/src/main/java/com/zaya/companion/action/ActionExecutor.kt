@@ -38,7 +38,9 @@ class ActionExecutor(
     val callManager: CellularCallManager = CellularCallManager(context),
     val contactManager: ContactManager = callManager.contactManager,
     val screenCaptureManager: ScreenCaptureManager = ScreenCaptureManager(context),
+    val memoryStore: com.zaya.companion.memory.PersonalMemoryStore = com.zaya.companion.memory.PersonalMemoryStore(context),
 ) {
+    val taskCoordinator: TaskCoordinator by lazy { TaskCoordinator(this) }
 
     companion object {
         private const val TAG = "ActionExecutor"
@@ -81,12 +83,12 @@ class ActionExecutor(
             is AndroidAction.TapScreen -> {
                 ActionResult.unsupported("Touch gestures require Accessibility Service authorization.")
             }
-            is AndroidAction.RunTask -> {
-                ActionResult.success("Task ${action.taskId} started.", mapOf("task_id" to action.taskId))
-            }
-            is AndroidAction.CancelTask -> {
-                ActionResult.cancelled("Task ${action.taskId} cancelled.")
-            }
+            is AndroidAction.RunTask -> executeRunTask(action)
+            is AndroidAction.CancelTask -> executeCancelTask(action)
+            is AndroidAction.PlanAndExecuteTask -> executePlanAndExecuteTask(action)
+            is AndroidAction.RememberMemory -> executeRememberMemory(action)
+            is AndroidAction.ForgetMemory -> executeForgetMemory(action)
+            is AndroidAction.QueryMemory -> executeQueryMemory(action)
         }
     }
 
@@ -182,7 +184,8 @@ class ActionExecutor(
             return ActionResult.failure("App name cannot be empty.", error = "invalid_argument")
         }
 
-        return when (val outcome = appLauncher.resolveAndLaunch(name)) {
+        val targetName = memoryStore.getAppAlias(name) ?: name
+        return when (val outcome = appLauncher.resolveAndLaunch(targetName)) {
             is com.zaya.companion.service.AppLaunchOutcome.Success -> {
                 ActionResult.success("Opened ${outcome.appName}.", mapOf("app_name" to outcome.appName, "package" to outcome.packageName))
             }
@@ -911,6 +914,200 @@ class ActionExecutor(
                     "resolution" to analysis.resolution,
                     "focus" to (action.focus ?: "all"),
                     "timestamp" to analysis.timestamp
+                )
+            )
+        }
+    }
+
+    // ── Multi-Step Tasks & Cancellation ─────────────────────────────────────
+
+    private suspend fun executeRunTask(action: AndroidAction.RunTask): ActionResult {
+        if (action.actions.isEmpty()) {
+            return ActionResult.failure("No actions provided for task execution.", error = "empty_task")
+        }
+
+        val steps = action.actions.mapIndexed { index, act ->
+            TaskStep(
+                stepIndex = index + 1,
+                actionId = act.actionId,
+                description = "Step ${index + 1}: ${act.actionId}",
+                action = act
+            )
+        }
+
+        val taskId = action.taskId.ifBlank { java.util.UUID.randomUUID().toString() }
+        val report = taskCoordinator.executeTask(
+            taskId = taskId,
+            originalGoal = "Run task $taskId",
+            steps = steps
+        )
+
+        return when (report.status) {
+            TaskOverallStatus.COMPLETED -> ActionResult.success(
+                spoken = report.summary,
+                data = report.data + mapOf("task_id" to report.taskId, "completed" to true)
+            )
+            TaskOverallStatus.PARTIALLY_COMPLETED -> ActionResult.failure(
+                spoken = report.summary,
+                error = "partially_completed",
+                data = report.data + mapOf(
+                    "task_id" to report.taskId,
+                    "completed_steps" to report.completedSteps,
+                    "total_steps" to report.totalSteps
+                )
+            )
+            TaskOverallStatus.CANCELLED -> ActionResult.cancelled(report.summary)
+            TaskOverallStatus.NEEDS_CONFIRMATION -> ActionResult.needsConfirmation(
+                spoken = report.summary,
+                actionId = "run_task",
+                payload = report.data
+            )
+            else -> ActionResult.failure(spoken = report.summary, error = "task_failed", data = report.data)
+        }
+    }
+
+    private fun executeCancelTask(action: AndroidAction.CancelTask): ActionResult {
+        val targetId = action.taskId.ifBlank {
+            taskCoordinator.activeTask.value?.taskId ?: ""
+        }
+
+        if (targetId.isBlank()) {
+            return ActionResult.failure("No active task running to cancel.", error = "no_active_task")
+        }
+
+        val cancelled = taskCoordinator.cancelTask(targetId, "Cancelled by user")
+        return if (cancelled) {
+            val state = taskCoordinator.activeTask.value
+            val irreversibleNote = if (!state?.irreversibleActionsCompleted.isNullOrEmpty()) {
+                " Note: ${state!!.irreversibleActionsCompleted.joinToString("; ")} was already executed and cannot be recalled."
+            } else ""
+
+            ActionResult.cancelled("Task $targetId cancelled.$irreversibleNote")
+        } else {
+            ActionResult.failure("Task $targetId was not active or could not be cancelled.", error = "cancel_failed")
+        }
+    }
+
+    private suspend fun executePlanAndExecuteTask(action: AndroidAction.PlanAndExecuteTask): ActionResult {
+        val (steps, clarification) = TaskPlanner.planFromRequest(action.prompt, registry)
+        if (clarification != null) {
+            return ActionResult.failure(spoken = clarification, error = "clarification_needed", data = mapOf("prompt" to action.prompt))
+        }
+
+        if (steps.isEmpty()) {
+            return ActionResult.failure(
+                spoken = "Unable to create a multi-step plan for '${action.prompt}'.",
+                error = "unsupported_plan"
+            )
+        }
+
+        val taskId = action.taskId.ifBlank { java.util.UUID.randomUUID().toString() }
+        val report = taskCoordinator.executeTask(
+            taskId = taskId,
+            originalGoal = action.prompt,
+            steps = steps
+        )
+
+        return when (report.status) {
+            TaskOverallStatus.COMPLETED -> ActionResult.success(
+                spoken = report.summary,
+                data = report.data + mapOf("task_id" to report.taskId, "completed" to true)
+            )
+            TaskOverallStatus.PARTIALLY_COMPLETED -> ActionResult.failure(
+                spoken = report.summary,
+                error = "partially_completed",
+                data = report.data + mapOf(
+                    "task_id" to report.taskId,
+                    "completed_steps" to report.completedSteps,
+                    "total_steps" to report.totalSteps
+                )
+            )
+            TaskOverallStatus.CANCELLED -> ActionResult.cancelled(report.summary)
+            TaskOverallStatus.NEEDS_CONFIRMATION -> ActionResult.needsConfirmation(
+                spoken = report.summary,
+                actionId = "plan_and_execute_task",
+                payload = report.data
+            )
+            TaskOverallStatus.CLARIFICATION_REQUIRED -> ActionResult.failure(
+                spoken = report.clarificationQuestion ?: report.summary,
+                error = "clarification_needed"
+            )
+            else -> ActionResult.failure(spoken = report.summary, error = "task_failed", data = report.data)
+        }
+    }
+
+    // ── Personal Memory Handlers ────────────────────────────────────────────
+
+    private fun executeRememberMemory(action: AndroidAction.RememberMemory): ActionResult {
+        val cat = com.zaya.companion.memory.MemoryCategory.fromString(action.category)
+        return when (val res = memoryStore.saveMemory(action.key, action.value, cat, action.confirmed)) {
+            is com.zaya.companion.memory.MemorySaveResult.Saved -> {
+                ActionResult.success(
+                    spoken = res.message,
+                    data = mapOf(
+                        "id" to res.memory.id,
+                        "key" to res.memory.key,
+                        "value" to res.memory.value,
+                        "category" to res.memory.category.name
+                    )
+                )
+            }
+            is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> {
+                ActionResult.needsConfirmation(
+                    spoken = res.prompt,
+                    actionId = "remember_memory",
+                    payload = mapOf(
+                        "key" to res.key,
+                        "value" to res.value,
+                        "category" to res.category.name
+                    )
+                )
+            }
+            is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> {
+                ActionResult.failure(
+                    spoken = "For your privacy and security, I cannot store sensitive details such as passwords, authentication tokens, or payment credentials.",
+                    error = "sensitive_data_blocked"
+                )
+            }
+            is com.zaya.companion.memory.MemorySaveResult.Invalid -> {
+                ActionResult.failure(res.reason, error = "invalid_argument")
+            }
+        }
+    }
+
+    private fun executeForgetMemory(action: AndroidAction.ForgetMemory): ActionResult {
+        val cat = action.category?.let { com.zaya.companion.memory.MemoryCategory.fromString(it) }
+        val forgotten = memoryStore.forgetMemory(action.key, cat)
+        return if (forgotten) {
+            ActionResult.success(
+                spoken = "I have forgotten '${action.key}' and removed it from your saved preferences.",
+                data = mapOf("key" to action.key, "forgotten" to true)
+            )
+        } else {
+            ActionResult.failure(
+                spoken = "I don't have anything saved about '${action.key}'.",
+                error = "memory_not_found"
+            )
+        }
+    }
+
+    private fun executeQueryMemory(action: AndroidAction.QueryMemory): ActionResult {
+        val matches = memoryStore.getRelevantMemories(action.query)
+        return if (matches.isEmpty()) {
+            ActionResult.success(
+                spoken = "I don't have any saved preferences matching '${action.query}'.",
+                data = mapOf("count" to 0, "results" to emptyList<Any>())
+            )
+        } else {
+            val descriptions = matches.map { "${it.category.displayName} - ${it.key}: ${it.value}" }
+            val spoken = "Found ${matches.size} saved preference${if (matches.size > 1) "s" else ""}: ${descriptions.joinToString("; ")}."
+            ActionResult.success(
+                spoken = spoken,
+                data = mapOf(
+                    "count" to matches.size,
+                    "memories" to matches.map {
+                        mapOf("key" to it.key, "value" to it.value, "category" to it.category.name)
+                    }
                 )
             )
         }

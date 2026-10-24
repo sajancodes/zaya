@@ -150,11 +150,55 @@ sealed class AndroidAction(
         val focus: String? = null,
     ) : AndroidAction("summarize_screen", ActionRisk.LOW)
 
-    data class ScrollScreen(val direction: String) : AndroidAction("scroll_screen", ActionRisk.MEDIUM)
+    data class ScrollScreen(
+        val direction: String = "down",
+        val count: Int = 1,
+        val distance: String = "medium",
+    ) : AndroidAction("scroll_screen", ActionRisk.MEDIUM)
 
-    data class TapScreen(val x: Float, val y: Float) : AndroidAction("tap_screen", ActionRisk.MEDIUM)
+    data class TapScreen(
+        val x: Float? = null,
+        val y: Float? = null,
+        val label: String? = null,
+        val confirmed: Boolean = false,
+    ) : AndroidAction("tap_screen", ActionRisk.MEDIUM)
 
-    data class RunTask(val taskId: String) : AndroidAction("run_task", ActionRisk.MEDIUM)
+    data object NavigateBack : AndroidAction("navigate_back", ActionRisk.LOW)
 
-    data class CancelTask(val taskId: String) : AndroidAction("cancel_task", ActionRisk.LOW)
+    data object NavigateHome : AndroidAction("navigate_home", ActionRisk.LOW)
+
+    data object CloseOverlay : AndroidAction("close_overlay", ActionRisk.LOW)
+
+    data class NavigateReel(
+        val action: String = "next",
+        val count: Int = 1,
+    ) : AndroidAction("navigate_reel", ActionRisk.MEDIUM)
+
+    data class RunTask(
+        val taskId: String,
+        val actions: List<AndroidAction> = emptyList(),
+    ) : AndroidAction("run_task", ActionRisk.MEDIUM)
+
+    data class CancelTask(val taskId: String = "") : AndroidAction("cancel_task", ActionRisk.LOW)
+
+    data class PlanAndExecuteTask(
+        val prompt: String,
+        val taskId: String = "",
+    ) : AndroidAction("plan_and_execute_task", ActionRisk.MEDIUM)
+
+    data class RememberMemory(
+        val key: String,
+        val value: String,
+        val category: String = "PREFERENCE",
+        val confirmed: Boolean = false,
+    ) : AndroidAction("remember_memory", ActionRisk.LOW)
+
+    data class ForgetMemory(
+        val key: String,
+        val category: String? = null,
+    ) : AndroidAction("forget_memory", ActionRisk.LOW)
+
+    data class QueryMemory(
+        val query: String,
+    ) : AndroidAction("query_memory", ActionRisk.LOW)
 }

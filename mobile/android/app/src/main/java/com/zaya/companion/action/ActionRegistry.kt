@@ -341,7 +341,8 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 12. Screen Gestures (Scroll/Tap) - requires AccessibilityService
+        // 12. Screen Gestures & Interaction - requires ZayaInteractionService
+        val hasAccessibility = com.zaya.companion.service.ZayaInteractionService.isServiceEnabled()
         list.add(
             ActionCapability(
                 actionId = "scroll_screen",
@@ -350,20 +351,140 @@ class ActionRegistry(private val context: Context) {
                 risk = ActionRisk.MEDIUM,
                 requiresConfirmation = false,
                 isSupportedOnOs = true,
-                isPermissionGranted = false,
-                isAvailable = false,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
             )
         )
         list.add(
             ActionCapability(
                 actionId = "tap_screen",
-                purpose = "Direct screen coordinate touch gesture (Requires Accessibility Service)",
-                requiredArguments = listOf("x", "y"),
+                purpose = "Direct screen coordinate or semantic label touch gesture (Requires Accessibility Service)",
+                requiredArguments = emptyList(),
                 risk = ActionRisk.MEDIUM,
                 requiresConfirmation = false,
                 isSupportedOnOs = true,
-                isPermissionGranted = false,
-                isAvailable = false,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_back",
+                purpose = "System back button navigation gesture",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_home",
+                purpose = "Navigate to device home screen launcher",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "close_overlay",
+                purpose = "Dismiss active floating Zaya overlay",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_reel",
+                purpose = "Navigate short video or reel (next/previous/pause)",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "run_task",
+                purpose = "Execute bounded sequence of validated assistant actions (max 5 steps)",
+                requiredArguments = listOf("task_id"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "cancel_task",
+                purpose = "Cancel an active running interaction or scrolling task",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "plan_and_execute_task",
+                purpose = "Decompose natural language request into validated steps and execute safely",
+                requiredArguments = listOf("prompt"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "remember_memory",
+                purpose = "Save a non-sensitive user preference, style, routine, or app alias to local memory",
+                requiredArguments = listOf("key", "value"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "forget_memory",
+                purpose = "Delete a stored preference or memory item from local device storage",
+                requiredArguments = listOf("key"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "query_memory",
+                purpose = "Retrieve stored preferences or details matching a query from local device storage",
+                requiredArguments = listOf("query"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
             )
         )
 

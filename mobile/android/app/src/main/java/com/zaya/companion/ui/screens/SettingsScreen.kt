@@ -205,8 +205,12 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
         CallPermissionCard()
 
         Spacer(Modifier.height(12.dp))
+        PersonalMemoryCard(runtime)
+
+        Spacer(Modifier.height(12.dp))
         SectionCard(title = "This phone") {
             KeyValue("Microphone", "only while you are in a call")
+            KeyValue("Personal Memory", "stored locally in device internal storage")
             KeyValue("Faces", "mobile/android/assets (see image.txt)")
             KeyValue("Secrets", "device credential sealed with the Android Keystore")
             Spacer(Modifier.height(10.dp))
@@ -228,11 +232,156 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
         Note(
-            "Nothing on this phone holds a copy of Zaya's memory, her tools or her " +
-                "WhatsApp session: it renders what the laptop sends and forwards your " +
-                "voice and text to it.",
+            "Personal memories, app aliases, and response preferences stay 100% on this phone. " +
+                "Only prompt text relevant to your immediate request is sent to the laptop runtime. " +
+                "Passwords, financial data, and credentials are never stored.",
         )
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+fun PersonalMemoryCard(runtime: ZayaRuntime) {
+    val memories by runtime.memoryStore.memories.collectAsStateWithLifecycle()
+    var newKey by remember { mutableStateOf("") }
+    var newValue by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf(com.zaya.companion.memory.MemoryCategory.PREFERENCE) }
+    var memoryMessage by remember { mutableStateOf("") }
+
+    SectionCard(
+        title = "Personal Memory & Preferences",
+        subtitle = "Stored locally on this phone. Passwords and credentials are never stored.",
+    ) {
+        if (memories.isEmpty()) {
+            Text(
+                text = "No saved personal preferences yet. Add one below or say \"remember that…\"",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                memories.forEach { memory ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                StatusChip(
+                                    text = memory.category.displayName,
+                                    color = when (memory.category) {
+                                        com.zaya.companion.memory.MemoryCategory.STYLE -> ZayaAccent.blue
+                                        com.zaya.companion.memory.MemoryCategory.ALIAS -> ZayaAccent.green
+                                        com.zaya.companion.memory.MemoryCategory.ROUTINE -> ZayaAccent.amber
+                                        com.zaya.companion.memory.MemoryCategory.CORRECTION -> ZayaAccent.red
+                                        com.zaya.companion.memory.MemoryCategory.PREFERENCE -> ZayaAccent.quiet
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = memory.key,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                            Text(
+                                text = memory.value,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { runtime.memoryStore.deleteMemoryById(memory.id) },
+                        ) {
+                            Text("Delete")
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Add preference or app alias",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = newKey,
+            onValueChange = { newKey = it },
+            label = { Text("Topic or Alias (e.g. style, music, camera)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = newValue,
+            onValueChange = { newValue = it },
+            label = { Text("Preference value (e.g. concise, Spotify, OpenCamera)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                com.zaya.companion.memory.MemoryCategory.STYLE,
+                com.zaya.companion.memory.MemoryCategory.ALIAS,
+                com.zaya.companion.memory.MemoryCategory.PREFERENCE,
+            ).forEach { cat ->
+                OutlinedToggle(
+                    label = cat.displayName,
+                    active = selectedCategory == cat,
+                    onClick = { selectedCategory = cat }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    val result = runtime.memoryStore.saveMemory(
+                        key = newKey,
+                        value = newValue,
+                        category = selectedCategory,
+                        confirmed = true
+                    )
+                    memoryMessage = when (result) {
+                        is com.zaya.companion.memory.MemorySaveResult.Saved -> {
+                            newKey = ""
+                            newValue = ""
+                            result.message
+                        }
+                        is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> result.reason
+                        is com.zaya.companion.memory.MemorySaveResult.Invalid -> result.reason
+                        is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> result.prompt
+                    }
+                },
+                enabled = newKey.isNotBlank() && newValue.isNotBlank(),
+            ) {
+                Text("Save Preference")
+            }
+
+            if (memories.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = {
+                        runtime.memoryStore.clearAll()
+                        memoryMessage = "All saved preferences cleared."
+                    }
+                ) {
+                    Text("Clear All")
+                }
+            }
+        }
+
+        if (memoryMessage.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Note(memoryMessage, ZayaAccent.amber)
+        }
     }
 }
 

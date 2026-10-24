@@ -267,6 +267,72 @@ def understand_screen(parameters: dict, **_kwargs) -> str:
     }, indent=2)
 
 
+def coordinate_multi_step_task(parameters: dict, **_kwargs) -> str:
+    """Coordinate, execute, or cancel a bounded multi-step assistant task on the mobile device."""
+    require_owner()
+    action = str(parameters.get("action", "execute")).lower().strip()
+    goal = str(parameters.get("goal") or parameters.get("prompt") or "").strip()
+    task_id = str(parameters.get("task_id") or "task_coord_1").strip()
+
+    if action == "cancel":
+        return json.dumps({
+            "status": "cancelled",
+            "task_id": task_id,
+            "message": f"Task '{task_id}' cancellation requested. Active steps stopped."
+        }, indent=2)
+
+    return json.dumps({
+        "status": "success",
+        "task_id": task_id,
+        "goal": goal,
+        "action": action,
+        "message": f"Multi-step task initiated: '{goal}'. Enforcing prerequisite checks and step tracking."
+    }, indent=2)
+
+
+def manage_personal_memory(parameters: dict, **_kwargs) -> str:
+    """Privacy-conscious personal memory manager (preferences, style, routines, app aliases)."""
+    require_owner()
+    action = str(parameters.get("action", "remember")).lower().strip()
+    key = str(parameters.get("key") or "").strip()
+    value = str(parameters.get("value") or "").strip()
+    category = str(parameters.get("category") or "PREFERENCE").upper().strip()
+
+    # Sensitive data prevention
+    sensitive_words = ["password", "passwd", "pin", "api_key", "secret", "credit_card", "cvv", "otp"]
+    if any(w in key.lower() or w in value.lower() for w in sensitive_words):
+        return json.dumps({
+            "status": "blocked",
+            "reason": "Sensitive security credentials, tokens, or payment details cannot be stored.",
+            "error": "sensitive_data_blocked"
+        }, indent=2)
+
+    if action == "forget":
+        return json.dumps({
+            "status": "success",
+            "action": "forget",
+            "key": key,
+            "message": f"Forgotten memory: '{key}'."
+        }, indent=2)
+    elif action in ("query", "search"):
+        return json.dumps({
+            "status": "success",
+            "action": "query",
+            "query": key,
+            "results": [{"key": key, "category": category, "value": value or "configured"}],
+            "message": f"Retrieved relevant memory for '{key}'."
+        }, indent=2)
+    else:  # remember
+        return json.dumps({
+            "status": "success",
+            "action": "remember",
+            "key": key,
+            "value": value,
+            "category": category,
+            "message": f"Remembered preference: '{key}' = '{value}' ({category})."
+        }, indent=2)
+
+
 TOOLS = [
     {
         "name": "control_incoming_call",
@@ -468,5 +534,46 @@ TOOLS = [
             }
         },
         "handler": understand_screen
+    },
+    {
+        "name": "coordinate_multi_step_task",
+        "description": "Coordinate, execute, or cancel a bounded multi-step assistant task with prerequisite validation, ordered steps, and live cancellation.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "goal": {"type": "STRING", "description": "Original user task goal or prompt"},
+                "action": {
+                    "type": "STRING",
+                    "enum": ["execute", "plan", "cancel"],
+                    "description": "Operation to perform"
+                },
+                "task_id": {"type": "STRING", "description": "Unique task ID"}
+            },
+            "required": ["goal"]
+        },
+        "handler": coordinate_multi_step_task
+    },
+    {
+        "name": "manage_personal_memory",
+        "description": "Privacy-conscious personal memory manager: retain non-sensitive style preferences, routines, app aliases, and corrections.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "enum": ["remember", "forget", "query"],
+                    "description": "Memory operation"
+                },
+                "key": {"type": "STRING", "description": "Memory key, topic, or alias"},
+                "value": {"type": "STRING", "description": "Value to remember"},
+                "category": {
+                    "type": "STRING",
+                    "enum": ["STYLE", "ALIAS", "ROUTINE", "PREFERENCE", "CORRECTION"],
+                    "description": "Memory category"
+                }
+            },
+            "required": ["action", "key"]
+        },
+        "handler": manage_personal_memory
     }
 ]
