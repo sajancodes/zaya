@@ -19,7 +19,7 @@ jobs:
       - name: Install native build and desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libportaudio2 libasound2 libasound2-plugins libpulse0 libegl1 libgles2 libgl1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 gnome-keyring xdg-utils xclip ffmpeg
+          sudo apt-get install -y rpm xvfb libportaudio2 libasound2 libasound2-plugins libpulse0 libegl1 libgles2 libgl1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 gnome-keyring xdg-utils xclip ffmpeg
           python -m pip install -r requirements.txt pyinstaller pytest pip-audit mediapipe
       - name: Build spatial renderer
         working-directory: spatial_renderer
@@ -36,6 +36,7 @@ jobs:
           xvfb-run -a python -m PyInstaller --noconfirm --clean --distpath dist/linux-app packaging/linux/zaya.spec
           cp dist/linux-worker/ZayaHandWorker dist/linux-app/Zaya/ZayaHandWorker
           python tools/prepare_linux_release.py --app-dir dist/linux-app/Zaya
+          python tools/prepare_linux_variants.py --app-dir dist/linux-app/Zaya --output dist/linux-candidate/variants
           dpkg-deb --info dist/linux-candidate/Zaya.deb
           dpkg-deb --contents dist/linux-candidate/Zaya.deb
       - name: Save candidate for native installation verification
