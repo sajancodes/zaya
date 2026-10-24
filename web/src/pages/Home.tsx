@@ -3,6 +3,11 @@ import { windowsBeta } from '../data/useReleases';
 import { EnterpriseTeaser } from './Enterprise';
 const DestinyPath3D = lazy(() => import('../components/DestinyPath3D').then(m => ({default:m.DestinyPath3D})));
 
+const DownloadPlatforms = () => <span aria-hidden="true" style={{display:'inline-flex', alignItems:'center', gap:10}}>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2 3h9v9H2zm11 0h9v9h-9zM2 14h9v9H2zm11 0h9v9h-9z"/></svg>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 9V6a4 4 0 0 1 8 0v3c0 2 3 5 3 8s-3 4-7 4-7-1-7-4 3-6 3-8Z"/><ellipse cx="12" cy="15" rx="4" ry="5"/><path d="m9 8 3 2 3-2-3-1-3 1ZM6 18l-3 3 5 1 2-2m8-2 3 3-5 1-2-2"/><path d="M10 5.5v.5m4-.5v.5"/></svg>
+</span>;
+
 const examples = [
   {number:'01', title:'Think out loud.', prompt:'“Help me work through this idea.”', body:'Talk through a question or a plan with voice conversation. Cloud voice needs your own provider key and an internet connection.', href:'/docs/voice', link:'Explore voice'},
   {number:'02', title:'Get help at your desktop.', prompt:'“Help me understand what’s on my screen.”', body:'Ask for screen context and help with computer tasks. Choose what to share and review actions with Full Access off.', href:'/docs/computer-control', link:'See desktop controls'},
@@ -18,7 +23,7 @@ export const Home: React.FC<{navigate:(path:string)=>void; latestVersion?:string
         <p className="eyebrow">Meet Zaya. Your desktop companion.</p>
         <h1>Talk it through.<br/><em>Get things done.</em></h1>
         <p className="hero-description">A personal AI assistant for your Windows desktop. Talk naturally, get help with what’s on screen, and work on projects together—with you in control.</p>
-        <div className="action-row"><a className="btn btn-primary" href="/download">Get the Windows beta <span aria-hidden="true">↗</span></a><a className="text-link" href="#meet-zaya">Take a closer look <span aria-hidden="true">↓</span></a></div>
+        <div className="action-row"><a className="btn btn-primary" href="/download" aria-label="Download Zaya for Windows or Linux">Download <DownloadPlatforms /></a><a className="text-link" href="#meet-zaya">Take a closer look <span aria-hidden="true">↓</span></a></div>
         <p className="hero-note">Windows 10/11 · Own AI provider key · Early, unsigned beta</p>
       </div>
       <figure className="hero-product">
@@ -175,6 +180,6 @@ export const Home: React.FC<{navigate:(path:string)=>void; latestVersion?:string
       ['What happens to my data?','Zaya keeps local archives and configuration on your computer. Requests, audio or images you send to a cloud AI provider are processed by that provider. Read the privacy guide before enabling additional features.'],
     ].map(([question,answer])=><details key={question}><summary>{question}<span aria-hidden="true">+</span></summary><p>{answer}</p></details>)}</div></section>
     <EnterpriseTeaser />
-    <section className="home-final wrap"><div><p className="eyebrow">Let’s start small</p><h2>Say hello to Zaya.</h2><p>Try the beta. Tell us what works—and what needs another look.</p></div><div><a className="btn btn-primary" href="/download">Download Windows beta ↗</a><a className="text-link" href="/docs/getting-started">Read the getting-started guide</a></div></section>
+    <section className="home-final wrap"><div><p className="eyebrow">Let’s start small</p><h2>Say hello to Zaya.</h2><p>Try the beta. Tell us what works—and what needs another look.</p></div><div><a className="btn btn-primary" href="/download" aria-label="Download Zaya for Windows or Linux">Download <DownloadPlatforms /></a><a className="text-link" href="/docs/getting-started">Read the getting-started guide</a></div></section>
   </div>
 </div>;
