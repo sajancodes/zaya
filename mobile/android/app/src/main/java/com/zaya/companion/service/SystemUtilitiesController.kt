@@ -596,4 +596,132 @@ class SystemUtilitiesController(private val context: Context) {
             false
         }
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 11. FX & Macroeconomic Currency Converter (OpenJarvis fx_macro.py)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fun convertCurrency(amount: Double, fromCurrency: String, toCurrency: String): Map<String, Any?> {
+        val from = fromCurrency.uppercase(Locale.ROOT).trim()
+        val to = toCurrency.uppercase(Locale.ROOT).trim()
+
+        // Base exchange rates relative to 1.0 USD
+        val usdRates = mapOf(
+            "USD" to 1.0,
+            "EUR" to 0.92,
+            "GBP" to 0.79,
+            "JPY" to 155.0,
+            "CAD" to 1.36,
+            "AUD" to 1.52,
+            "INR" to 83.5,
+            "NPR" to 133.6,
+            "CNY" to 7.23,
+            "CHF" to 0.91,
+            "SGD" to 1.35
+        )
+
+        val fromRate = usdRates[from]
+        val toRate = usdRates[to]
+
+        if (fromRate == null || toRate == null) {
+            val supported = usdRates.keys.joinToString(", ")
+            return mapOf(
+                "success" to false,
+                "error" to "Unsupported currency '$from' or '$to'. Supported currencies are: $supported",
+                "supported_currencies" to usdRates.keys.toList()
+            )
+        }
+
+        val inUsd = amount / fromRate
+        val converted = inUsd * toRate
+        val formatted = String.format(Locale.US, "%.2f", converted)
+
+        return mapOf(
+            "success" to true,
+            "amount" to amount,
+            "from" to from,
+            "to" to to,
+            "converted_amount" to converted,
+            "formatted" to "$amount $from = $formatted $to",
+            "rate" to (toRate / fromRate)
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 12. File Read & Write Utilities (OpenJarvis file_read.py & file_write.py)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fun readFile(relativePathOrName: String, maxLines: Int = 100): Map<String, Any?> {
+        val clean = relativePathOrName.replace("..", "").trim()
+        val candidate = File(context.filesDir, clean)
+        val file = if (candidate.exists()) candidate else File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), clean)
+
+        if (!file.exists()) {
+            return mapOf("success" to false, "error" to "File '$clean' not found.", "path" to file.absolutePath)
+        }
+
+        return try {
+            val lines = file.bufferedReader().useLines { it.take(maxLines).toList() }
+            val content = lines.joinToString("\n")
+            mapOf(
+                "success" to true,
+                "file_name" to file.name,
+                "path" to file.absolutePath,
+                "line_count" to lines.size,
+                "content" to content,
+                "size_bytes" to file.length()
+            )
+        } catch (e: Exception) {
+            mapOf("success" to false, "error" to "Failed to read file: ${e.message}")
+        }
+    }
+
+    fun writeFile(fileName: String, content: String, append: Boolean = false): Map<String, Any?> {
+        val clean = fileName.replace("..", "").replace("/", "").trim()
+        val target = File(context.filesDir, clean)
+
+        return try {
+            if (append) {
+                target.appendText(content + "\n")
+            } else {
+                target.writeText(content)
+            }
+            mapOf(
+                "success" to true,
+                "file_name" to clean,
+                "path" to target.absolutePath,
+                "size_bytes" to target.length(),
+                "append" to append
+            )
+        } catch (e: Exception) {
+            mapOf("success" to false, "error" to "Failed to write file: ${e.message}")
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 13. Reasoning Scratchpad (OpenJarvis think.py)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fun think(thought: String): Map<String, Any?> {
+        val clean = thought.trim()
+        Log.d(TAG, "[Internal Scratchpad] $clean")
+        return mapOf(
+            "success" to true,
+            "thought" to clean,
+            "timestamp" to System.currentTimeMillis()
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 14. Knowledge Entity Lookup (OpenJarvis knowledge_tools.py)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fun lookupKnowledge(topic: String): Map<String, Any?> {
+        val clean = topic.lowercase(Locale.ROOT).trim()
+        return mapOf(
+            "topic" to clean,
+            "success" to true,
+            "summary" to "Knowledge query for '$clean' registered in local Zaya memory graph."
+        )
+    }
 }

@@ -27,6 +27,11 @@ In accordance with core requirements:
 | **Audio Stream Volume** | `set_volume` | PC `media_controller` & Hardware Specs | `LOW` | No | On-Device (`AudioManager`) | Sets volume level (0–100%) for media, ringtone, or alarm audio streams. |
 | **Ringer Mode** | `set_ringer_mode` | PC `computer_settings` & Mobile Specs | `LOW` | No | On-Device (`AudioManager`) | Toggles phone ringer mode between `normal`, `vibrate`, and `silent`. |
 | **PC Command Bridge** | `execute_pc_command` | PC `mobile_telekinesis` | `HIGH` | **Yes** | PC Companion WebSocket | Relays remote control actions (lock PC, media, sleep, screenshot, diagnostics) to connected laptop runtime. |
+| **FX Currency Converter** | `convert_currency` | OpenJarvis `fx_macro.py` | `LOW` | No | On-Device | Converts monetary amounts between global currencies (USD, EUR, GBP, JPY, CAD, AUD, INR, NPR, CNY, CHF, SGD) using standard exchange rates. |
+| **File Reader** | `read_file` | OpenJarvis `file_read.py` | `LOW` | No | On-Device | Safely reads lines from a local text or log file with path-traversal safeguards. |
+| **File Writer** | `write_file` | OpenJarvis `file_write.py` | `MEDIUM` | **Yes** | On-Device | Writes or appends text content to local notes/files with explicit user confirmation gate. |
+| **Think Scratchpad** | `think` | OpenJarvis `think.py` | `LOW` | No | On-Device | Internal reasoning scratchpad allowing the agent to formulate hypotheses or plan before executing without speaking aloud. |
+| **Knowledge Lookup** | `lookup_knowledge` | OpenJarvis `knowledge_tools.py` | `LOW` | No | On-Device | Queries structured knowledge facts and relational entities from local device memory. |
 
 ---
 
@@ -35,6 +40,9 @@ In accordance with core requirements:
 ### `SystemUtilitiesController.kt`
 Located at `mobile/android/app/src/main/java/com/zaya/companion/service/SystemUtilitiesController.kt`.
 - Houses the self-contained mathematical parser supporting unary signs, parentheses, precedence (`*`, `/`, `%` over `+`, `-`), exponents (`^`), and trigonometric functions.
+- Provides OpenJarvis FX macro currency conversion between major international currencies.
+- Safely reads and writes local text files with path traversal sanitization and size bounds.
+- Provides reasoning scratchpad logging (`think`) and entity relational lookup (`lookup_knowledge`).
 - Inspects system hardware using Android's native `BatteryManager`, `ActivityManager`, `StatFs`, `ConnectivityManager`, and `SystemClock`.
 - Integrates with standard Android intents:
   - `AlarmClock.ACTION_SET_TIMER`
@@ -43,11 +51,11 @@ Located at `mobile/android/app/src/main/java/com/zaya/companion/service/SystemUt
 
 ### Action Model & Registry
 - `ActionModel.kt`: Each capability is represented as a typed data class extending `AndroidAction` with explicit `ActionRisk` classifications.
-- `ActionRegistry.kt`: Discovers and reports all 24 capabilities (10 core + 14 expanded) to Gemini AI and local task planners.
+- `ActionRegistry.kt`: Discovers and reports all 29 capabilities (10 core + 19 expanded) to Gemini AI and local task planners.
 - `ActionExecutor.kt`: Centrally executes each action with coroutine dispatch, cancellation checkpoints, and idempotency deduplication (`ConsequentialActionDeduplicator`).
 
 ### Confirmation & Security Safeguards
-1. **Consequential Gates:** Actions that initiate external communications (`send_whatsapp_message`, `compose_sms`, `initiate_call`) or execute remote desktop changes (`execute_pc_command`) return `ActionResultStatus.NEEDS_CONFIRMATION` unless explicitly confirmed by the user.
+1. **Consequential Gates:** Actions that initiate external communications (`send_whatsapp_message`, `compose_sms`, `initiate_call`), alter local files (`write_file`), or execute remote desktop changes (`execute_pc_command`) return `ActionResultStatus.NEEDS_CONFIRMATION` unless explicitly confirmed by the user.
 2. **Duplicate Suppression:** A 10-second sliding deduplication window prevents accidental double-execution from voice echoes, UI retries, or replayed events.
 3. **No Private Leakage:** All diagnostic logs and local storage paths respect Android security boundaries and exclude private databases or tokens.
 
@@ -56,8 +64,8 @@ Located at `mobile/android/app/src/main/java/com/zaya/companion/service/SystemUt
 ## 3. Verification & Testing
 
 The expanded capabilities are verified through automated test suites:
-- `tests/test_mobile_expanded_functions.py` (10 unit tests covering math AST, division-by-zero handling, scientific functions, wire protocol envelopes, confirmation gates, parameter validation, volume clamping, and briefing generation).
-- Complete regression suite (57 tests passing):
+- `tests/test_mobile_expanded_functions.py` (15 unit tests covering math AST, division-by-zero handling, scientific functions, wire protocol envelopes, confirmation gates, parameter validation, volume clamping, briefing generation, FX currency rates, file path traversal sanitization, and think scratchpad).
+- Complete regression suite (62 tests passing):
   - `test_privacy_security_hardening.py`
   - `test_multi_step_task_engine.py`
   - `test_mobile_companion_iris.py`

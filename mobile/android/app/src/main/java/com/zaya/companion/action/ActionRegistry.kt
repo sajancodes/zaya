@@ -681,6 +681,76 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
+        // 25. OpenJarvis FX Macro Currency Converter
+        list.add(
+            ActionCapability(
+                actionId = "convert_currency",
+                purpose = "Convert monetary amounts between global currencies using standard exchange rates",
+                requiredArguments = listOf("amount", "from", "to"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 26. OpenJarvis File Reader
+        list.add(
+            ActionCapability(
+                actionId = "read_file",
+                purpose = "Read content from a specified local text file",
+                requiredArguments = listOf("path"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 27. OpenJarvis File Writer
+        list.add(
+            ActionCapability(
+                actionId = "write_file",
+                purpose = "Write or append text content to a local file",
+                requiredArguments = listOf("path", "content"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 28. OpenJarvis Think Scratchpad
+        list.add(
+            ActionCapability(
+                actionId = "think",
+                purpose = "Internal reasoning scratchpad allowing the agent to formulate plans without speaking aloud",
+                requiredArguments = listOf("thought"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 29. OpenJarvis Knowledge Tools
+        list.add(
+            ActionCapability(
+                actionId = "lookup_knowledge",
+                purpose = "Lookup entity facts and relational knowledge from local store",
+                requiredArguments = listOf("topic"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
         return list
     }
 }

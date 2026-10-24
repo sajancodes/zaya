@@ -262,4 +262,31 @@ sealed class AndroidAction(
         val parameters: Map<String, Any?> = emptyMap(),
         val confirmed: Boolean = false,
     ) : AndroidAction("execute_pc_command", ActionRisk.HIGH, requiresConfirmation = true)
+
+    // OpenJarvis Specialized Tools
+    data class ConvertCurrency(
+        val amount: Double,
+        val from: String,
+        val to: String,
+    ) : AndroidAction("convert_currency", ActionRisk.LOW)
+
+    data class ReadFile(
+        val path: String,
+        val maxLines: Int = 100,
+    ) : AndroidAction("read_file", ActionRisk.LOW)
+
+    data class WriteFile(
+        val path: String,
+        val content: String,
+        val append: Boolean = false,
+        val confirmed: Boolean = false,
+    ) : AndroidAction("write_file", ActionRisk.MEDIUM, requiresConfirmation = true)
+
+    data class Think(
+        val thought: String,
+    ) : AndroidAction("think", ActionRisk.LOW)
+
+    data class LookupKnowledge(
+        val topic: String,
+    ) : AndroidAction("lookup_knowledge", ActionRisk.LOW)
 }

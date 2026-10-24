@@ -129,6 +129,11 @@ class ActionExecutor(
             is AndroidAction.SetVolume -> executeSetVolume(action)
             is AndroidAction.SetRingerMode -> executeSetRingerMode(action)
             is AndroidAction.ExecutePcCommand -> executeExecutePcCommand(action)
+            is AndroidAction.ConvertCurrency -> executeConvertCurrency(action)
+            is AndroidAction.ReadFile -> executeReadFile(action)
+            is AndroidAction.WriteFile -> executeWriteFile(action)
+            is AndroidAction.Think -> executeThink(action)
+            is AndroidAction.LookupKnowledge -> executeLookupKnowledge(action)
         }
     }
 
@@ -1444,6 +1449,81 @@ class ActionExecutor(
         return ActionResult.success(
             spoken = "Dispatched remote PC command '${action.command}'.",
             data = mapOf("command" to action.command, "parameters" to action.parameters, "relayed" to true)
+        )
+    }
+
+    private fun executeConvertCurrency(action: AndroidAction.ConvertCurrency): ActionResult {
+        val res = systemUtils.convertCurrency(action.amount, action.from, action.to)
+        return if (res["success"] == true) {
+            ActionResult.success(
+                spoken = res["formatted"] as String,
+                data = res
+            )
+        } else {
+            ActionResult.failure(
+                spoken = res["error"] as String,
+                error = "currency_conversion_failed"
+            )
+        }
+    }
+
+    private fun executeReadFile(action: AndroidAction.ReadFile): ActionResult {
+        val res = systemUtils.readFile(action.path, action.maxLines)
+        return if (res["success"] == true) {
+            val lines = res["line_count"]
+            val name = res["file_name"]
+            ActionResult.success(
+                spoken = "Read $lines lines from $name.",
+                data = res
+            )
+        } else {
+            ActionResult.failure(
+                spoken = res["error"] as String,
+                error = "file_read_failed"
+            )
+        }
+    }
+
+    private fun executeWriteFile(action: AndroidAction.WriteFile): ActionResult {
+        if (!action.confirmed) {
+            return ActionResult.needsConfirmation(
+                spoken = "Are you sure you want to write to file '${action.path}'?",
+                actionId = "write_file",
+                payload = mapOf(
+                    "path" to action.path,
+                    "content" to action.content,
+                    "append" to action.append
+                )
+            )
+        }
+        val res = systemUtils.writeFile(action.path, action.content, action.append)
+        return if (res["success"] == true) {
+            val name = res["file_name"]
+            ActionResult.success(
+                spoken = "Successfully wrote to $name.",
+                data = res
+            )
+        } else {
+            ActionResult.failure(
+                spoken = res["error"] as String,
+                error = "file_write_failed"
+            )
+        }
+    }
+
+    private fun executeThink(action: AndroidAction.Think): ActionResult {
+        val res = systemUtils.think(action.thought)
+        return ActionResult.success(
+            spoken = "Plan recorded.",
+            data = res + ("silent" to true)
+        )
+    }
+
+    private fun executeLookupKnowledge(action: AndroidAction.LookupKnowledge): ActionResult {
+        val res = systemUtils.lookupKnowledge(action.topic)
+        return ActionResult.success(
+            spoken = "Retrieved knowledge for '${action.topic}'.",
+            data = res
         )
     }
 }

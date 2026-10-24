@@ -1255,6 +1255,27 @@ class ZayaRuntime(
                 command = args.optString("command", ""),
                 confirmed = args.optBoolean("confirmed", false)
             )
+            "convert_currency" -> com.zaya.companion.action.AndroidAction.ConvertCurrency(
+                amount = args.optDouble("amount", 1.0),
+                from = args.optString("from", "USD"),
+                to = args.optString("to", "EUR")
+            )
+            "read_file" -> com.zaya.companion.action.AndroidAction.ReadFile(
+                path = args.optString("path", ""),
+                maxLines = args.optInt("max_lines", 100)
+            )
+            "write_file" -> com.zaya.companion.action.AndroidAction.WriteFile(
+                path = args.optString("path", ""),
+                content = args.optString("content", ""),
+                append = args.optBoolean("append", false),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "think" -> com.zaya.companion.action.AndroidAction.Think(
+                thought = args.optString("thought", "")
+            )
+            "lookup_knowledge" -> com.zaya.companion.action.AndroidAction.LookupKnowledge(
+                topic = args.optString("topic", "")
+            )
             else -> {
                 val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
                 val report = JSONObject()
