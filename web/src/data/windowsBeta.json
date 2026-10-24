@@ -1,10 +1,10 @@
 {
   "published": true,
-  "version": "0.5.0",
-  "tag": "windows-0.5.0-beta.1",
-  "date": "2026-10-23",
+  "version": "0.5.1",
+  "tag": "windows-0.5.1-beta.1",
+  "date": "2026-10-24",
   "filename": "ZayaBetaSetup.exe",
-  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/windows-0.5.0-beta.1/ZayaBetaSetup.exe",
-  "sha256": "7215656c6da6d461c7a41fce3167378849d0a2e36f099d5ee1508bfde6b9e31a",
-  "size": 233932353
+  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/windows-0.5.1-beta.1/ZayaBetaSetup.exe",
+  "sha256": "c8d62b9d2f99b0d7dcf04ee3980544aa924e7d406ab78e406a767e2d386973d9",
+  "size": 234010769
 }
