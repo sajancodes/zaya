@@ -15,9 +15,10 @@ export const linuxBeta: ReleaseItem | null = linux.published ? {
   version: linux.version, tag: linux.tag, channel: 'Beta', platform: 'linux', platformName: 'Linux Desktop',
   date: linux.date, filename: linux.filename, downloadUrl: linux.url, sha256: linux.sha256,
   sizeBytes: linux.size, sizeFormatted: `${(linux.size / 1048576).toFixed(1)} MB`, unsigned: true,
-  highlights: ['Experimental unsigned Linux beta; manual package updates', 'Built and smoke-tested on Ubuntu 22.04 AMD64 in WSL2'],
+  highlights: ['Experimental unsigned Linux beta; manual package updates', 'Debian/Ubuntu .deb, Fedora .rpm and portable x86-64 archive'],
   fullChangelog: ['Fixed Qt/X11 runtime dependencies, isolated hand-worker packaging and user-data paths in root-owned Linux installs.', 'Physical microphone/camera and full desktop automation still need native Linux testing.'],
-  requirements: ['Ubuntu/Debian-based AMD64 desktop with X11', 'Unlocked Secret Service keyring for credentials', 'Own provider connection; no automatic Linux updater']
+  requirements: ['x86-64 desktop with glibc 2.35+; X11 for desktop automation', 'Unlocked Secret Service keyring for credentials', 'Own provider connection; no automatic Linux updater'],
+  downloads: linux.packages.map(item=>({format:item.format,label:item.label,filename:item.filename,downloadUrl:item.url,sha256:item.sha256,sizeFormatted:`${(item.size / 1048576).toFixed(1)} MB`,commands:item.commands,note:item.note}))
 } : null;
 
 const includeBeta = (rows: ReleaseItem[]) => {

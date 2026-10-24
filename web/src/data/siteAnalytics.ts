@@ -59,7 +59,7 @@ export function trackDownload(event: MouseEvent, path: string) {
     const url = new URL(anchor.href);
     const internal = url.origin === location.origin ? /^\/download\/(windows|linux|android)$/.exec(url.pathname) : null;
     const official = url.hostname === 'github.com' && url.pathname.startsWith('/sajancodes/zaya-companion-releases/releases/download/');
-    const platform = internal?.[1] || (official ? /\.exe$/i.test(url.pathname) ? 'windows' : /\.apk$/i.test(url.pathname) ? 'android' : /\.(deb|AppImage)$/i.test(url.pathname) ? 'linux' : '' : '');
+    const platform = internal?.[1] || (official ? /\.exe$/i.test(url.pathname) ? 'windows' : /\.apk$/i.test(url.pathname) ? 'android' : /\.(deb|rpm|AppImage|tar\.gz)$/i.test(url.pathname) ? 'linux' : '' : '');
     if (platform) send(path, 'download', platform);
   } catch { /* Ignore non-download links. */ }
 }

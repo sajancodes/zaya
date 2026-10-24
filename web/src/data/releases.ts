@@ -1,3 +1,14 @@
+export interface ReleaseDownload {
+  format: string;
+  label: string;
+  filename: string;
+  downloadUrl: string;
+  sha256: string;
+  sizeFormatted: string;
+  commands: string[];
+  note: string;
+}
+
 export interface ReleaseItem {
   version: string;
   tag: string;
@@ -15,7 +26,8 @@ export interface ReleaseItem {
   knownIssues?: string[];
   requirements: string[];
   unsigned?: boolean;
+  downloads?: ReleaseDownload[];
 }
 
-// Release details come exclusively from verified server metadata.
+// Stable releases use verified server metadata; experimental betas use published artifact metadata.
 export const RELEASES_DATA: ReleaseItem[] = [];

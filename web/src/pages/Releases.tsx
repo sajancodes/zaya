@@ -103,6 +103,8 @@ export const Releases: React.FC = () => {
                 </a>
               </div>
 
+              {rel.downloads && rel.downloads.length > 1 && <div className="release-linux-packages"><h3>Linux package formats</h3>{rel.downloads.filter(item=>item.downloadUrl!==rel.downloadUrl).map(item=><div key={item.format}><a className="text-link" href={item.downloadUrl}>{item.label} · {item.filename} ↓</a><span>{item.sizeFormatted}</span><details className="checksum-details"><summary>SHA-256</summary><code>{item.sha256}</code></details></div>)}</div>}
+
               {/* Highlights */}
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ fontSize: '13px', color: 'var(--site-ink)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
