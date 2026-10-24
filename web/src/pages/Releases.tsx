@@ -4,7 +4,7 @@ import { useReleases } from '../data/useReleases';
 
 export const Releases: React.FC = () => {
   const {releases: RELEASES_DATA, loading} = useReleases();
-  const [selectedPlatform, setSelectedPlatform] = useState<'ALL' | 'windows' | 'android'>('ALL');
+  const [selectedPlatform, setSelectedPlatform] = useState<'ALL' | 'windows' | 'android' | 'linux'>('ALL');
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
   if (loading && !RELEASES_DATA.length) return <section className="section container"><h1>Releases</h1><p>Loading published releases…</p></section>;
@@ -34,8 +34,8 @@ export const Releases: React.FC = () => {
           </p>
 
           {/* Platform Filters */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '24px' }}>
-            {(['ALL', 'windows', 'android'] as const).map((plat) => (
+          <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '8px', marginTop: '24px' }}>
+            {(['ALL', 'windows', 'android', 'linux'] as const).map((plat) => (
               <button
                 key={plat}
                 onClick={() => setSelectedPlatform(plat)}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReleaseItem } from './releases';
 import beta from './windowsBeta.json';
+import linux from './linuxBeta.json';
 
 export const windowsBeta: ReleaseItem | null = beta.published ? {
   version: beta.version, tag: beta.tag, channel: 'Beta', platform: 'windows', platformName: 'Windows Desktop',
@@ -10,7 +11,19 @@ export const windowsBeta: ReleaseItem | null = beta.published ? {
   requirements: ['Windows 10/11 x64', 'Unsigned: some Windows security policies block installation', 'Own provider key and internet for cloud voice features']
 } : null;
 
-const includeBeta = (rows: ReleaseItem[]) => windowsBeta ? [...rows.filter(r => !(r.platform === 'windows' && r.channel === 'Beta')), windowsBeta] : rows;
+export const linuxBeta: ReleaseItem | null = linux.published ? {
+  version: linux.version, tag: linux.tag, channel: 'Beta', platform: 'linux', platformName: 'Linux Desktop',
+  date: linux.date, filename: linux.filename, downloadUrl: linux.url, sha256: linux.sha256,
+  sizeBytes: linux.size, sizeFormatted: `${(linux.size / 1048576).toFixed(1)} MB`, unsigned: true,
+  highlights: ['Experimental unsigned Linux beta; manual package updates', 'Built and smoke-tested on Ubuntu 22.04 AMD64 in WSL2'],
+  fullChangelog: ['Fixed Qt/X11 runtime dependencies, isolated hand-worker packaging and user-data paths in root-owned Linux installs.', 'Physical microphone/camera and full desktop automation still need native Linux testing.'],
+  requirements: ['Ubuntu/Debian-based AMD64 desktop with X11', 'Unlocked Secret Service keyring for credentials', 'Own provider connection; no automatic Linux updater']
+} : null;
+
+const includeBeta = (rows: ReleaseItem[]) => {
+  const betas = [windowsBeta, linuxBeta].filter((r): r is ReleaseItem => r !== null);
+  return [...rows.filter(r => !betas.some(b => b.platform === r.platform && r.channel === 'Beta')), ...betas];
+};
 
 export function useReleases() {
   const [releases, setReleases] = useState<ReleaseItem[]>(includeBeta([]));

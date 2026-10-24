@@ -1,0 +1,13 @@
+{
+  "published": true,
+  "version": "0.5.0",
+  "tag": "linux-0.5.0-beta.1",
+  "date": "2026-10-24",
+  "filename": "Zaya.deb",
+  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.0-beta.1/Zaya.deb",
+  "sha256": "1835cfca0e7799fffb8e58e16dfaa3cc653818635bf298c8072a15223e10c361",
+  "size": 373070924,
+  "channel": "beta",
+  "platform": "linux",
+  "public_release_verified": false
+}
