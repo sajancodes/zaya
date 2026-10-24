@@ -92,6 +92,9 @@ def init_db(db_path: Optional[Path] = None) -> None:
     conn = get_connection(db_path)
     try:
         with conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS daily_activity (
+                installation_id TEXT NOT NULL, day TEXT NOT NULL,
+                PRIMARY KEY (installation_id, day));""")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS installations (
                     installation_id TEXT PRIMARY KEY,
@@ -167,60 +170,28 @@ def record_install(installation_id: str, platform: str, version: str) -> bool:
         from web import firebase_store
         return firebase_store.record_install(installation_id, platform, version)
     now = int(time.time())
+    from datetime import datetime, timezone
+    day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
     conn = get_connection()
     try:
         with conn:
-            cursor = conn.execute(
-                "SELECT installation_id FROM installations WHERE installation_id = ?;",
-                (installation_id,)
-            )
-            existing = cursor.fetchone()
-            if existing:
-                conn.execute("""
-                    UPDATE installations
-                    SET current_version = ?, last_seen = ?
-                    WHERE installation_id = ?;
-                """, (version, now, installation_id))
-                return False
-            else:
-                conn.execute("""
-                    INSERT INTO installations (installation_id, platform, installed_version, current_version, first_seen, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?);
-                """, (installation_id, platform.lower(), version, version, now, now))
-                return True
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT installation_id FROM installations WHERE installation_id = ?", (installation_id,)).fetchone()
+            conn.execute("""INSERT INTO installations
+                (installation_id, platform, installed_version, current_version, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(installation_id) DO UPDATE SET
+                platform=excluded.platform, current_version=excluded.current_version, last_seen=excluded.last_seen""",
+                (installation_id, platform.lower(), version, version, now, now))
+            conn.execute("INSERT OR IGNORE INTO daily_activity VALUES (?, ?)", (installation_id, day))
+            conn.execute("DELETE FROM daily_activity WHERE day < date(?, 'unixepoch', '-90 days')", (now,))
+            return existing is None
     finally:
         conn.close()
 
 
 def record_heartbeat(installation_id: str, platform: str, version: str) -> bool:
-    if firebase_enabled():
-        from web import firebase_store
-        return firebase_store.record_heartbeat(installation_id, platform, version)
-    """Update last_seen timestamp for an active installation."""
-    now = int(time.time())
-    conn = get_connection()
-    try:
-        with conn:
-            cursor = conn.execute(
-                "SELECT installation_id FROM installations WHERE installation_id = ?;",
-                (installation_id,)
-            )
-            if cursor.fetchone():
-                conn.execute("""
-                    UPDATE installations
-                    SET current_version = ?, last_seen = ?, platform = ?
-                    WHERE installation_id = ?;
-                """, (version, now, platform.lower(), installation_id))
-                return True
-            else:
-                # If installation record missing, create it
-                conn.execute("""
-                    INSERT INTO installations (installation_id, platform, installed_version, current_version, first_seen, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?);
-                """, (installation_id, platform.lower(), version, version, now, now))
-                return True
-    finally:
-        conn.close()
+    return record_install(installation_id, platform, version)
 
 
 def record_download(platform: str, version: str, client_ip: Optional[str] = None) -> None:
@@ -447,6 +418,7 @@ def get_analytics_metrics() -> Dict[str, Any]:
                 "last_30d": active_30d,
             },
             "version_distribution": version_distribution,
+            "daily_actives": [dict(row) for row in c.execute("SELECT day, COUNT(*) AS count FROM daily_activity GROUP BY day ORDER BY day DESC LIMIT 14").fetchall()][::-1],
             "daily_installs": daily_installs,
             "daily_downloads": daily_downloads,
             "updated_at": now,

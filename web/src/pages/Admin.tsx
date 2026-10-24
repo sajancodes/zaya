@@ -169,6 +169,10 @@ export const Admin: React.FC = () => {
         </div>
 
         <SiteTraffic />
+        {metrics && <section className="card admin-releases"><h2>Daily app activity (UTC)</h2>
+          <p>Each anonymous installation counts once per day. Opt-in only; reporting starts with version 0.5.1. Earlier versions can also contribute through their existing heartbeats. No historical backfill.</p>
+          {metrics.daily_actives?.length ? <table><thead><tr><th>Date</th><th>Active installations</th></tr></thead><tbody>{metrics.daily_actives.map(row => <tr key={row.day}><td>{row.day}</td><td>{row.count}</td></tr>)}</tbody></table> : <p>No daily reports received yet.</p>}
+        </section>}
         <section className="admin-releases card"><h2>Release management</h2>
         <p>Deactivate a broken version to stop advertising it. Published binaries remain immutable and are not deleted.</p>
         {releases.map(release => <div className="admin-release-row" key={release.platform + release.version}>
@@ -185,7 +189,7 @@ export const Admin: React.FC = () => {
           <>
             {/* Top Stat Cards */}
             <div className="metric-grid">
-              <div className="metric-card"><div className="metric-label">Online now</div><div className="metric-value">{metrics.active.online_now ?? 'Unavailable'}</div><div className="metric-sub">Opted-in installations seen within 3 minutes</div></div>
+              <div className="metric-card"><div className="metric-label">Active today (UTC)</div><div className="metric-value">{metrics.daily_actives?.find(row => row.day === new Date().toISOString().slice(0, 10))?.count ?? 0}</div><div className="metric-sub">Unique opted-in installations reported today</div></div>
               <div className="metric-card">
                 <div className="metric-label">Total Downloads</div>
                 <div className="metric-value">{metrics.downloads.total}</div>
@@ -205,7 +209,7 @@ export const Admin: React.FC = () => {
               <div className="metric-card">
                 <div className="metric-label">Active (Last 24 Hours)</div>
                 <div className="metric-value">{metrics.active.last_24h}</div>
-                <div className="metric-sub">Daily active heartbeats</div>
+                <div className="metric-sub">Installations reporting within 24 hours</div>
               </div>
 
               <div className="metric-card">

@@ -35,8 +35,10 @@ def record_install(installation_id, platform, version):
     def update(transaction):
         existing = ref.get(transaction=transaction)
         now = int(time.time())
+        day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+        new_day = (existing.to_dict() or {}).get('last_active_day') != day
         data = {'platform': platform, 'current_version': version, 'last_seen': now,
-                'expires_at': datetime.now(timezone.utc) + timedelta(days=90)}
+                'expires_at': datetime.now(timezone.utc) + timedelta(days=90), 'last_active_day': day}
         if not existing.exists:
             data.update(first_seen=now, installed_version=version)
             aggregation = collection('maintenance').document('install_aggregation')
@@ -46,6 +48,9 @@ def record_install(installation_id, platform, version):
             day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
             transaction.set(collection('daily_installs').document(day), {
                 'total': firestore.Increment(1), platform: firestore.Increment(1)}, merge=True)
+        if new_day:
+            transaction.set(collection('daily_actives').document(day), {
+                'day': day, 'total': firestore.Increment(1), platform: firestore.Increment(1)}, merge=True)
         transaction.set(ref, data, merge=True)
         return not existing.exists
     return update(client().transaction())
@@ -152,7 +157,8 @@ def get_analytics_metrics():
     maintenance = collection('maintenance').document('retention').get().to_dict() or {}
     last_cleanup = maintenance.get('last_completed')
     recent_updates = [doc.to_dict() for doc in collection('daily_updates').where(filter=FieldFilter('day', '>=', (datetime.now(timezone.utc).date() - timedelta(days=13)).isoformat())).order_by('day', direction='DESCENDING').limit(100).stream()]
-    return {'update_health':recent_updates, 'update_health_definition':'Opt-in reports only. Installer started means process launch, not completed installation. Version adoption comes from later heartbeats.',
+    daily_actives = [doc.to_dict() for doc in collection('daily_actives').order_by('day', direction='DESCENDING').limit(14).stream()]
+    return {'daily_actives': [{'day': item['day'], 'count': item['total']} for item in reversed(daily_actives)], 'update_health':recent_updates, 'update_health_definition':'Opt-in reports only. Installer started means process launch, not completed installation. Version adoption comes from later heartbeats.',
             'retention': {'mode': 'traffic-driven', 'last_completed': int(last_cleanup.timestamp()) if last_cleanup else None,
                           'last_deleted': maintenance.get('deleted', {}),
                           'limitation': 'Runs on protected request traffic; idle deployments require a scheduled caller. Up to 100 expired records per collection per pass.'},

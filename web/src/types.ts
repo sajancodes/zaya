@@ -27,6 +27,7 @@ export interface AnalyticsMetrics {
     last_30d: number;
   };
   version_distribution: Record<string, number>;
+  daily_actives?: Array<{ day: string; count: number }>;
   daily_installs: Array<{ day: string; count: number }>;
   daily_downloads: Array<{ day: string; count: number }>;
   daily_installs_since?: number;

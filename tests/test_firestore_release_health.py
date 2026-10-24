@@ -135,7 +135,7 @@ def test_cleanup_preserves_concurrently_refreshed_installation(database):
     assert ('installations', 'old') not in database.rows
     assert ('admin_sessions', 'expired') not in database.rows
     assert ('request_limits', 'expired') not in database.rows
-    assert database.rows['maintenance', 'retention']['deleted'] == {'installations': 1, 'admin_sessions': 1, 'request_limits': 1, 'update_receipts': 0}
+    assert database.rows['maintenance', 'retention']['deleted'] == {'installations': 1, 'admin_sessions': 1, 'request_limits': 1, 'update_receipts': 0, 'site_receipts': 0, 'site_visitors': 0, 'site_sessions': 0, 'site_daily_visitors': 0}
 
 
 def test_update_receipt_retry_does_not_duplicate_or_store_installation_id(database):
@@ -161,3 +161,17 @@ def test_stable_beta_and_pulled_release_fallback_survive_sync(database, monkeypa
     firebase_store.set_release_active('0.5.1', 'windows', False)
     publish('0.5.1', 'stable', 2)
     assert firebase_store.get_latest_release(channel='stable')['version'] == '0.5.0'
+
+
+def test_daily_active_firestore_retry_and_next_day(database, monkeypatch):
+    now = [1761263990]
+    monkeypatch.setattr(firebase_store.time, 'time', lambda: now[0])
+    firebase_store.record_install('one', 'linux', '0.5.1')
+    firebase_store.record_heartbeat('one', 'linux', '0.5.1')
+    firebase_store.record_install('two', 'windows', '0.5.1')
+    counters = [value for (name, _), value in database.rows.items() if name == 'daily_actives']
+    assert len(counters) == 1 and counters[0]['total'] == 2
+    now[0] += 86400
+    firebase_store.record_heartbeat('one', 'linux', '0.5.2')
+    counters = [value for (name, _), value in database.rows.items() if name == 'daily_actives']
+    assert sorted(row['total'] for row in counters) == [1, 2]

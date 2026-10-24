@@ -6,11 +6,13 @@ Privacy Guarantees:
 - ZERO hardware fingerprinting (no MAC address, CPU, disk, motherboard, or IP derivation).
 - ZERO personal data, conversations, keys, audio, screen captures, or activity content.
 - Respects the user's telemetry toggle in settings/onboarding.
-- Opt-in heartbeat sent at most once every two minutes.
+- Opt-in activity reported at most once per UTC day after acknowledgement.
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from functools import wraps
 import logging
 import os
 import sys
@@ -32,7 +34,28 @@ DEFAULT_TELEMETRY_BASE_URL = os.environ.get(
     os.environ.get("ZAYA_WEBSITE_URL", "https://zayaxyz.vercel.app")
 ).rstrip("/")
 
-HEARTBEAT_INTERVAL_SECONDS = 120  # Opt-in only; online means seen within 3 minutes.
+HEARTBEAT_INTERVAL_SECONDS = 120  # Local checks only; no repeated successful daily requests.
+_STATE_LOCK = threading.RLock()
+
+
+def _serialized(function):
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with _STATE_LOCK:
+            return function(*args, **kwargs)
+    return locked
+
+
+def _save_info(info):
+    path = _installation_file_path()
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _utc_day(timestamp):
+    return datetime.fromtimestamp(timestamp, timezone.utc).date()
+
 
 
 def _installation_file_path() -> Path:
@@ -41,6 +64,7 @@ def _installation_file_path() -> Path:
     return user_data / "installation.json"
 
 
+@_serialized
 def get_or_create_installation_info() -> Dict[str, Any]:
     """Retrieve or initialize the anonymous installation metadata.
 
@@ -56,7 +80,7 @@ def get_or_create_installation_info() -> Dict[str, Any]:
                 if data.get("current_version") != VERSION:
                     data["current_version"] = VERSION
                     try:
-                        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                        _save_info(data)
                     except Exception:
                         pass
                 return data
@@ -76,7 +100,7 @@ def get_or_create_installation_info() -> Dict[str, Any]:
         "last_heartbeat": 0,
     }
     try:
-        path.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        _save_info(info)
     except Exception as e:
         logger.debug(f"Could not write installation.json: {e}")
     return info
@@ -88,13 +112,14 @@ def is_telemetry_enabled() -> bool:
     return bool(info.get("telemetry_enabled", False))
 
 
+@_serialized
 def set_telemetry_enabled(enabled: bool) -> None:
     """Update the user's anonymous telemetry preference."""
     path = _installation_file_path()
     info = get_or_create_installation_info()
     info["telemetry_enabled"] = bool(enabled)
     try:
-        path.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        _save_info(info)
     except Exception as e:
         logger.debug(f"Could not save telemetry preference: {e}")
 
@@ -119,6 +144,7 @@ def _post_json(url: str, payload: Dict[str, Any], timeout_seconds: float = 5.0) 
         return False
 
 
+@_serialized
 def report_install_event(base_url: Optional[str] = None) -> bool:
     """Report anonymous first-install event once.
 
@@ -136,21 +162,27 @@ def report_install_event(base_url: Optional[str] = None) -> bool:
     payload = {
         "installation_id": info["installation_id"],
         "platform": info["platform"],
-        "version": info.get("installed_version", VERSION),
+        "version": VERSION,
     }
 
+    sent_at = int(time.time())
     success = _post_json(endpoint, payload)
     if success:
         info["install_reported"] = True
+        info["last_heartbeat"] = sent_at
         try:
-            _installation_file_path().write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+            _save_info(info)
         except Exception:
             pass
     return success
 
 
+@_serialized
 def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) -> bool:
-    """Send an opt-in heartbeat after the bounded interval has elapsed."""
+    """Report activity once per UTC day; failures remain retryable.
+
+    force is retained for callers but never bypasses a successful daily receipt.
+    """
     if not is_telemetry_enabled():
         return False
 
@@ -158,7 +190,7 @@ def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) 
     now = int(time.time())
     last = int(info.get("last_heartbeat", 0))
 
-    if not force and (now - last < HEARTBEAT_INTERVAL_SECONDS):
+    if last and _utc_day(now) == _utc_day(last):
         return True
 
     server = (base_url or DEFAULT_TELEMETRY_BASE_URL).rstrip("/")
@@ -173,7 +205,7 @@ def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) 
     if success:
         info["last_heartbeat"] = now
         try:
-            _installation_file_path().write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+            _save_info(info)
         except Exception:
             pass
     return success
@@ -209,21 +241,24 @@ class TelemetryClient:
         if self._thread is not None and self._thread.is_alive():
             return
 
+        self._stop_event.clear()
+
         def _worker():
             # Initial delayed check (10 seconds after launch) so startup is instantaneous
             if self._stop_event.wait(10):
                 return
 
             try:
-                report_install_event(self.base_url)
-                report_heartbeat_event(self.base_url)
+                if report_install_event(self.base_url):
+                    report_heartbeat_event(self.base_url)
             except Exception as e:
                 logger.debug(f"Telemetry worker initial pass error: {e}")
 
-            # Periodic check every 6 hours to catch 24h threshold
+            # Check locally for consent changes, offline retries and UTC day rollover.
             while not self._stop_event.wait(HEARTBEAT_INTERVAL_SECONDS):
                 try:
-                    report_heartbeat_event(self.base_url)
+                    if report_install_event(self.base_url):
+                        report_heartbeat_event(self.base_url)
                 except Exception as e:
                     logger.debug(f"Telemetry worker cycle error: {e}")
 
