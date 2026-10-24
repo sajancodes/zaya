@@ -20,6 +20,7 @@ for (const url of urls) {
   if (route.startsWith('/docs/')) assert(/<article(?:\s|>)/.test(html) && html.includes('BreadcrumbList'));
   assert(!html.includes('zaya.sajan.codes'), `Stale origin: ${route}`);
   for (const [, href] of html.matchAll(/href="(\/[^"?#]*)/g)) {
+    if (/^\/api\/downloads\/beta\/(?:windows\/exe|linux\/(?:deb|rpm|portable))$/.test(href)) continue;
     if (href.startsWith('/assets/') || href === '/favicon.ico') continue;
     assert(urls.includes(new URL(href, url).href), `Broken public navigation: ${route} -> ${href}`);
   }

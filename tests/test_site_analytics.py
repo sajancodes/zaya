@@ -69,7 +69,7 @@ def test_counts_deduplicate_across_visits_and_periods(backend, monkeypatch):
     site.record_event(event(visitor, uuid4()))
     site.record_event(event())
     data = site.report(30)
-    assert data['totals'] == {'visits':3, 'pageviews':4, 'visitor_ids':2, 'download_clicks':1}
+    assert data['totals'] == {'visits':3, 'pageviews':4, 'visitor_ids':2, 'download_clicks':1, 'download_browsers':1}
     assert data['period']['unique_browsers'] == 2
     assert data['period']['returning_visits'] == 1
     assert len(data['daily']) == 2  # No invented zero history before collection.
@@ -118,3 +118,12 @@ def test_api_requires_admin_and_limits_public_payloads(monkeypatch, tmp_path):
     assert site.report()['totals']['pageviews'] == 1
     monkeypatch.setattr(site, 'is_rate_limited', lambda address: True)
     assert client.post('/api/site-events',json=payload).status_code == 429
+
+
+def test_repeat_download_clicks_count_browser_once(backend):
+    visitor, session = uuid4(), uuid4()
+    for platform in ('linux', 'linux', 'windows'):
+        site.record_event(event(visitor, session, kind='download', platform=platform))
+    result = site.report()['totals']
+    assert result['download_clicks'] == 3
+    assert result['download_browsers'] == 1

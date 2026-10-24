@@ -56,7 +56,7 @@ def _increment(data, key):
     data[key] = int(data.get(key, 0)) + 1
 
 
-def _aggregate(total, daily, event, new_visitor, new_session, new_daily_visitor, now):
+def _aggregate(total, daily, event, new_visitor, new_session, new_daily_visitor, now, new_downloader=False):
     total.setdefault('started_at', now)
     if new_visitor:
         _increment(total, 'visitor_ids')
@@ -77,6 +77,9 @@ def _aggregate(total, daily, event, new_visitor, new_session, new_daily_visitor,
         for data in (total, daily):
             _increment(data, 'download_clicks')
         _increment(daily.setdefault('platforms', {}), event['platform'])
+        if new_downloader:
+            for data in (total, daily):
+                _increment(data, 'download_browsers')
 
 
 def record_event(event):
@@ -98,7 +101,11 @@ def record_event(event):
                 row = conn.execute('SELECT payload FROM site_aggregates WHERE id=?', (key,)).fetchone()
                 return json.loads(row[0]) if row else {}
             total, daily = load('total'), load(day)
-            _aggregate(total, daily, event, not visitor, not session, not daily_visitor, now)
+            download_key = 'download-' + hashlib.sha256(event['visitor_id'].encode()).hexdigest()
+            new_downloader = event['kind'] == 'download' and not conn.execute('SELECT 1 FROM site_receipts WHERE id=?', (download_key,)).fetchone()
+            _aggregate(total, daily, event, not visitor, not session, not daily_visitor, now, new_downloader)
+            if new_downloader:
+                conn.execute('INSERT OR REPLACE INTO site_receipts VALUES (?,?,?)', (download_key, now, now + 90*86400))
             for key, data in (('total', total), (day, daily)):
                 conn.execute('INSERT OR REPLACE INTO site_aggregates VALUES (?,?)', (key, json.dumps(data)))
             for table, key, expiry in (('site_receipts', event['event_id'], now + 86400),
@@ -137,7 +144,11 @@ def _record_firestore(event, now, day):
             return False
         snapshots = [ref.get(transaction=transaction) for ref in refs[1:]]
         total, daily = snapshots[3].to_dict() or {}, snapshots[4].to_dict() or {}
-        _aggregate(total, daily, event, not snapshots[0].exists, not snapshots[1].exists, not snapshots[2].exists, now)
+        download_ref = collection('site_receipts').document('download-' + hashlib.sha256(event['visitor_id'].encode()).hexdigest())
+        new_downloader = event['kind'] == 'download' and not download_ref.get(transaction=transaction).exists
+        _aggregate(total, daily, event, not snapshots[0].exists, not snapshots[1].exists, not snapshots[2].exists, now, new_downloader)
+        if new_downloader:
+            transaction.set(download_ref, {'expires_at': datetime.fromtimestamp(now, timezone.utc) + timedelta(days=90)})
         for index in range(4):
             transaction.set(refs[index], {'last_seen': now, 'expires_at': datetime.fromtimestamp(now, timezone.utc) + timedelta(days=1 if index == 0 else 90)})
         transaction.set(refs[4], total)
@@ -182,7 +193,7 @@ def report(days=30):
                 values[label] = values.get(label, 0) + value
     period['unique_browsers'] = unique
     return {'days': days, 'started_at': total.get('started_at'), 'updated_at': now,
-            'totals': {key: total.get(key, 0) for key in ('visits', 'pageviews', 'visitor_ids', 'download_clicks')},
+            'totals': {key: total.get(key, 0) for key in ('visits', 'pageviews', 'visitor_ids', 'download_clicks', 'download_browsers')},
             'period': period, 'daily': timeline,
             'breakdowns': {key: [{'label': label, 'count': count} for label, count in sorted(values.items(), key=lambda item: (-item[1], item[0]))] for key, values in breakdowns.items()},
-            'definition': 'Consent-only estimates, not all visitors or people. Visits use a 30-minute browser session. Browser IDs rotate every 30 days. Download clicks do not prove completed downloads or installations. Admin pages, private content, full referrers and IP addresses are excluded. History starts when tracking is enabled; earlier traffic cannot be backfilled.'}
+            'definition': 'Consent-only estimates, not all visitors or people. Visits use a 30-minute browser session. Browser IDs rotate every 30 days. Download browsers count anonymous browser IDs once across download clicks, starting with this counter; IDs rotate every 30 days. Clicks do not prove completed downloads or installations. Admin pages, private content, full referrers and IP addresses are excluded. History starts when tracking is enabled; earlier traffic cannot be backfilled.'}

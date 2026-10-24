@@ -58,3 +58,22 @@ def test_sqlite_daily_receipts_do_not_duplicate_installations(tmp_path, monkeypa
     metrics = database.get_analytics_metrics()
     assert [r['count'] for r in metrics['daily_actives']] == [2, 1]
     assert metrics['installations']['total'] == 2
+
+
+def test_beta_downloads_are_counted_and_outages_do_not_block(monkeypatch):
+    from fastapi.testclient import TestClient
+    from web import server
+    calls = []
+    monkeypatch.setattr(server, 'record_download', lambda *args: calls.append(args))
+    client = TestClient(server.app)
+    for platform, package in [('windows', 'exe'), ('linux', 'deb'), ('linux', 'rpm'), ('linux', 'portable')]:
+        response = client.get(f'/api/downloads/beta/{platform}/{package}', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['location'].startswith('https://github.com/sajancodes/zaya-companion-releases/releases/download/')
+        assert response.headers['cache-control'] == 'no-store'
+    assert len(calls) == 4
+    def offline(*args):
+        raise RuntimeError('offline')
+    monkeypatch.setattr(server, 'record_download', offline)
+    assert client.get('/api/downloads/beta/linux/rpm', follow_redirects=False).status_code == 302
+    assert client.get('/api/downloads/beta/other/exe').status_code == 404

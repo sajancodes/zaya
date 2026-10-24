@@ -141,6 +141,13 @@ def get_analytics_metrics():
     downloads = collection('counters').document('downloads').get().to_dict() or {}
     releases = get_all_releases()
     versions = {r['version'] for r in releases}
+    # Manual beta packages intentionally stay outside the automatic-update catalog.
+    import json
+    from pathlib import Path
+    for name in ('windowsBeta.json', 'linuxBeta.json'):
+        beta = json.loads((Path(__file__).parent / 'src/data' / name).read_text(encoding='utf-8'))
+        if beta.get('published'):
+            versions.add(beta['version'])
     distribution = {v: count(installs.where(filter=FieldFilter('current_version', '==', v))) for v in versions}
     daily = []
     daily_installs = []

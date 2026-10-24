@@ -47,6 +47,7 @@ export const SiteTraffic:React.FC = () => {
     {data && <>
       <div className="metric-grid">{[
         ['Total site visits',data.totals.visits,'All time since collection began'],
+        ['Download browsers',data.totals.download_browsers ?? 0,'Anonymous IDs counted once; rotate every 30 days'],
         ['Total page views',data.totals.pageviews,'All time; repeat views included'],
         [`Visits · ${data.days} days`,data.period.visits,'30-minute browser sessions'],
         [`Unique browsers · ${data.days} days`,data.period.unique_browsers,'Estimated anonymous browser IDs, not people'],

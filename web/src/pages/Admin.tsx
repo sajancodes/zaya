@@ -191,7 +191,7 @@ export const Admin: React.FC = () => {
             <div className="metric-grid">
               <div className="metric-card"><div className="metric-label">Active today (UTC)</div><div className="metric-value">{metrics.daily_actives?.find(row => row.day === new Date().toISOString().slice(0, 10))?.count ?? 0}</div><div className="metric-sub">Unique opted-in installations reported today</div></div>
               <div className="metric-card">
-                <div className="metric-label">Total Downloads</div>
+                <div className="metric-label">Download requests</div>
                 <div className="metric-value">{metrics.downloads.total}</div>
                 <div className="metric-sub">
                   Windows: {metrics.downloads.windows} · Android: {metrics.downloads.android}

@@ -138,6 +138,31 @@ def downloadable_release(platform, channel='stable'):
         raise HTTPException(503, 'Release metadata is not ready for distribution.')
 
 
+@app.get('/api/downloads/beta/{platform}/{package}')
+async def beta_package_download(platform: str, package: str):
+    """Count the advertised beta download request, then redirect to its immutable asset."""
+    import json
+    from urllib.parse import urlparse
+    if (platform, package) not in {('windows', 'exe'), ('linux', 'deb'), ('linux', 'rpm'), ('linux', 'portable')}:
+        raise HTTPException(404, 'Unsupported beta package.')
+    metadata = json.loads((Path(__file__).parent / 'src' / 'data' / ('windowsBeta.json' if platform == 'windows' else 'linuxBeta.json')).read_text(encoding='utf-8'))
+    if not metadata.get('published'):
+        raise HTTPException(404, 'Beta is not available.')
+    item = metadata if platform == 'windows' else next((p for p in metadata.get('packages', []) if p['format'] == package), None)
+    if item is None:
+        raise HTTPException(404, 'Package is not available.')
+    url = item['url']
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or parsed.netloc != 'github.com' or not parsed.path.startswith('/sajancodes/zaya-companion-releases/releases/download/') or parsed.query or parsed.fragment:
+        raise HTTPException(503, 'Package metadata is invalid.')
+    try:
+        record_download(platform, metadata['version'])
+    except Exception:
+        # Analytics outages must never prevent downloading the app.
+        pass
+    return RedirectResponse(url, status_code=302, headers={'Cache-Control': 'no-store'})
+
+
 # ---------------------------------------------------------------------------
 # Telemetry Pydantic Models
 # ---------------------------------------------------------------------------
