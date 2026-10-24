@@ -338,3 +338,4 @@ code { font-family:'JetBrains Mono',Consolas,monospace; font-size:.85em; }
 .footer-main .contact-links { flex-direction:row;flex-wrap:wrap;gap:7px!important; }
 .footer-main .contact-links a { width:30px;height:32px;min-height:32px;margin:0; }
 .contact-links .contact-icon { width:20px;height:20px; }
+.linux-download{min-width:0}.linux-download .download-main-button:disabled{opacity:.55;cursor:not-allowed}.linux-download>.text-link{display:inline-block;margin-top:18px}.linux-download>code{display:block;padding:14px;background:#091420;color:#b2e7ef;border-radius:8px;overflow-wrap:anywhere}
