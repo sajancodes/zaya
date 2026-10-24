@@ -46,7 +46,8 @@ function send(path: string, kind: 'view' | 'download', platform = 'none') {
 }
 
 export function trackPage(path: string) {
-  if (preference() !== 'yes' || privacySignal() || path.startsWith('/admin') || lastPage === path) return;
+  if (path.startsWith('/admin')) { lastPage = ''; return; }
+  if (preference() !== 'yes' || privacySignal() || lastPage === path) return;
   lastPage = path;
   send(path, 'view');
 }

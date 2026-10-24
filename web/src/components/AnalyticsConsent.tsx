@@ -11,8 +11,8 @@ export const AnalyticsConsent: React.FC<{path:string}> = ({path}) => {
     return () => window.removeEventListener('storage', sync);
   }, []);
   useEffect(() => {
-    if (path.startsWith('/admin') || consent !== 'yes' || privacySignal()) return;
     trackPage(path);
+    if (path.startsWith('/admin') || consent !== 'yes' || privacySignal()) return;
     const onClick = (event: MouseEvent) => trackDownload(event, path);
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
