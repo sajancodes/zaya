@@ -119,11 +119,11 @@ export const App: React.FC<{initialPath?: string}> = ({initialPath}) => {
     <div className={currentPath.startsWith('/admin') ? 'site-shell admin-shell' : `site-shell premium-shell ${effectsPaused ? 'effects-paused' : ''} ${currentPath === '/' ? 'home-shell' : currentPath === '/download' ? 'download-shell' : ''}`}>
       {currentPath !== '/' && !currentPath.startsWith('/admin') && <CrystalAtmosphere />}
       {currentPath !== '/' && !currentPath.startsWith('/admin') && <button className="motion-control" aria-pressed={effectsPaused} onClick={() => setEffectsPaused(!effectsPaused)}>{effectsPaused ? 'Resume effects' : 'Pause effects'} <span aria-hidden="true">◇</span></button>}
-      <Navbar currentPath={currentPath} navigate={navigate} onOpenSearch={() => setIsSearchOpen(true)} />
+      {currentPath.startsWith('/admin') ? <header className="admin-header"><a href="/" className="admin-brand"><img src="/assets/zaya-logo.png" alt="" width="32" height="32"/>Zaya <span>Owner console</span></a><a href="/">Back to website ↗</a></header> : <Navbar currentPath={currentPath} navigate={navigate} onOpenSearch={() => setIsSearchOpen(true)} />}
       <main id="main-content" style={{ flex: 1 }}>
         {renderRoute()}
       </main>
-      <Footer navigate={navigate} />
+      {!currentPath.startsWith('/admin') && <Footer navigate={navigate} />}
       <AnalyticsConsent path={currentPath}/>
 
       {/* Global Search Modal */}

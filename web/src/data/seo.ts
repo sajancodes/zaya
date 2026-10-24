@@ -20,6 +20,7 @@ export function canonicalPath(path: string) {
 
 export function pageMetadata(path: string) {
   path = canonicalPath(path);
+  if (path === '/admin') return {title: 'Owner console | Zaya', description: 'Protected Zaya release and analytics dashboard.'};
   if (PUBLIC_PAGES[path]) return PUBLIC_PAGES[path];
   const key = path.replace(/^\/docs\//, '').replace(/^install\//, 'install-');
   const doc = path.startsWith('/docs/') ? DOCS_DATA[key] : undefined;

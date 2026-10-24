@@ -7,6 +7,8 @@ export const Admin: React.FC = () => {
   const [password, setPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
   const [metrics, setMetrics] = useState<AnalyticsMetrics | null>(null);
+  const [serviceError, setServiceError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [releases, setReleases] = useState<any[]>([]);
   useEffect(() => {
@@ -15,6 +17,7 @@ export const Admin: React.FC = () => {
 
   const fetchMetrics = () => {
     setIsLoading(true);
+    setServiceError('');
     fetch('/api/admin/metrics')
       .then((res) => {
         if (res.status === 401) {
@@ -30,6 +33,7 @@ export const Admin: React.FC = () => {
         setIsLoading(false);
       })
       .catch((err) => {
+        if (err.message !== 'Unauthorized') setServiceError('Unable to refresh dashboard. Check the connection and try again.');
         setIsLoading(false);
       });
   };
@@ -41,6 +45,7 @@ export const Admin: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
+    setIsSubmitting(true);
     try {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
@@ -51,11 +56,11 @@ export const Admin: React.FC = () => {
         setIsAuthenticated(true);
         fetchMetrics();
       } else {
-        setLoginError('Invalid admin credentials.');
+        setLoginError(res.status === 429 ? 'Too many attempts. Wait 5 minutes before trying again.' : res.status === 503 ? 'Admin access is not configured. Set a Production ADMIN_PASSWORD of at least 12 characters and redeploy.' : 'Username or password is incorrect.');
       }
     } catch {
       setLoginError('Could not reach backend.');
-    }
+    } finally { setIsSubmitting(false); }
   };
 
   const handleLogout = async () => {
@@ -73,10 +78,10 @@ export const Admin: React.FC = () => {
         <div className="container" style={{ maxWidth: '420px' }}>
           <div className="card" style={{ padding: '36px' }}>
             <h1 style={{ fontSize: '22px', color: '#ffffff', marginBottom: '8px', textAlign: 'center' }}>
-              Owner Analytics Login
+              Welcome back
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', marginBottom: '24px' }}>
-              Protected dashboard for Sajan Rai. Enter admin credentials to view anonymous analytics.
+              Sign in to manage releases and view anonymous usage.
             </p>
 
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -85,7 +90,7 @@ export const Admin: React.FC = () => {
                   Username
                 </label>
                 <input
-                  type="text"
+                  aria-label="Username" autoComplete="username" type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   style={{
@@ -106,7 +111,7 @@ export const Admin: React.FC = () => {
                   Password
                 </label>
                 <input
-                  type="password"
+                  aria-label="Password" autoComplete="current-password" type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   style={{
@@ -128,8 +133,8 @@ export const Admin: React.FC = () => {
                 </div>
               )}
 
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
-                Sign In to Dashboard
+              <button disabled={isSubmitting} type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
+                {isSubmitting ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
           </div>
@@ -145,10 +150,10 @@ export const Admin: React.FC = () => {
           <div>
             <div className="hero-tag">Owner Dashboard</div>
             <h1 className="section-title" style={{ textAlign: 'left', marginBottom: '4px' }}>
-              Telemetry & Distribution Analytics
+              Overview
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-              Anonymous installation events, download volume, and daily active heartbeats.
+              Your releases, downloads and installation activity in one place.
             </p>
           </div>
 
@@ -162,16 +167,18 @@ export const Admin: React.FC = () => {
           </div>
         </div>
 
-        <h2>Release management</h2>
+        <section className="admin-releases card"><h2>Release management</h2>
         <p>Deactivate a broken version to stop advertising it. Published binaries remain immutable and are not deleted.</p>
-        {releases.map(release => <p key={release.platform + release.version}>
+        {releases.map(release => <div className="admin-release-row" key={release.platform + release.version}>
           {release.platform} · {release.version} · {release.channel || 'stable'} · {release.active === false ? 'Pulled' : 'Active'}{' '}
           <button onClick={async () => {
             const active = release.active === false;
             const result = await fetch(`/api/admin/releases/${release.platform}/${release.version}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active})});
             if (result.ok) setReleases(rows => rows.map(r => r === release ? {...r,active} : r));
           }}>{release.active === false ? 'Reactivate' : 'Stop advertising'}</button>
-        </p>)}
+        </div>)}
+        </section>
+        {serviceError && <p role="alert" className="admin-error">{serviceError}</p>}
         {metrics && (
           <>
             {/* Top Stat Cards */}
@@ -207,7 +214,7 @@ export const Admin: React.FC = () => {
             </div>
 
             {/* Split Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px', marginBottom: '32px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '24px', marginBottom: '32px' }}>
               {/* Version Adoption */}
               <div className="card">
                 <h3 style={{ color: '#ffffff', fontSize: '16px', marginBottom: '16px' }}>Version Adoption</h3>

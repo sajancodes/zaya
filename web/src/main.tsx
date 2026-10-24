@@ -12,3 +12,5 @@ if (rootElement) {
     </React.StrictMode>
   );
 }
+
+import '../static/css/admin.css';
