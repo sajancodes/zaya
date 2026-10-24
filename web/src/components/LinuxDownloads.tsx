@@ -16,7 +16,7 @@ export const LinuxDownloads:React.FC<{release:ReleaseItem|undefined; loading:boo
       <div className="linux-formats" role="group" aria-label="Linux distribution and package format">{packages.map(item=><button key={item.format} type="button" aria-pressed={selected.format===item.format} onClick={()=>{setFormat(item.format);setCopied('');}}>{item.label}<small>{item.filename.endsWith('.tar.gz') ? '.tar.gz' : '.'+item.filename.split('.').pop()}</small></button>)}</div>
       <p className="linux-package-note">{selected.note}</p>
       <div className="download-file"><span>Version {release.version}</span><span>{selected.sizeFormatted} · x86-64</span></div>
-      <a className="btn btn-primary download-main-button" href={selected.downloadUrl}>Download {selected.label}<span aria-hidden="true">↓</span></a>
+      <a className="btn btn-primary download-main-button" href={selected.downloadUrl} download={selected.filename}>Download {selected.label}<span aria-hidden="true">↓</span></a>
       <p className="file-note">{selected.filename}</p>
       <details className="checksum-details"><summary>Verify this package · SHA-256</summary><code>{selected.sha256}</code><button className="small-button" onClick={async()=>{try{await navigator.clipboard.writeText(selected.sha256);setCopied('Checksum copied');}catch{setCopied('Copy the checksum above manually.');}}}>Copy checksum</button><span role="status">{copied}</span></details>
       <p>Install / launch:</p><div className="linux-install-commands">{selected.commands.map(command=><code key={command}>{command}</code>)}</div>
