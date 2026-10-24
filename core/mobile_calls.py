@@ -30,6 +30,7 @@ import uuid
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
+from core.runtime_paths import mutable_path
 
 from core import mobile_protocol as protocol
 
@@ -52,7 +53,7 @@ DEFAULT_QUIET_FROM, DEFAULT_QUIET_TO = 23, 7
 
 # Where the owner's tunable block lives; a module constant so tests can point it
 # at a fixture instead of the real config.
-CONFIG_PATH = Path(__file__).resolve().parents[1] / 'config' / 'api_keys.json'
+CONFIG_PATH = mutable_path(Path(__file__).resolve().parents[1] / 'config' / 'api_keys.json')
 
 
 @dataclass(frozen=True)

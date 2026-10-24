@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 import json
 import os
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import queue
 import subprocess
 import threading
@@ -27,7 +28,7 @@ from core.shell_session import terminate_tree
 from core.task_runtime import get_runtime
 from core.runtime_logging import log_line
 
-STORE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json'
+STORE_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json')
 ACTIVE = {'starting', 'planning', 'working', 'reviewing'}
 _HIDDEN = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
            if os.name == 'nt' else {'start_new_session': True})

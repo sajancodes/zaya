@@ -54,7 +54,7 @@ def prepare(app: Path, output: Path):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding='utf-8')
             path.chmod(0o755 if executable else 0o644)
-        write('DEBIAN/control', f'Package: zaya\nVersion: {deb_version}\nArchitecture: amd64\nMaintainer: Sajan Rai <ab4290025@gmail.com>\nSection: utils\nPriority: optional\nDepends: libportaudio2, libasound2 | libasound2t64, libpulse0, libegl1, libgl1, libdbus-1-3, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xinerama0, libxkbcommon-x11-0, gnome-keyring, xdg-utils, xclip, ffmpeg\nHomepage: https://zayaxyz.vercel.app\nDescription: Zaya personal AI assistant by Sajan Rai\n Native Linux candidate. Desktop automation requires a supported X11 session.\n Camera, microphone, keyring and clean installation require native verification.\n')
+        write('DEBIAN/control', f'Package: zaya\nVersion: {deb_version}\nArchitecture: amd64\nMaintainer: Sajan Rai <ab4290025@gmail.com>\nSection: utils\nPriority: optional\nDepends: libportaudio2, libasound2 | libasound2t64, libasound2-plugins, libpulse0, libegl1, libgles2, libgl1, libdbus-1-3, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xinerama0, libxkbcommon-x11-0, gnome-keyring, xdg-utils, xclip, ffmpeg\nHomepage: https://zayaxyz.vercel.app\nDescription: Zaya personal AI assistant by Sajan Rai\n Native Linux candidate. Desktop automation requires a supported X11 session.\n Camera, microphone, keyring and clean installation require native verification.\n')
         write('usr/bin/zaya', '#!/bin/sh\nexec /opt/zaya/Zaya "$@"\n', executable=True)
         write('usr/share/applications/zaya.desktop', '[Desktop Entry]\nType=Application\nName=Zaya\nComment=Personal AI assistant by Sajan Rai\nExec=/usr/bin/zaya\nIcon=zaya\nTerminal=false\nCategories=Utility;\n')
         icon = stage / 'usr/share/icons/hicolor/256x256/apps/zaya.png'
@@ -63,7 +63,7 @@ def prepare(app: Path, output: Path):
         with Image.open(ROOT / 'assets' / 'standby.png') as image:
             image.thumbnail((256, 256))
             image.save(icon, format='PNG')
-        subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
+        subprocess.run(['dpkg-deb', '-Zxz', '-z3', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     with artifact.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     manifest = {'platform':'linux', 'version':version, 'build':build, 'channel':data['channel'],

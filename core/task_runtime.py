@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from core import audit
 from core.event_bus import bus
 from core.tool_result import ToolResult
@@ -182,5 +183,5 @@ def get_runtime() -> TaskRuntime:
     global _runtime
     with _runtime_lock:
         if _runtime is None:
-            _runtime = TaskRuntime(Path(__file__).resolve().parent.parent / 'memory' / 'zaya_runtime.db')
+            _runtime = TaskRuntime(mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'zaya_runtime.db'))
     return _runtime

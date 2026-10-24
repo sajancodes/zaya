@@ -115,8 +115,9 @@ def get_base_dir():
 
 BASE_DIR        = get_base_dir()
 LIVE_CONNECT_TIMEOUT = 20.0
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+from core.runtime_paths import get_config_dir, get_resource_dir
+API_CONFIG_PATH = get_config_dir() / "api_keys.json"
+PROMPT_PATH     = get_resource_dir() / "core" / "prompt.txt"
 
 
 @asynccontextmanager

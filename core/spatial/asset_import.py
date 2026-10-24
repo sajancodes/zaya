@@ -9,13 +9,14 @@ import sqlite3
 import re
 from contextlib import closing
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from urllib.parse import urlparse,unquote
 from .schema import SpatialScene,SpatialPart
 
 MAX_IMPORT=32_000_000
 _lock=threading.Lock()
 _bundles={}
-ASSET_DB=Path(__file__).resolve().parents[2]/'memory'/'spatial_assets.db'
+ASSET_DB=mutable_path(Path(__file__).resolve().parents[2]/'memory'/'spatial_assets.db')
 
 
 def database():

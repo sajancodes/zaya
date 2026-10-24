@@ -19,7 +19,7 @@ jobs:
       - name: Install native build and desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libportaudio2 libasound2 libpulse0 libegl1 libgl1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 gnome-keyring xdg-utils xclip ffmpeg
+          sudo apt-get install -y xvfb libportaudio2 libasound2 libasound2-plugins libpulse0 libegl1 libgles2 libgl1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 gnome-keyring xdg-utils xclip ffmpeg
           python -m pip install -r requirements.txt pyinstaller pytest pip-audit mediapipe
       - name: Build spatial renderer
         working-directory: spatial_renderer

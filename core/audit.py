@@ -5,8 +5,9 @@ import os
 import re
 import threading
 from pathlib import Path
+from core.runtime_paths import get_user_data_dir
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = get_user_data_dir()
 _lock = threading.Lock()
 _secret_name = re.compile(r'key|token|secret|password|authorization|cookie|credential', re.I)
 

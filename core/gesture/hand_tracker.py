@@ -7,10 +7,11 @@ import base64
 import uuid
 import collections
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from .hand_model import normalize
 from .smoothing import LandmarkSmoother
 
-DEFAULT_MODEL=Path(__file__).resolve().parents[2]/'models'/'hand_landmarker.task'
+DEFAULT_MODEL=mutable_path(Path(__file__).resolve().parents[2]/'models'/'hand_landmarker.task')
 
 
 class HandTracker:

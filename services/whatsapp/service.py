@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import shutil
 import threading
 import time
@@ -194,5 +195,5 @@ def get_service() -> WhatsAppService:
     global _service
     with _lock:
         if _service is None:
-            _service = WhatsAppService(WhatsAppStore(Path(__file__).resolve().parents[2] / 'memory' / 'zaya_runtime.db'))
+            _service = WhatsAppService(WhatsAppStore(mutable_path(Path(__file__).resolve().parents[2] / 'memory' / 'zaya_runtime.db')))
     return _service

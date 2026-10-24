@@ -68,12 +68,30 @@ def get_config_dir() -> Path:
     return get_user_data_dir() / "config"
 
 
+def mutable_path(legacy_path: Path) -> Path:
+    """Keep legacy locations except in root-owned frozen Linux installations."""
+    path = Path(legacy_path)
+    if is_frozen() and sys.platform == 'linux':
+        for root in (get_resource_dir(), get_app_root()):
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                continue
+            if relative.parts and relative.parts[0] in {'memory', 'config', 'logs', 'models'}:
+                return get_user_data_dir() / relative
+    return path
+
+
 def get_memory_dir() -> Path:
     return get_user_data_dir() / "memory"
 
 
 def get_log_dir() -> Path:
     return get_user_data_dir() / "logs"
+
+
+def get_runtime_dir() -> Path:
+    return get_log_dir() / 'runtime'
 
 
 def get_cache_dir() -> Path:

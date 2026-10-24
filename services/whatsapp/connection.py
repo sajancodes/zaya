@@ -1,8 +1,9 @@
 """Private pointer to the exact Hermes linked-device session; never copy keys."""
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 
-CONNECTION_PATH = Path(__file__).resolve().parents[2] / 'config' / 'hermes_connection.json'
+CONNECTION_PATH = mutable_path(Path(__file__).resolve().parents[2] / 'config' / 'hermes_connection.json')
 
 
 def normalize_account(value: str) -> str:

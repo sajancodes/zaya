@@ -13,12 +13,13 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from typing import Any, Callable
 from memory.fact_policy import confidence as fact_confidence, expiry as fact_expiry
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = Path(__file__).resolve().parent / "knowledge.db"
+_DEFAULT_DB_PATH = mutable_path(Path(__file__).resolve().parent / "knowledge.db")
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import re
 import threading
 import time
@@ -31,7 +32,7 @@ from core.tool_result import ToolResult, normalize
 
 logger = logging.getLogger(__name__)
 
-STORE_PATH = Path(__file__).resolve().parent.parent / "memory" / "missions.json"
+STORE_PATH = mutable_path(Path(__file__).resolve().parent.parent / "memory" / "missions.json")
 
 MAX_STEPS = 5
 MAX_CHECKS = 4

@@ -71,7 +71,8 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR   = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+from core.runtime_paths import get_config_dir
+CONFIG_DIR = get_config_dir()
 API_FILE   = CONFIG_DIR / "api_keys.json"
 
 

@@ -8,9 +8,10 @@ import sys
 import threading
 
 import psutil
+from core.runtime_paths import get_log_dir
 
 ROOT = Path(__file__).resolve().parents[1]
-PID_FILE = ROOT / 'logs' / 'desktop-process.json'
+PID_FILE = get_log_dir() / 'desktop-process.json'
 _launch_lock = threading.Lock()
 _launched_process = None
 
@@ -21,7 +22,7 @@ def python_windowless():
 
 
 def spawn_fixed(arguments, *, windowless=True):
-    log = ROOT / 'logs' / 'desktop-launcher.log'
+    log = get_log_dir() / 'desktop-launcher.log'
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open('ab') as output:
         executable = python_windowless() if windowless else str(Path(sys.executable).with_name('python.exe'))

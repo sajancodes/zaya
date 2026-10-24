@@ -1,9 +1,10 @@
 import hashlib
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from .schema import SpatialScene
 
-ROOT=Path(__file__).resolve().parents[2]/'memory'/'spatial_cache'
+ROOT=mutable_path(Path(__file__).resolve().parents[2]/'memory'/'spatial_cache')
 
 
 def key(generator,parameters):

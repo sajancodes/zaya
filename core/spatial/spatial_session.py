@@ -4,6 +4,7 @@ import math
 import time
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from .schema import SpatialScene
 from .scene_patcher import apply_patch
 from .scene_graph import part_context
@@ -234,4 +235,4 @@ class SpatialSession:
             self.publish('scene.create',self.snapshot())
 
 
-session=SpatialSession(Path(__file__).resolve().parents[2]/'memory'/'spatial_session.json')
+session=SpatialSession(mutable_path(Path(__file__).resolve().parents[2]/'memory'/'spatial_session.json'))

@@ -2,6 +2,7 @@
 from datetime import datetime
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import platform
 import shutil
 import sqlite3
@@ -10,7 +11,7 @@ import threading
 import time
 import uuid
 
-DB_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'reminders.db'
+DB_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'reminders.db')
 
 
 class ReminderStore:

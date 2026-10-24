@@ -1,9 +1,10 @@
 """Local-only project aliases, kept separate from personal prompt memory."""
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import time
 
-INDEX_PATH = Path(__file__).resolve().parent / 'projects.json'
+INDEX_PATH = mutable_path(Path(__file__).resolve().parent / 'projects.json')
 
 
 def register_project(path: str, name: str, aliases: list[str] | None = None, **metadata) -> dict:
