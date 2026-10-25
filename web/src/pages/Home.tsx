@@ -20,8 +20,8 @@ export const Home: React.FC<{navigate:(path:string)=>void; latestVersion?:string
     <section className="home-hero wrap">
       <div className="hero-copy">
         <a className="release-pill" href="/releases"><span className="status-dot"/> Windows beta {windowsBeta?.version || '0.5.0'} is here <span aria-hidden="true">↗</span></a>
-        <p className="eyebrow">Meet Zaya. Your desktop companion.</p>
-        <h1>Talk it through.<br/><em>Get things done.</em></h1>
+        <p className="eyebrow">Meet Zaya. Your everyday AI companion.</p>
+        <h1>Talk naturally.<br/><em>Make things happen.</em></h1>
         <p className="hero-description">A personal AI assistant for your Windows desktop. Talk naturally, get help with what’s on screen, and work on projects together—with you in control.</p>
         <div className="action-row"><a className="btn btn-primary" href="/download" aria-label="Download Zaya for Windows or Linux">Download <DownloadPlatforms /></a><a className="text-link" href="#meet-zaya">Take a closer look <span aria-hidden="true">↓</span></a></div>
         <p className="hero-note">Windows 10/11 · Own AI provider key · Early, unsigned beta</p>
