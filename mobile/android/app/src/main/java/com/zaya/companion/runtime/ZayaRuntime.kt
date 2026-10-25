@@ -96,7 +96,7 @@ class ZayaRuntime(
         .build()
 
     @Volatile
-    private var control: ZayaSocket? = null
+    internal var control: ZayaSocket? = null
 
     @Volatile
     private var voice: ZayaSocket? = null
@@ -145,6 +145,8 @@ class ZayaRuntime(
         )
     }
     val actionRegistry by lazy { actionExecutor.registry }
+    val voiceInput by lazy { com.zaya.companion.audio.VoiceInputManager(context) }
+    val voiceOutput by lazy { com.zaya.companion.audio.VoiceOutputManager(context) }
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -578,6 +580,101 @@ class ZayaRuntime(
     suspend fun send(text: String): Boolean {
         val clean = text.trim()
         val lower = clean.lowercase()
+
+        // 0. Conversational Follow-Up Resolution & Audio Loop Prevention
+        val isTaskRunning = taskCoordinator.activeTask.value?.isRunning == true
+        val pendingConsequential = taskCoordinator.activeTask.value?.steps?.any { it.status == com.zaya.companion.action.StepStatus.PENDING && it.isConsequential } == true
+        val intent = com.zaya.companion.runtime.ConversationalResolver.resolve(
+            rawInput = clean,
+            chatHistory = model.chat.value,
+            isTaskActive = isTaskRunning,
+            pendingActionIsConsequential = pendingConsequential
+        )
+
+        when (intent) {
+            is com.zaya.companion.runtime.ConversationalIntent.StopSpeech -> {
+                voiceOutput.stop()
+                model.notice("Speech silenced.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.CancelTask -> {
+                val active = taskCoordinator.activeTask.value
+                if (active != null) {
+                    taskCoordinator.cancelTask(active.taskId, intent.reason)
+                    model.notice("Task stopped by user.")
+                    return true
+                }
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Repeat -> {
+                return send("Could you explain that again? Previous response: ${intent.previousAnswer}")
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Summarize -> {
+                return send("Give me a concise 1-2 sentence summary of: ${intent.previousAnswer}")
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.SelectOption -> {
+                if (intent.requiresConfirmation) {
+                    model.beginCommand(clean)
+                    model.notice("Please explicitly confirm '${intent.optionText}' before I proceed with permanent changes.")
+                    return true
+                }
+                return send(intent.optionText)
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Continue -> {
+                if (intent.requiresConfirmation) {
+                    model.beginCommand(clean)
+                    model.notice("Please explicitly confirm the pending action before continuing.")
+                    return true
+                }
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Remember -> {
+                val res = memoryStore.remember(
+                    key = intent.content.take(60),
+                    value = intent.content,
+                    category = com.zaya.companion.memory.MemoryCategory.PREFERENCE,
+                    explicitConsent = true
+                )
+                model.beginCommand(clean)
+                when (res) {
+                    is com.zaya.companion.memory.MemorySaveResult.Saved -> model.notice(res.message)
+                    is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> model.notice("Blocked: ${res.reason}")
+                    is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> model.notice(res.prompt)
+                    is com.zaya.companion.memory.MemorySaveResult.Invalid -> model.notice(res.reason)
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.QueryMemory -> {
+                val found = memoryStore.getRelevantMemories(intent.query.ifBlank { "preference" })
+                model.beginCommand(clean)
+                if (found.isEmpty()) {
+                    model.notice("I don't have anything stored about that yet.")
+                } else {
+                    val summary = found.joinToString("\n") { "• [${it.category.displayName}] ${it.key}: ${it.value}" }
+                    model.notice("Here is what I remember:\n$summary")
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.ForgetMemory -> {
+                model.beginCommand(clean)
+                model.notice("Understood, I will not store this information.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.StopUsingMemory -> {
+                val stopped = memoryStore.deactivateMemory(intent.target)
+                model.beginCommand(clean)
+                if (stopped) {
+                    model.notice("Understood. I have stopped using '${intent.target}' in future conversations.")
+                } else {
+                    model.notice("I didn't find active memories for '${intent.target}', but I will avoid using it.")
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.ClearMemories -> {
+                model.beginCommand(clean)
+                model.notice("Are you sure you want to clear all saved memories? This will delete all stored preferences. Say 'confirm clear memories' to proceed.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Normal -> { /* Normal execution */ }
+        }
 
         // 1. Task Cancellation Gate
         if (taskCoordinator.activeTask.value?.isRunning == true) {
@@ -1062,7 +1159,7 @@ class ZayaRuntime(
                 control?.send(report.toString())
             }
             "volume" -> {
-                val vol = payload.num("percent", 50)
+                val vol = payload.num("percent", 50.0).toInt()
                 hardwareController.setMediaVolume(vol)
             }
         }
@@ -1294,7 +1391,7 @@ class ZayaRuntime(
                     .put("type", "pc.command")
                     .put("payload", JSONObject().put("command", action.command).put("parameters", JSONObject(action.parameters)))
                     .put("timestamp", System.currentTimeMillis() / 1000.0)
-                socket?.send(pcCmdMsg.toString())
+                control?.send(pcCmdMsg.toString())
             }
             val report = JSONObject()
                 .put("type", Protocol.Control.ACTION_RESULT)

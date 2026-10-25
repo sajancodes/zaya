@@ -21,6 +21,9 @@ import com.zaya.companion.service.ScreenCaptureManager
 import com.zaya.companion.service.ScreenFrameResult
 import com.zaya.companion.service.VisualAnalysis
 import com.zaya.companion.service.ZayaNotificationListener
+import com.zaya.companion.service.ZayaInteractionService
+import com.zaya.companion.service.ScrollOutcome
+import com.zaya.companion.service.TapOutcome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -103,12 +106,8 @@ class ActionExecutor(
             is AndroidAction.DescribeScreen -> executeDescribeScreen(action)
             is AndroidAction.ExtractVisibleText -> executeExtractVisibleText(action)
             is AndroidAction.SummarizeScreen -> executeSummarizeScreen(action)
-            is AndroidAction.ScrollScreen -> {
-                ActionResult.unsupported("Screen scrolling requires Accessibility Service authorization.")
-            }
-            is AndroidAction.TapScreen -> {
-                ActionResult.unsupported("Touch gestures require Accessibility Service authorization.")
-            }
+            is AndroidAction.ScrollScreen -> executeScrollScreen(action)
+            is AndroidAction.TapScreen -> executeTapScreen(action)
             is AndroidAction.RunTask -> executeRunTask(action)
             is AndroidAction.CancelTask -> executeCancelTask(action)
             is AndroidAction.PlanAndExecuteTask -> executePlanAndExecuteTask(action)
@@ -134,6 +133,10 @@ class ActionExecutor(
             is AndroidAction.WriteFile -> executeWriteFile(action)
             is AndroidAction.Think -> executeThink(action)
             is AndroidAction.LookupKnowledge -> executeLookupKnowledge(action)
+            AndroidAction.NavigateBack -> executeNavigateBack()
+            AndroidAction.NavigateHome -> executeNavigateHome()
+            AndroidAction.CloseOverlay -> executeCloseOverlay()
+            is AndroidAction.NavigateReel -> executeNavigateReel(action)
         }
     }
 
@@ -1052,6 +1055,120 @@ class ActionExecutor(
         }
     }
 
+    private suspend fun executeScrollScreen(action: AndroidAction.ScrollScreen): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService == null || !ZayaInteractionService.isServiceEnabled()) {
+            return ActionResult.permissionRequired(
+                permission = "android.settings.ACCESSIBILITY_SETTINGS",
+                spoken = "Accessibility Service authorization is required to scroll the screen."
+            )
+        }
+        return when (val outcome = interactionService.scroll(action.direction, action.count, action.distance)) {
+            is ScrollOutcome.Success -> {
+                ActionResult.success(
+                    spoken = "Scrolled ${outcome.direction} ${outcome.count} time(s).",
+                    data = mapOf("direction" to outcome.direction, "count" to outcome.count)
+                )
+            }
+            is ScrollOutcome.Cancelled -> {
+                ActionResult.cancelled("Scroll was cancelled after ${outcome.completedCount} actions.")
+            }
+            is ScrollOutcome.Failed -> {
+                ActionResult.failure(outcome.reason, error = "scroll_failed")
+            }
+        }
+    }
+
+    private suspend fun executeTapScreen(action: AndroidAction.TapScreen): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService == null || !ZayaInteractionService.isServiceEnabled()) {
+            return ActionResult.permissionRequired(
+                permission = "android.settings.ACCESSIBILITY_SETTINGS",
+                spoken = "Accessibility Service authorization is required to interact with on-screen controls."
+            )
+        }
+        if (action.label != null) {
+            return when (val outcome = interactionService.tapByLabel(action.label, action.confirmed)) {
+                is TapOutcome.Success -> {
+                    ActionResult.success(
+                        spoken = "Tapped '${outcome.target}'.",
+                        data = mapOf("target" to outcome.target)
+                    )
+                }
+                is TapOutcome.RequiresConfirmation -> {
+                    ActionResult.needsConfirmation(
+                        spoken = "Please confirm tapping '${outcome.label}': ${outcome.reason}",
+                        actionId = "tap_screen",
+                        payload = mapOf("label" to outcome.label, "reason" to outcome.reason)
+                    )
+                }
+                is TapOutcome.SecurityRestricted -> {
+                    ActionResult.failure("Security restriction: ${outcome.reason}", error = "security_restricted")
+                }
+                is TapOutcome.NotFound -> {
+                    ActionResult.failure("Could not locate '${outcome.label}' on the visible screen.", error = "not_found")
+                }
+                is TapOutcome.Ambiguous -> {
+                    ActionResult.failure("Found multiple (${outcome.count}) controls matching '${outcome.label}'. Please be more specific.", error = "ambiguous")
+                }
+                is TapOutcome.Failed -> {
+                    ActionResult.failure("Tap failed: ${outcome.reason}", error = "tap_failed")
+                }
+            }
+        } else if (action.x != null && action.y != null) {
+            val ok = interactionService.tapCoordinates(action.x, action.y)
+            return if (ok) {
+                ActionResult.success("Tapped coordinates (${action.x}, ${action.y}).", data = mapOf("x" to action.x, "y" to action.y))
+            } else {
+                ActionResult.failure("Failed to tap coordinates (${action.x}, ${action.y}). Out of bounds or gesture failed.", error = "gesture_failed")
+            }
+        } else {
+            return ActionResult.failure("TapScreen requires either a target label or (x, y) coordinates.", error = "invalid_arguments")
+        }
+    }
+
+    private fun executeNavigateBack(): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService != null && interactionService.navigateBack()) {
+            return ActionResult.success("Navigated back.")
+        }
+        return ActionResult.permissionRequired("android.settings.ACCESSIBILITY_SETTINGS", "Back navigation requires Accessibility Service authorization.")
+    }
+
+    private fun executeNavigateHome(): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService != null && interactionService.navigateHome()) {
+            return ActionResult.success("Navigated to home screen.")
+        }
+        return ActionResult.permissionRequired("android.settings.ACCESSIBILITY_SETTINGS", "Home navigation requires Accessibility Service authorization.")
+    }
+
+    private fun executeCloseOverlay(): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService != null && interactionService.navigateBack()) {
+            return ActionResult.success("Closed visible overlay.")
+        }
+        return ActionResult.permissionRequired("android.settings.ACCESSIBILITY_SETTINGS", "Closing overlay requires Accessibility Service authorization.")
+    }
+
+    private suspend fun executeNavigateReel(action: AndroidAction.NavigateReel): ActionResult {
+        val interactionService = ZayaInteractionService.getInstance()
+        if (interactionService == null || !ZayaInteractionService.isServiceEnabled()) {
+            return ActionResult.permissionRequired("android.settings.ACCESSIBILITY_SETTINGS", "Reel navigation requires Accessibility Service authorization.")
+        }
+        return when (val outcome = interactionService.navigateReel(action.action, action.count)) {
+            is ScrollOutcome.Success -> {
+                ActionResult.success("Navigated ${action.action} reel.", data = mapOf("action" to action.action, "count" to outcome.count))
+            }
+            is ScrollOutcome.Cancelled -> {
+                ActionResult.cancelled("Reel navigation cancelled.")
+            }
+            is ScrollOutcome.Failed -> {
+                ActionResult.failure("Reel navigation failed: ${outcome.reason}", error = "navigation_failed")
+            }
+        }
+    }
+
     // ── Multi-Step Tasks & Cancellation ─────────────────────────────────────
 
     private suspend fun executeRunTask(action: AndroidAction.RunTask): ActionResult {
@@ -1307,8 +1424,8 @@ class ActionExecutor(
     }
 
     private fun executeGetDailyBriefing(): ActionResult {
-        val activeCount = taskCoordinator.getActiveTask()?.let { 1 } ?: 0
-        val unreadNotifs = com.zaya.companion.service.ZayaNotificationListener.getRecentNotifications().size
+        val activeCount = taskCoordinator.activeTask.value?.let { 1 } ?: 0
+        val unreadNotifs = com.zaya.companion.service.ZayaNotificationListener.getActiveNotifications(context).size
         val briefing = systemUtils.getDailyBriefing(activeCount, unreadNotifs)
         val speech = briefing["spoken_briefing"] as? String ?: "Briefing compiled successfully."
         return ActionResult.success(speech, briefing)
@@ -1436,19 +1553,40 @@ class ActionExecutor(
     }
 
     private fun executeExecutePcCommand(action: AndroidAction.ExecutePcCommand): ActionResult {
-        if (!action.confirmed) {
+        val resource = action.parameters["path"] as? String
+            ?: action.parameters["process_name"] as? String
+            ?: action.parameters["app_id"] as? String
+            ?: "PC resource"
+        val isConsequential = action.command in listOf("write_file", "terminate_process", "delete_file", "install_software")
+        val sideEffects = when (action.command) {
+            "write_file" -> "Modifying or overwriting file at '$resource'"
+            "terminate_process" -> "Terminating running process '$resource'"
+            else -> "Executing remote command '${action.command}' on paired PC"
+        }
+        val isReversible = false
+
+        if (!action.confirmed && isConsequential) {
             return ActionResult.needsConfirmation(
-                spoken = "Do you want me to execute the remote PC command '${action.command}'?",
+                spoken = "Confirmation required: Do you approve executing '${action.command}' on $resource? Potential side effect: $sideEffects.",
                 actionId = "execute_pc_command",
                 payload = mapOf(
-                    "command" to action.command,
-                    "parameters" to action.parameters
+                    "target_pc" to "Paired PC",
+                    "action" to action.command,
+                    "resource" to resource,
+                    "parameters" to action.parameters,
+                    "potential_side_effects" to sideEffects,
+                    "reversible" to isReversible
                 )
             )
         }
         return ActionResult.success(
             spoken = "Dispatched remote PC command '${action.command}'.",
-            data = mapOf("command" to action.command, "parameters" to action.parameters, "relayed" to true)
+            data = mapOf(
+                "command" to action.command,
+                "parameters" to action.parameters,
+                "resource" to resource,
+                "relayed" to true
+            )
         )
     }
 

@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,6 +50,7 @@ import com.zaya.companion.ui.KeyValue
 import com.zaya.companion.ui.Note
 import com.zaya.companion.ui.OutlinedToggle
 import com.zaya.companion.ui.SectionCard
+import com.zaya.companion.ui.StatusChip
 import com.zaya.companion.ui.theme.ZayaAccent
 import kotlinx.coroutines.launch
 
@@ -276,6 +279,11 @@ fun PersonalMemoryCard(runtime: ZayaRuntime) {
                                         com.zaya.companion.memory.MemoryCategory.ROUTINE -> ZayaAccent.amber
                                         com.zaya.companion.memory.MemoryCategory.CORRECTION -> ZayaAccent.red
                                         com.zaya.companion.memory.MemoryCategory.PREFERENCE -> ZayaAccent.quiet
+                                        com.zaya.companion.memory.MemoryCategory.PROJECT_GOAL -> ZayaAccent.blue
+                                        com.zaya.companion.memory.MemoryCategory.INSTRUCTION -> ZayaAccent.amber
+                                        com.zaya.companion.memory.MemoryCategory.FACT -> ZayaAccent.green
+                                        com.zaya.companion.memory.MemoryCategory.DECISION -> ZayaAccent.red
+                                        com.zaya.companion.memory.MemoryCategory.TASK_SUMMARY -> ZayaAccent.quiet
                                     }
                                 )
                                 Spacer(Modifier.width(8.dp))

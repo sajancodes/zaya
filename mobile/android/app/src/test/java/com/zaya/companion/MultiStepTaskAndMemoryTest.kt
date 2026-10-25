@@ -11,6 +11,7 @@ import com.zaya.companion.action.TaskOverallStatus
 import com.zaya.companion.action.TaskPlanner
 import com.zaya.companion.action.TaskStep
 import com.zaya.companion.memory.MemoryCategory
+import com.zaya.companion.memory.MemorySaveResult
 import com.zaya.companion.memory.PersonalMemory
 import com.zaya.companion.memory.PersonalMemoryStore
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,14 +56,14 @@ class MultiStepTaskAndMemoryTest {
         )
         state = state.copy(
             steps = listOf(step1, step2),
-            status = TaskOverallStatus.COMPLETED
+            overallStatus = TaskOverallStatus.COMPLETED
         )
 
         val report = TaskExecutionReport.fromState(state)
-        assertEquals(2, report.completedSteps.size)
-        assertEquals(0, report.failedSteps.size)
-        assertEquals(0, report.skippedSteps.size)
-        assertEquals(0, report.cancelledSteps.size)
+        assertEquals(2, report.completedSteps)
+        assertEquals(0, report.failedSteps)
+        assertEquals(0, report.skippedSteps)
+        assertEquals(0, report.cancelledSteps)
         assertEquals("Task completed successfully.", report.summary)
         assertTrue(state.isTerminal)
     }
@@ -91,14 +92,14 @@ class MultiStepTaskAndMemoryTest {
 
         state = state.copy(
             steps = listOf(s1, s2, s3),
-            status = TaskOverallStatus.FAILED,
+            overallStatus = TaskOverallStatus.FAILED,
             failureReason = "App not installed"
         )
 
         val report = TaskExecutionReport.fromState(state)
-        assertEquals(1, report.completedSteps.size)
-        assertEquals(1, report.failedSteps.size)
-        assertEquals(1, report.skippedSteps.size)
+        assertEquals(1, report.completedSteps)
+        assertEquals(1, report.failedSteps)
+        assertEquals(1, report.skippedSteps)
         assertTrue(report.summary.contains("Step 2 failed"))
         assertFalse("Task should not claim overall success", state.status == TaskOverallStatus.COMPLETED)
     }
@@ -128,7 +129,7 @@ class MultiStepTaskAndMemoryTest {
 
         val report = TaskExecutionReport.fromState(state)
         assertEquals(ActionResultStatus.PERMISSION_REQUIRED, state.steps[0].result?.status)
-        assertEquals(1, report.failedSteps.size)
+        assertEquals(1, report.failedSteps)
         assertTrue(report.summary.contains("permission"))
     }
 
@@ -145,8 +146,8 @@ class MultiStepTaskAndMemoryTest {
 
         val report = TaskExecutionReport.fromState(state)
         assertEquals(TaskOverallStatus.CANCELLED, state.status)
-        assertEquals(0, report.completedSteps.size)
-        assertEquals(2, report.cancelledSteps.size)
+        assertEquals(0, report.completedSteps)
+        assertEquals(2, report.cancelledSteps)
         assertTrue(report.summary.contains("cancelled"))
     }
 
@@ -166,8 +167,8 @@ class MultiStepTaskAndMemoryTest {
         )
 
         val report = TaskExecutionReport.fromState(state)
-        assertEquals(1, report.completedSteps.size)
-        assertEquals(2, report.cancelledSteps.size)
+        assertEquals(1, report.completedSteps)
+        assertEquals(2, report.cancelledSteps)
         assertTrue(report.summary.contains("partially completed before cancellation"))
     }
 
@@ -231,9 +232,9 @@ class MultiStepTaskAndMemoryTest {
         )
 
         val report = TaskExecutionReport.fromState(state)
-        assertEquals(1, report.completedSteps.size)
-        assertEquals(1, report.failedSteps.size)
-        assertEquals(1, report.skippedSteps.size)
+        assertEquals(1, report.completedSteps)
+        assertEquals(1, report.failedSteps)
+        assertEquals(1, report.skippedSteps)
         assertFalse("Must not report success", report.summary.contains("completed successfully"))
         assertTrue(report.summary.contains("Step 2 failed"))
     }
@@ -251,7 +252,7 @@ class MultiStepTaskAndMemoryTest {
             explicitConsent = true
         )
 
-        assertTrue(res is PersonalMemoryStore.MemorySaveResult.Saved)
+        assertTrue(res is MemorySaveResult.Saved)
         val memories = store.getAllMemories()
         assertEquals(1, memories.size)
         assertEquals("response_style", memories[0].key)
@@ -312,6 +313,7 @@ class MultiStepTaskAndMemoryTest {
     }
 
     // 12. Prevention of sensitive or explicitly excluded data being saved
+    // 12. Prevention of sensitive or explicitly excluded data being saved
     @Test
     fun `test 12 prevention of sensitive data being saved`() = runTest {
         val tempDir = Files.createTempDirectory("zaya_memory_test_12").toFile()
@@ -319,19 +321,19 @@ class MultiStepTaskAndMemoryTest {
 
         // Password attempt
         val res1 = store.remember("my_password", "Secret1234!", MemoryCategory.PREFERENCE, true)
-        assertTrue("Password must be blocked", res1 is PersonalMemoryStore.MemorySaveResult.BlockedSensitive)
+        assertTrue("Password must be blocked", res1 is MemorySaveResult.SensitiveDataBlocked)
 
         // Credit card / CVV attempt
         val res2 = store.remember("card_details", "cvv is 456", MemoryCategory.PREFERENCE, true)
-        assertTrue("CVV/Card details must be blocked", res2 is PersonalMemoryStore.MemorySaveResult.BlockedSensitive)
+        assertTrue("CVV/Card details must be blocked", res2 is MemorySaveResult.SensitiveDataBlocked)
 
         // PIN attempt
         val res3 = store.remember("atm_pin", "1234", MemoryCategory.PREFERENCE, true)
-        assertTrue("PIN must be blocked", res3 is PersonalMemoryStore.MemorySaveResult.BlockedSensitive)
+        assertTrue("PIN must be blocked", res3 is MemorySaveResult.SensitiveDataBlocked)
 
         // API Key attempt
         val res4 = store.remember("gemini_api_key", "AIzaSyTest123", MemoryCategory.PREFERENCE, true)
-        assertTrue("API key must be blocked", res4 is PersonalMemoryStore.MemorySaveResult.BlockedSensitive)
+        assertTrue("API key must be blocked", res4 is MemorySaveResult.SensitiveDataBlocked)
 
         // Ensure nothing was saved
         assertEquals(0, store.getAllMemories().size)
@@ -343,15 +345,15 @@ class MultiStepTaskAndMemoryTest {
     @Test
     fun `test 13 task interruption and safe recovery without auto resuming consequential steps`() {
         val steps = listOf(
-            TaskStep("1", "Check Wi-Fi", "check_wifi", emptyMap(), status = StepStatus.COMPLETED),
-            TaskStep("2", "Send SMS to Mom", "compose_sms", mapOf("recipient" to "Mom", "text" to "I'm on my way"), status = StepStatus.PENDING)
+            TaskStep(0, "open_settings", "Check Wi-Fi", AndroidAction.OpenSystemSettings("wifi"), status = StepStatus.COMPLETED),
+            TaskStep(1, "compose_sms", "Send SMS to Mom", AndroidAction.ComposeSms("Mom", "I'm on my way"), status = StepStatus.PENDING, isConsequential = true)
         )
         // Task was running when process was interrupted
         val interruptedState = MultiStepTaskState(
             taskId = "task_test_13",
-            goal = "Send message to Mom",
+            originalGoal = "Send message to Mom",
             steps = steps,
-            status = TaskOverallStatus.PAUSED
+            overallStatus = TaskOverallStatus.NOT_STARTED
         )
 
         // Consequential step (compose_sms) must NOT auto-execute upon recovery
@@ -360,7 +362,7 @@ class MultiStepTaskAndMemoryTest {
         assertEquals("compose_sms", pendingConsequential[0].actionId)
 
         // Policy check: Consequential steps require explicit user re-confirmation before resumption
-        assertTrue(pendingConsequential[0].requiresConfirmation)
+        assertTrue(pendingConsequential[0].action.requiresConfirmation)
     }
 
     // 14. Confirmation before consequential external actions
@@ -370,12 +372,13 @@ class MultiStepTaskAndMemoryTest {
         assertTrue("ComposeSms is consequential and must require confirmation", smsAction.requiresConfirmation)
         assertEquals(ActionRisk.CRITICAL, smsAction.risk)
 
-        val replyAction = AndroidAction.ReplyToNotification("key_999", "I agree")
+        val replyAction = AndroidAction.ReplyToNotification(notificationKey = "key_999", text = "I agree")
         assertTrue("ReplyToNotification is consequential and must require confirmation", replyAction.requiresConfirmation)
         assertEquals(ActionRisk.HIGH, replyAction.risk)
 
-        val phoneCallAction = AndroidAction.ManageCall("answer", "Mom")
-        assertEquals(ActionRisk.CRITICAL, phoneCallAction.risk)
+        val phoneCallAction = AndroidAction.InitiateCall("Mom")
+        assertEquals(ActionRisk.HIGH, phoneCallAction.risk)
+        assertTrue(phoneCallAction.requiresConfirmation)
 
         val flashlightAction = AndroidAction.SetFlashlight(true)
         assertFalse("SetFlashlight is not consequential and does not require confirmation", flashlightAction.requiresConfirmation)

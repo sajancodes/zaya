@@ -130,4 +130,65 @@ class ScreenUnderstandingTest {
         assertEquals("PERMISSION_REQUIRED", json.getString("status"))
         assertEquals("android.permission.MEDIA_PROJECTION", json.getString("error"))
     }
+
+    @Test
+    fun `screen interaction actions classify as expected risk`() {
+        val scroll = AndroidAction.ScrollScreen(direction = "down", count = 2)
+        assertEquals("scroll_screen", scroll.actionId)
+        assertEquals(ActionRisk.MEDIUM, scroll.risk)
+        assertEquals("down", scroll.direction)
+        assertEquals(2, scroll.count)
+
+        val tap = AndroidAction.TapScreen(label = "Confirm", confirmed = false)
+        assertEquals("tap_screen", tap.actionId)
+        assertEquals(ActionRisk.MEDIUM, tap.risk)
+        assertEquals("Confirm", tap.label)
+        assertFalse(tap.confirmed)
+
+        val back = AndroidAction.NavigateBack
+        assertEquals("navigate_back", back.actionId)
+        assertEquals(ActionRisk.LOW, back.risk)
+
+        val home = AndroidAction.NavigateHome
+        assertEquals("navigate_home", home.actionId)
+        assertEquals(ActionRisk.LOW, home.risk)
+
+        val reel = AndroidAction.NavigateReel(action = "next")
+        assertEquals("navigate_reel", reel.actionId)
+        assertEquals(ActionRisk.MEDIUM, reel.risk)
+    }
+
+    @Test
+    fun `screen snapshot data model preserves structure and flags password presence`() {
+        val snapshot = com.zaya.companion.service.ScreenSnapshot(
+            packageName = "com.android.settings",
+            windowTitle = "Settings",
+            visibleTexts = listOf("Wi-Fi", "Bluetooth", "Display"),
+            interactiveLabels = listOf("Wi-Fi", "Bluetooth"),
+            hasPasswordFields = true,
+            timestamp = 1718000000000L
+        )
+
+        assertEquals("com.android.settings", snapshot.packageName)
+        assertEquals(3, snapshot.visibleTexts.size)
+        assertEquals(2, snapshot.interactiveLabels.size)
+        assertTrue("Snapshot must indicate presence of password fields without exposing text", snapshot.hasPasswordFields)
+    }
+
+    @Test
+    fun `tap outcomes enforce security restrictions and confirmation rules`() {
+        val reqConf = com.zaya.companion.service.TapOutcome.RequiresConfirmation(
+            label = "Delete Account",
+            reason = "Permanent account deletion"
+        )
+        assertEquals("Delete Account", reqConf.label)
+
+        val secRestricted = com.zaya.companion.service.TapOutcome.SecurityRestricted(
+            reason = "Direct interaction with password field restricted"
+        )
+        assertTrue(secRestricted.reason.contains("password"))
+
+        val notFound = com.zaya.companion.service.TapOutcome.NotFound("Submit")
+        assertEquals("Submit", notFound.label)
+    }
 }

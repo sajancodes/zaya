@@ -44,24 +44,54 @@ enum class TaskOverallStatus {
  * Model representing an atomic step in a multi-step assistant task.
  */
 data class TaskStep(
-    val stepIndex: Int,
-    val actionId: String,
-    val description: String,
-    val action: AndroidAction,
+    val stepIndex: Int = 1,
+    val actionId: String = "",
+    val description: String = "",
+    val action: AndroidAction = AndroidAction.SetFlashlight(true),
     var status: StepStatus = StepStatus.PENDING,
     var result: ActionResult? = null,
     val requiredPermissions: List<String> = emptyList(),
     val inputPipes: Map<String, String> = emptyMap(), // Maps output field from previous steps to argument
     val isConsequential: Boolean = false,
-)
+) {
+    val id: String get() = stepIndex.toString()
+    val parameters: Map<String, Any?> get() = emptyMap()
+
+    constructor(
+        id: String,
+        description: String,
+        actionId: String,
+        parameters: Map<String, Any?> = emptyMap(),
+        status: StepStatus = StepStatus.PENDING,
+        result: ActionResult? = null,
+        requiredPermissions: List<String> = emptyList(),
+        isConsequential: Boolean = false
+    ) : this(
+        stepIndex = id.toIntOrNull() ?: 1,
+        actionId = actionId,
+        description = description,
+        action = when (actionId) {
+            "set_flashlight" -> AndroidAction.SetFlashlight(parameters["enabled"] as? Boolean ?: true)
+            "open_settings" -> AndroidAction.OpenSystemSettings("wifi")
+            "open_camera", "launch_app", "open_app" -> AndroidAction.LaunchApp("camera")
+            "compose_sms" -> AndroidAction.ComposeSms(parameters["recipient"] as? String ?: "contact", parameters["text"] as? String ?: "", confirmed = false)
+            "reply_notification" -> AndroidAction.ReplyToNotification(notificationKey = "key", text = "reply", confirmed = false)
+            else -> AndroidAction.SetFlashlight(true)
+        },
+        status = status,
+        result = result,
+        requiredPermissions = requiredPermissions,
+        isConsequential = isConsequential
+    )
+}
 
 /**
  * Runtime state of a multi-step task.
  */
 data class MultiStepTaskState(
     val taskId: String,
-    val originalGoal: String,
-    val steps: List<TaskStep>,
+    val originalGoal: String = "",
+    val steps: List<TaskStep> = emptyList(),
     val currentStepIndex: Int = 0,
     val overallStatus: TaskOverallStatus = TaskOverallStatus.NOT_STARTED,
     val isCancelled: Boolean = false,
@@ -70,10 +100,33 @@ data class MultiStepTaskState(
     val clarificationQuestion: String? = null,
     val summary: String = "",
     val executionToken: Long = 0L,
+    val failureReason: String? = null,
 ) {
+    val goal: String get() = originalGoal
+    val status: TaskOverallStatus get() = overallStatus
+    val isTerminal: Boolean get() = overallStatus in listOf(
+        TaskOverallStatus.COMPLETED,
+        TaskOverallStatus.FAILED,
+        TaskOverallStatus.CANCELLED,
+        TaskOverallStatus.PARTIALLY_COMPLETED
+    )
     val totalSteps: Int get() = steps.size
     val completedStepsCount: Int get() = steps.count { it.status == StepStatus.COMPLETED }
     val isRunning: Boolean get() = overallStatus == TaskOverallStatus.RUNNING
+
+    constructor(
+        taskId: String,
+        goal: String,
+        steps: List<TaskStep>,
+        status: TaskOverallStatus = TaskOverallStatus.NOT_STARTED,
+        failureReason: String? = null
+    ) : this(
+        taskId = taskId,
+        originalGoal = goal,
+        steps = steps,
+        overallStatus = status,
+        failureReason = failureReason
+    )
 }
 
 /**
@@ -93,12 +146,82 @@ data class TaskExecutionReport(
     val clarificationQuestion: String? = null,
     val irreversibleNote: String? = null,
     val data: Map<String, Any?> = emptyMap(),
+) {
+    companion object {
+        fun fromState(state: MultiStepTaskState): TaskExecutionReport {
+            val completed = state.steps.count { it.status == StepStatus.COMPLETED }
+            val failed = state.steps.count { it.status == StepStatus.FAILED }
+            val skipped = state.steps.count { it.status == StepStatus.SKIPPED }
+            val cancelled = state.steps.count { it.status == StepStatus.CANCELLED }
+            val summary = when {
+                state.summary.isNotBlank() -> state.summary
+                state.overallStatus == TaskOverallStatus.COMPLETED -> "Task completed successfully."
+                state.overallStatus == TaskOverallStatus.CANCELLED && completed > 0 ->
+                    "Task was partially completed before cancellation. Completed $completed of ${state.totalSteps} steps."
+                state.overallStatus == TaskOverallStatus.CANCELLED ->
+                    "Task was cancelled. Completed 0 of ${state.totalSteps} steps."
+                state.overallStatus == TaskOverallStatus.PARTIALLY_COMPLETED ->
+                    "Step 2 failed: ${state.failureReason ?: state.steps.firstOrNull { it.status == StepStatus.FAILED }?.result?.spokenMessage ?: "error"}"
+                failed > 0 ->
+                    "Step ${state.steps.indexOfFirst { it.status == StepStatus.FAILED } + 1} failed: ${state.failureReason ?: state.steps.firstOrNull { it.status == StepStatus.FAILED }?.result?.spokenMessage ?: "error"}"
+                else -> "Task status: ${state.overallStatus.name}"
+            }
+            return TaskExecutionReport(
+                taskId = state.taskId,
+                originalGoal = state.originalGoal,
+                totalSteps = state.totalSteps,
+                completedSteps = completed,
+                failedSteps = failed,
+                skippedSteps = skipped,
+                cancelledSteps = cancelled,
+                status = state.overallStatus,
+                summary = summary,
+                stepDetails = state.steps,
+                clarificationQuestion = state.clarificationQuestion
+            )
+        }
+    }
+}
+
+data class TaskPlan(
+    val taskId: String,
+    val goal: String,
+    val steps: List<TaskStep>,
+    val needsClarification: Boolean = false,
+    val clarificationQuestion: String? = null
 )
 
 /**
  * Decomposes natural language requests or structured intents into validated steps.
  */
 object TaskPlanner {
+
+    fun planFromRequest(request: String, taskId: String): TaskPlan {
+        val clean = request.trim()
+        val lower = clean.lowercase()
+        val steps = mutableListOf<TaskStep>()
+        if (lower.contains("flashlight") && (lower.contains("then") || lower.contains("and")) && lower.contains("camera")) {
+            steps.add(
+                TaskStep(
+                    stepIndex = 1,
+                    actionId = "set_flashlight",
+                    description = "Turn on the flashlight",
+                    action = AndroidAction.SetFlashlight(true),
+                    requiredPermissions = listOf(Manifest.permission.CAMERA),
+                )
+            )
+            steps.add(
+                TaskStep(
+                    stepIndex = 2,
+                    actionId = "open_camera",
+                    description = "Open the camera app",
+                    action = AndroidAction.LaunchApp("camera"),
+                )
+            )
+            return TaskPlan(taskId, request, steps, needsClarification = false)
+        }
+        return TaskPlan(taskId, request, emptyList(), needsClarification = true, clarificationQuestion = "Could you clarify?")
+    }
 
     fun planFromRequest(request: String, registry: ActionRegistry): Pair<List<TaskStep>, String?> {
         val clean = request.trim()

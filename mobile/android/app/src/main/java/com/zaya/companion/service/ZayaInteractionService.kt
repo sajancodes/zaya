@@ -38,6 +38,15 @@ sealed class TapOutcome {
     data class Failed(val reason: String) : TapOutcome()
 }
 
+data class ScreenSnapshot(
+    val packageName: String?,
+    val windowTitle: String?,
+    val visibleTexts: List<String>,
+    val interactiveLabels: List<String>,
+    val hasPasswordFields: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 /**
  * Narrowly scoped, policy-compliant AccessibilityService for user-directed scrolling,
  * semantic UI clicks, and system navigation.
@@ -281,6 +290,63 @@ class ZayaInteractionService : AccessibilityService() {
             val child = node.getChild(i) ?: continue
             findMatchingNodes(child, query, outList)
         }
+    }
+
+    /**
+     * Extracts non-sensitive visible text and interactive labels from the active window hierarchy.
+     * Password fields are strictly omitted to safeguard private credentials.
+     */
+    fun extractScreenSnapshot(): ScreenSnapshot {
+        val rootNode = rootInActiveWindow ?: return ScreenSnapshot(
+            packageName = null,
+            windowTitle = null,
+            visibleTexts = emptyList(),
+            interactiveLabels = emptyList(),
+            hasPasswordFields = false
+        )
+
+        val texts = mutableListOf<String>()
+        val interactive = mutableListOf<String>()
+        var foundPassword = false
+
+        fun traverse(node: AccessibilityNodeInfo) {
+            if (node.isPassword) {
+                foundPassword = true
+                return // Never inspect or collect password characters!
+            }
+
+            val text = node.text?.toString()?.trim()
+            val desc = node.contentDescription?.toString()?.trim()
+
+            if (!text.isNullOrBlank()) {
+                texts.add(text)
+            }
+            if (!desc.isNullOrBlank() && desc != text) {
+                texts.add(desc)
+            }
+
+            if (node.isClickable) {
+                val label = text ?: desc
+                if (!label.isNullOrBlank()) {
+                    interactive.add(label)
+                }
+            }
+
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                traverse(child)
+            }
+        }
+
+        traverse(rootNode)
+
+        return ScreenSnapshot(
+            packageName = rootNode.packageName?.toString(),
+            windowTitle = rootNode.windowId.toString(),
+            visibleTexts = texts,
+            interactiveLabels = interactive,
+            hasPasswordFields = foundPassword
+        )
     }
 
     /**

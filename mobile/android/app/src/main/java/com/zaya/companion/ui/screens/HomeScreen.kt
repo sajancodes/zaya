@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,9 +26,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.zaya.companion.audio.VoiceInputState
+import com.zaya.companion.audio.VoiceOutputState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -202,6 +206,8 @@ fun CommandInput(runtime: ZayaRuntime, placeholder: String = "Message Zaya…") 
     var text by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val status by runtime.connection.collectAsStateWithLifecycle()
+    val voiceState by runtime.voiceInput.state.collectAsStateWithLifecycle()
+    val outputState by runtime.voiceOutput.state.collectAsStateWithLifecycle()
 
     fun submit() {
         val message = text.trim()
@@ -210,22 +216,67 @@ fun CommandInput(runtime: ZayaRuntime, placeholder: String = "Message Zaya…") 
         scope.launch { runtime.send(message) }
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it.take(Protocol.MAX_TEXT) },
-            placeholder = { Text(placeholder) },
-            maxLines = 4,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { submit() }),
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        IconButton(
-            onClick = { submit() },
-            enabled = text.isNotBlank(),
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+    LaunchedEffect(voiceState) {
+        val current = voiceState
+        if (current is VoiceInputState.Success) {
+            text = current.recognizedText
+        }
+    }
+
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(Protocol.MAX_TEXT) },
+                placeholder = {
+                    Text(if (voiceState is VoiceInputState.Listening) "Listening… Speak now" else placeholder)
+                },
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+
+            // Push-to-talk voice input button
+            IconButton(
+                onClick = {
+                    if (voiceState is VoiceInputState.Listening) {
+                        runtime.voiceInput.stopListening()
+                    } else {
+                        runtime.voiceInput.startListening()
+                    }
+                }
+            ) {
+                if (voiceState is VoiceInputState.Listening) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.width(22.dp).height(22.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Call,
+                        contentDescription = "Voice Input",
+                        tint = if (voiceState is VoiceInputState.Listening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Silence button when assistant is speaking aloud
+            if (outputState is VoiceOutputState.Speaking) {
+                IconButton(onClick = { runtime.voiceOutput.stop() }) {
+                    Text("⏹", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+
+            Spacer(Modifier.width(2.dp))
+            IconButton(
+                onClick = { submit() },
+                enabled = text.isNotBlank(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+            }
         }
     }
     if (!status.isOnline) {

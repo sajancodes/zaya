@@ -50,6 +50,7 @@ except Exception:                                 # pragma: no cover - import gu
 from core import mobile_protocol as protocol
 from core.mobile_bridge import get_bridge
 from core.mobile_calls import get_call_manager
+from core.pc_ecosystem import get_pc_ecosystem
 from core.remote_commands import get_gate
 
 log = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ class MobileApi:
         self.audio_frames = 0
         self.bridge = get_bridge()
         self.calls = get_call_manager()
+        self.pc = get_pc_ecosystem()
         self.video_frames = queue.Queue(maxsize=1)
         self._last_video = ('', 0.0)
         self.gate = get_gate()
@@ -521,6 +523,113 @@ class MobileApi:
                     status_code=503,
                 )
 
+        # ── typed allowlisted PC ecosystem endpoints ─────────────────────────
+
+        @app.get('/api/mobile/pc/status')
+        async def mobile_pc_status(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            result = self.pc.execute(device['device_id'], 'system_status')
+            return JSONResponse(result)
+
+        @app.get('/api/mobile/pc/allowed-commands')
+        async def mobile_pc_allowed_commands(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            return JSONResponse({'ok': True, 'commands': self.pc.get_allowed_commands()})
+
+        @app.post('/api/mobile/pc/command')
+        async def mobile_pc_command(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({'ok': False, 'error': 'Invalid request JSON'}, status_code=400)
+            if not isinstance(body, dict):
+                return JSONResponse({'ok': False, 'error': 'Malformed request body'}, status_code=400)
+
+            cmd = str(body.get('command') or '')
+            params = body.get('parameters')
+            if params is not None and not isinstance(params, dict):
+                return JSONResponse({'ok': False, 'error': 'parameters must be an object'}, status_code=400)
+            confirmed = bool(body.get('confirmed', False))
+            approval_id = str(body.get('approval_id') or '') or None
+
+            result = self.pc.execute(
+                device['device_id'],
+                cmd,
+                params or {},
+                confirmed=confirmed,
+                approval_id=approval_id,
+            )
+            status_code = 200 if result.get('ok') else 400
+            return JSONResponse(result, status_code=status_code)
+
+        @app.post('/api/mobile/pc/approve')
+        async def mobile_pc_approve(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({'ok': False, 'error': 'Invalid request JSON'}, status_code=400)
+            approval_id = str(body.get('approval_id') or '').strip()
+            if not approval_id:
+                return JSONResponse({'ok': False, 'error': 'approval_id is required'}, status_code=400)
+
+            pending = self.pc.approvals.get(approval_id)
+            if not pending or pending.device_id != device['device_id']:
+                return JSONResponse({'ok': False, 'error': 'Invalid, expired, or unauthorized approval token'},
+                                    status_code=404)
+
+            result = self.pc.execute(
+                device['device_id'],
+                pending.command,
+                pending.parameters,
+                confirmed=True,
+                approval_id=approval_id,
+            )
+            return JSONResponse(result, status_code=200 if result.get('ok') else 400)
+
+        @app.post('/api/mobile/pc/reject')
+        async def mobile_pc_reject(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({'ok': False, 'error': 'Invalid request JSON'}, status_code=400)
+            approval_id = str(body.get('approval_id') or '').strip()
+            if not approval_id:
+                return JSONResponse({'ok': False, 'error': 'approval_id is required'}, status_code=400)
+
+            ok = self.pc.approvals.reject(approval_id, device['device_id'])
+            if ok:
+                self.pc.audit.log(device['device_id'], 'approval', 'rejected',
+                                  f'User rejected approval {approval_id}')
+            return JSONResponse({'ok': True, 'rejected': ok})
+
+        @app.get('/api/mobile/pc/pending-approvals')
+        async def mobile_pc_pending_approvals(request: Request):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            return JSONResponse({'ok': True, 'approvals': self.pc.approvals.list_for_device(device['device_id'])})
+
+        @app.get('/api/mobile/pc/audit-log')
+        async def mobile_pc_audit_log(request: Request, limit: int = 50):
+            device = self._device_from_request(request)
+            if device is None:
+                return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+            clamped = max(1, min(limit, 100))
+            return JSONResponse({'ok': True, 'entries': self.pc.audit.get_entries(limit=clamped)})
+
     # ── data used by both transports ─────────────────────────────────────────
 
     def tasks(self, limit: int = 60) -> list[dict]:
@@ -667,6 +776,51 @@ class MobileApi:
         if kind == 'command':
             self._submit_command(session, str(data.get('text') or ''),
                                  str(data.get('request_id') or ''))
+            return
+
+        if kind == 'pc.command':
+            cmd = str(data.get('command') or '')
+            params = data.get('parameters') or {}
+            confirmed = bool(data.get('confirmed', False))
+            approval_id = str(data.get('approval_id') or '') or None
+            res = self.pc.execute(
+                session.device['device_id'],
+                cmd,
+                params,
+                confirmed=confirmed,
+                approval_id=approval_id,
+            )
+            session.enqueue(protocol.envelope('pc.command.result', {
+                'request_id': str(data.get('request_id') or ''),
+                'command': cmd,
+                'result': res,
+            }))
+            return
+
+        if kind == 'pc.approve':
+            approval_id = str(data.get('approval_id') or '').strip()
+            pending = self.pc.approvals.get(approval_id)
+            if not pending or pending.device_id != session.device['device_id']:
+                session.enqueue(protocol.envelope('error', {'error': 'Invalid or expired approval token'}))
+                return
+            res = self.pc.execute(
+                session.device['device_id'],
+                pending.command,
+                pending.parameters,
+                confirmed=True,
+                approval_id=approval_id,
+            )
+            session.enqueue(protocol.envelope('pc.command.result', {
+                'request_id': str(data.get('request_id') or ''),
+                'command': pending.command,
+                'result': res,
+            }))
+            return
+
+        if kind == 'pc.reject':
+            approval_id = str(data.get('approval_id') or '').strip()
+            ok = self.pc.approvals.reject(approval_id, session.device['device_id'])
+            session.enqueue(protocol.envelope('pc.approval.rejected', {'approval_id': approval_id, 'ok': ok}))
             return
 
         if kind == 'output.target':

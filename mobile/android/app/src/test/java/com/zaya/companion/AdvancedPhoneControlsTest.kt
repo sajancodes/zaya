@@ -32,21 +32,21 @@ class AdvancedPhoneControlsTest {
     @Test
     fun `open system settings preserves panel and optional package name`() {
         val displayAction = AndroidAction.OpenSystemSettings("display")
-        assertEquals("open_system_settings", displayAction.actionId)
-        assertEquals("display", displayAction.settingType)
+        assertEquals("open_settings", displayAction.actionId)
+        assertEquals("display", displayAction.setting)
         assertEquals(null, displayAction.packageName)
         assertEquals(ActionRisk.LOW, displayAction.risk)
         assertFalse(displayAction.requiresConfirmation)
 
         val appDetailsAction = AndroidAction.OpenSystemSettings("app_details", "com.whatsapp")
-        assertEquals("app_details", appDetailsAction.settingType)
+        assertEquals("app_details", appDetailsAction.setting)
         assertEquals("com.whatsapp", appDetailsAction.packageName)
     }
 
     @Test
     fun `flashlight state result serializes accurate status and data`() {
         val resultOn = ActionResult.success(
-            spokenMessage = "The flashlight is on.",
+            spoken = "The flashlight is on.",
             data = mapOf("is_on" to true, "available" to true)
         )
         val json = resultOn.toJsonObject()
@@ -56,18 +56,18 @@ class AdvancedPhoneControlsTest {
         assertTrue(json.getJSONObject("data").getBoolean("available"))
 
         val resultNoFlash = ActionResult.failure(
-            message = "This device does not have a camera flash.",
+            spoken = "This device does not have a camera flash.",
             error = "NO_FLASH_UNIT"
         )
         val jsonNoFlash = resultNoFlash.toJsonObject()
-        assertEquals("FAILED", jsonNoFlash.getString("status"))
+        assertEquals("FAILURE", jsonNoFlash.getString("status"))
         assertEquals("NO_FLASH_UNIT", jsonNoFlash.getString("error"))
     }
 
     @Test
     fun `media status result reports active track or idle state`() {
         val activeResult = ActionResult.success(
-            spokenMessage = "Now playing Believer by Imagine Dragons on Spotify.",
+            spoken = "Now playing Believer by Imagine Dragons on Spotify.",
             data = mapOf(
                 "is_playing" to true,
                 "title" to "Believer",
@@ -92,16 +92,16 @@ class AdvancedPhoneControlsTest {
     @Test
     fun `app launch outcome results format ambiguous and missing states`() {
         val ambiguousResult = ActionResult.failure(
-            message = "I found multiple matching apps: YouTube, YouTube Music. Which one would you like to open?",
+            spoken = "I found multiple matching apps: YouTube, YouTube Music. Which one would you like to open?",
             error = "AMBIGUOUS_APP_NAME"
         )
         val jsonAmbiguous = ambiguousResult.toJsonObject()
-        assertEquals("FAILED", jsonAmbiguous.getString("status"))
+        assertEquals("FAILURE", jsonAmbiguous.getString("status"))
         assertEquals("AMBIGUOUS_APP_NAME", jsonAmbiguous.getString("error"))
         assertTrue(jsonAmbiguous.getString("spoken_message").contains("YouTube Music"))
 
         val notFoundResult = ActionResult.failure(
-            message = "App 'Flappy Bird' is not installed on this device.",
+            spoken = "App 'Flappy Bird' is not installed on this device.",
             error = "APP_NOT_INSTALLED"
         )
         val jsonNotFound = notFoundResult.toJsonObject()
@@ -114,7 +114,7 @@ class AdvancedPhoneControlsTest {
         for (verb in verbs) {
             val action = AndroidAction.ControlMedia(verb)
             assertEquals("control_media", action.actionId)
-            assertEquals(verb, action.command)
+            assertEquals(verb, action.action)
             assertEquals(ActionRisk.MEDIUM, action.risk)
         }
     }

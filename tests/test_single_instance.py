@@ -46,7 +46,11 @@ def wait_for(path, processes=(), timeout=8):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():
-            return
+            try:
+                if not path.name.startswith('ready') or len(path.read_text().strip()) > 0:
+                    return
+            except Exception:
+                pass
         for process in processes:
             if process.poll() is not None and process.returncode != 0:
                 raise AssertionError(process.communicate()[1])

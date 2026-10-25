@@ -270,11 +270,25 @@ class ScreenCaptureManager(private val context: Context) {
 
     private fun extractVisualFeatures(width: Int, height: Int): List<String> {
         val orientation = if (width > height) "Landscape" else "Portrait"
-        return listOf(
+        val features = mutableListOf(
             "Display Orientation: $orientation",
             "Resolution: ${width}x${height}",
             "Interactive Viewport active"
         )
+        val accessibility = ZayaInteractionService.getInstance()
+        if (accessibility != null && ZayaInteractionService.isServiceEnabled()) {
+            val snapshot = accessibility.extractScreenSnapshot()
+            if (snapshot.packageName != null) {
+                features.add("Foreground App: ${snapshot.packageName}")
+            }
+            if (snapshot.visibleTexts.isNotEmpty()) {
+                features.addAll(snapshot.visibleTexts.take(30))
+            }
+            if (snapshot.hasPasswordFields) {
+                features.add("[Security: Password/secure fields omitted from text output]")
+            }
+        }
+        return features
     }
 
     fun stopCapture() {

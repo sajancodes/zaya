@@ -197,7 +197,7 @@ class PrivacySecurityHardeningTest {
         assertEquals(ActionRisk.CRITICAL, sms.risk)
         assertTrue(sms.requiresConfirmation)
 
-        val reply = AndroidAction.ReplyToNotification("key", "reply text")
+        val reply = AndroidAction.ReplyToNotification(notificationKey = "key", text = "reply text")
         assertEquals(ActionRisk.HIGH, reply.risk)
         assertTrue(reply.requiresConfirmation)
 
