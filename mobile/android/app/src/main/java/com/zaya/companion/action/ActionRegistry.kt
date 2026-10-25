@@ -57,6 +57,7 @@ class ActionRegistry(private val context: Context) {
     fun discoverCapabilities(): List<ActionCapability> {
         val list = mutableListOf<ActionCapability>()
 
+
         // 1. Launch App
         list.add(
             ActionCapability(
@@ -116,6 +117,10 @@ class ActionRegistry(private val context: Context) {
 
         // 5. Look Up Contact
         val hasContacts = hasPermission(Manifest.permission.READ_CONTACTS)
+        list.add(ActionCapability("browse_media", "Find or open phone photos, videos and audio on request",
+            listOf("kind"), ActionRisk.LOW, false, true,
+            if (Build.VERSION.SDK_INT >= 33) hasPermission(Manifest.permission.READ_MEDIA_IMAGES)
+            else hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE), true))
         list.add(
             ActionCapability(
                 actionId = "lookup_contact",

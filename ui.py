@@ -71,7 +71,8 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR   = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+from core.runtime_paths import get_config_dir
+CONFIG_DIR = get_config_dir()
 API_FILE   = CONFIG_DIR / "api_keys.json"
 
 
@@ -2738,6 +2739,278 @@ class PluginSettingsOverlay(QWidget):
         lbl.setStyleSheet(f"color: {color}; background: transparent;")
 
 
+class AIEngineOverlay(QWidget):
+    """Owner-facing engine/provider/speech settings.
+
+    The form is generated from Zaya's provider catalog, so adding an
+    OpenAI-compatible endpoint does not require another hand-built panel.
+    """
+
+    saved = pyqtSignal(str)
+    _OW, _OH = 520, 610
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            AIEngineOverlay {{
+                background: rgba(0, 6, 10, 248);
+                border: 1px solid {C.BORDER_B};
+                border-radius: 6px;
+            }}
+        """)
+        from core.ai.settings import local_pipeline_settings
+        from core.providers.catalog import provider_specs
+        from memory.config_manager import load_api_keys
+        self._config = load_api_keys()
+        self._settings = local_pipeline_settings()
+        self._specs = {spec.key: spec for spec in provider_specs()}
+        self._providers = list(self._specs)
+        self._provider_values = {}
+        for key, spec in self._specs.items():
+            from core.security.key_vault import load_provider_key
+            api_key = load_provider_key(key) or self._config.get(f"{key}_api_key")
+            if not api_key and key == self._settings.provider:
+                # Older local-pipeline configs stored the key only under this
+                # shared name. Do not lose it when the owner reopens the form.
+                api_key = self._config.get("local_llm_api_key")
+            self._provider_values[key] = {
+                "model": str(self._config.get(f"{key}_model") or spec.model),
+                "base_url": str(self._config.get(f"{key}_base_url") or spec.base_url),
+                "api_key": str(api_key or ""),
+            }
+
+        self._fs = (f"QLineEdit {{ background: #000d12; color: {C.TEXT}; "
+                    f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
+                    f"QLineEdit:focus {{ border: 1px solid {C.PRI}; }}")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 16, 22, 16)
+        root.setSpacing(8)
+        root.addWidget(self._lbl("◈  AI ENGINE", 12, True))
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        root.addWidget(sep)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        inner = QWidget(); inner.setStyleSheet("background: transparent;")
+        form = QVBoxLayout(inner)
+        form.setContentsMargins(0, 0, 6, 0)
+        form.setSpacing(6)
+        root.addWidget(scroll, 1)
+
+        form.addWidget(self._lbl("CONVERSATION ENGINE", 9, True))
+        self._engine = QComboBox()
+        self._engine.addItems(["GEMINI LIVE", "LOCAL PIPELINE"])
+        self._engine.setCurrentIndex(1 if self._settings.provider and self._engine_mode() == "local_pipeline" else 0)
+        self._style_combo(self._engine)
+        form.addWidget(self._engine)
+        form.addWidget(self._lbl(
+            "Gemini Live keeps native audio and barge-in. The modular pipeline "
+            "runs STT, an LLM, and TTS as independent local stages.", 8, color=C.TEXT_DIM))
+
+        form.addWidget(self._lbl("LANGUAGE MODEL PROVIDER", 9, True))
+        self._provider = QComboBox()
+        self._provider.addItems(self._providers)
+        if self._settings.provider in self._providers:
+            self._provider.setCurrentText(self._settings.provider)
+        self._style_combo(self._provider)
+        self._provider.currentTextChanged.connect(self._load_provider_fields)
+        form.addWidget(self._provider)
+
+        form.addWidget(self._lbl("MODEL", 8, color=C.TEXT_DIM))
+        self._model = QLineEdit(); self._model.setFont(QFont("Courier New", 9))
+        self._model.setFixedHeight(30); self._model.setStyleSheet(self._fs)
+        form.addWidget(self._model)
+
+        form.addWidget(self._lbl("ENDPOINT (OPENAI-COMPATIBLE OR NATIVE OLLAMA)", 8, color=C.TEXT_DIM))
+        self._base = QLineEdit(); self._base.setFont(QFont("Courier New", 9))
+        self._base.setFixedHeight(30); self._base.setStyleSheet(self._fs)
+        form.addWidget(self._base)
+
+        form.addWidget(self._lbl("API KEY (LEAVE EMPTY FOR A LOCAL SERVER)", 8, color=C.TEXT_DIM))
+        self._key = QLineEdit(); self._key.setFont(QFont("Courier New", 9))
+        self._key.setFixedHeight(30); self._key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._key.setStyleSheet(self._fs)
+        form.addWidget(self._key)
+
+        form.addWidget(self._lbl("SPEECH TO TEXT", 9, True))
+        self._stt_model = self._line(str(self._settings.stt_model or "small"))
+        self._stt_device = self._line(str(self._settings.stt_device or "auto"))
+        self._stt_compute = self._line(str(self._settings.stt_compute_type or "int8"))
+        self._stt_language = self._line(str(self._settings.stt_language or ""))
+        form.addWidget(self._lbl("Whisper model / device / compute / language", 8, color=C.TEXT_DIM))
+        for widget in (self._stt_model, self._stt_device, self._stt_compute, self._stt_language):
+            form.addWidget(widget)
+
+        form.addWidget(self._lbl("TEXT TO SPEECH", 9, True))
+        self._tts_model = self._line(str(self._settings.tts_model or ""))
+        self._tts_model.setPlaceholderText("Path to a Piper .onnx voice")
+        self._tts_fallback = self._line(str(self._settings.tts_fallback_voice or ""))
+        form.addWidget(self._lbl("Default Piper voice / fallback voice", 8, color=C.TEXT_DIM))
+        form.addWidget(self._tts_model)
+        form.addWidget(self._tts_fallback)
+        form.addWidget(self._lbl("LANGUAGE → VOICE MAP (JSON)", 8, color=C.TEXT_DIM))
+        self._voice_map = QTextEdit()
+        self._voice_map.setFixedHeight(72)
+        self._voice_map.setFont(QFont("Courier New", 8))
+        self._voice_map.setStyleSheet(
+            f"QTextEdit {{ background: #000d12; color: {C.TEXT}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 3px; padding: 4px; }}")
+        self._voice_map.setPlainText(json.dumps(self._settings.tts_voice_map or {}, ensure_ascii=False))
+        form.addWidget(self._voice_map)
+
+        self._custom_local = QPushButton("CUSTOM ENDPOINT: REMOTE")
+        self._custom_local.setCheckable(True)
+        self._custom_local.setChecked(bool(self._config.get("custom_local")))
+        self._custom_local.setText(
+            "CUSTOM ENDPOINT: THIS MACHINE / LAN" if self._custom_local.isChecked()
+            else "CUSTOM ENDPOINT: REMOTE")
+        self._custom_local.setFixedHeight(28)
+        self._custom_local.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._custom_local.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._custom_local.toggled.connect(
+            lambda on: self._custom_local.setText(
+                "CUSTOM ENDPOINT: THIS MACHINE / LAN" if on else "CUSTOM ENDPOINT: REMOTE"))
+        self._custom_local.setVisible(self._provider.currentText() == "custom")
+        self._provider.currentTextChanged.connect(
+            lambda name: self._custom_local.setVisible(name == "custom"))
+        form.addWidget(self._custom_local)
+
+        self._cloud = QPushButton()
+        self._cloud.setCheckable(True)
+        self._cloud.setChecked(bool(self._settings.allow_cloud_fallback))
+        self._cloud.setFixedHeight(28)
+        self._cloud.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._cloud.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cloud.toggled.connect(self._style_toggle)
+        self._style_toggle(self._cloud.isChecked())
+        form.addWidget(self._lbl("CLOUD FAILOVER", 9, True))
+        form.addWidget(self._cloud)
+        form.addWidget(self._lbl(
+            "Off by default: a local provider never silently sends a request to a "
+            "cloud provider. Turning this on is an explicit owner choice.", 8, color=C.TEXT_DIM))
+        self._status = self._lbl("", 8, color=C.TEXT_DIM)
+        form.addWidget(self._status)
+        scroll.setWidget(inner)
+
+        row = QHBoxLayout(); row.setSpacing(8)
+        save = QPushButton("▸  SAVE")
+        save.setFixedHeight(34); save.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        save.setCursor(Qt.CursorShape.PointingHandCursor)
+        save.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.PRI}; border: 1px solid {C.PRI_DIM}; border-radius: 3px; }}"
+                           f"QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}")
+        save.clicked.connect(self._save)
+        row.addWidget(save)
+        close = QPushButton("CLOSE")
+        close.setFixedHeight(34); close.setFont(QFont("Courier New", 9))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; border: 1px solid {C.BORDER}; border-radius: 3px; }}")
+        close.clicked.connect(self.hide)
+        row.addWidget(close)
+        root.addLayout(row)
+        self._load_provider_fields(self._provider.currentText())
+
+    def _engine_mode(self):
+        from core.ai.settings import engine_mode
+        return engine_mode()
+
+    def _lbl(self, text, size=9, bold=False, color=C.PRI):
+        label = QLabel(text); label.setWordWrap(True)
+        label.setFont(QFont("Courier New", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+        label.setStyleSheet(f"color: {color}; background: transparent;")
+        return label
+
+    def _line(self, value):
+        widget = QLineEdit(value); widget.setFont(QFont("Courier New", 9))
+        widget.setFixedHeight(30); widget.setStyleSheet(self._fs)
+        return widget
+
+    def _style_combo(self, widget):
+        widget.setFixedHeight(30)
+        widget.setFont(QFont("Courier New", 9))
+        widget.setStyleSheet(
+            f"QComboBox {{ background: #000d12; color: {C.TEXT}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 3px; padding: 2px 8px; }}"
+            f"QComboBox QAbstractItemView {{ background: #000d12; color: {C.TEXT}; "
+            f"selection-background-color: {C.PRI_GHO}; }}")
+
+    def _style_toggle(self, on):
+        self._cloud.setText("ALLOW CLOUD FAILOVER: ON" if on else "LOCAL ONLY: NO CLOUD FAILOVER")
+        self._cloud.setStyleSheet(
+            f"QPushButton {{ background: {C.PRI_GHO if on else 'transparent'}; color: {C.PRI if on else C.TEXT_MED}; "
+            f"border: 1px solid {C.PRI if on else C.BORDER}; border-radius: 3px; }}")
+
+    def _load_provider_fields(self, name):
+        values = self._provider_values.get(name) or {}
+        self._model.setText(str(values.get("model") or ""))
+        self._base.setText(str(values.get("base_url") or ""))
+        self._key.setText(str(values.get("api_key") or ""))
+        spec = self._specs.get(name)
+        if spec is not None:
+            self._provider.setToolTip(spec.help or spec.label)
+
+    def _save(self):
+        from core.ai.settings import save_engine_mode, save_local_pipeline_settings
+        from memory.config_manager import _patch_config
+        provider = self._provider.currentText().strip().lower()
+        engine = "local_pipeline" if self._engine.currentIndex() == 1 else "gemini_live"
+        try:
+            voice_map = json.loads(self._voice_map.toPlainText().strip() or "{}")
+            if not isinstance(voice_map, dict):
+                raise ValueError("Voice map must be a JSON object.")
+        except (ValueError, TypeError) as error:
+            self._status.setText(f"Not saved: {error}")
+            self._status.setStyleSheet(f"color: #ff6b6b; background: transparent;")
+            return
+        try:
+            save_engine_mode(engine)
+            key_text = self._key.text().strip()
+            if key_text:
+                from core.security.key_vault import store_provider_key
+                store_provider_key(provider, key_text)
+
+            save_local_pipeline_settings({
+                "local_llm_provider": provider,
+                "local_llm_model": self._model.text().strip(),
+                "local_llm_base_url": self._base.text().strip(),
+                "local_llm_api_key": key_text,
+                "local_stt_model": self._stt_model.text().strip() or "small",
+                "local_stt_device": self._stt_device.text().strip() or "auto",
+                "local_stt_compute": self._stt_compute.text().strip() or "int8",
+                "local_stt_language": self._stt_language.text().strip(),
+                "local_tts_model": self._tts_model.text().strip(),
+                "local_tts_fallback_voice": self._tts_fallback.text().strip(),
+                "local_tts_voice_map": voice_map,
+                "allow_cloud_fallback": self._cloud.isChecked(),
+            })
+            if provider == "custom":
+                _patch_config(
+                    custom_model=self._model.text().strip(),
+                    custom_base_url=self._base.text().strip(),
+                    custom_local=self._custom_local.isChecked(),
+                )
+            elif provider != "gemini":
+                _patch_config(**{
+                    f"{provider}_model": self._model.text().strip(),
+                    f"{provider}_base_url": self._base.text().strip(),
+                })
+            self._provider_values[provider] = {
+                "model": self._model.text().strip(),
+                "base_url": self._base.text().strip(),
+                "api_key": key_text,
+            }
+            self._status.setText("Saved. Restart Zaya to apply an engine or model change.")
+            self._status.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+            self.saved.emit("SYS: AI engine settings saved. Restart Zaya to apply engine/provider changes.")
+            QTimer.singleShot(900, self.hide)
+        except Exception as error:
+            self._status.setText(f"Not saved: {error}")
+            self._status.setStyleSheet("color: #ff6b6b; background: transparent;")
+
+
 class RemoteKeyOverlay(QWidget):
     """Floating overlay — QR code for instant phone pairing + manual key fallback."""
 
@@ -2976,6 +3249,10 @@ class MainWindow(QMainWindow):
     _state_sig      = pyqtSignal(str)
     _applied_state_sig = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
+    _display_request_sig = pyqtSignal(object)
+    restart_requested = pyqtSignal()
+    hand_settings_requested = pyqtSignal()
+    update_available = pyqtSignal(str)
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
     _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
     _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
@@ -3267,6 +3544,7 @@ class MainWindow(QMainWindow):
         self._archive_history_sig.connect(self._show_saved_history)
         self._state_sig.connect(self._apply_state)
         self._content_sig.connect(self._show_content)
+        self._display_request_sig.connect(self._apply_display_request)
         self._reconfig_sig.connect(self._show_setup)
         self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
@@ -4373,6 +4651,14 @@ class MainWindow(QMainWindow):
         cust_btn.clicked.connect(self._open_customize)
         lay.addWidget(cust_btn)
 
+        engine_btn = QPushButton("◈  AI ENGINE")
+        engine_btn.setFixedHeight(30)
+        engine_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        engine_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        engine_btn.setStyleSheet(_BTN_STYLE_PRI)
+        engine_btn.clicked.connect(self._open_ai_engine)
+        lay.addWidget(engine_btn)
+
         audio_btn = QPushButton("🎧  AUDIO DEVICES")
         audio_btn.setFixedHeight(26)
         audio_btn.setFont(QFont("Courier New", 7))
@@ -4466,6 +4752,35 @@ class MainWindow(QMainWindow):
 
         fs_btn = _row(QPushButton("⛶  FULLSCREEN  [F11]"), self._BTN_DIM)
         fs_btn.clicked.connect(self._toggle_fullscreen)
+        restart_btn = _row(QPushButton("Restart Zaya"), self._BTN_DIM)
+        restart_btn.clicked.connect(self.restart_requested.emit)
+        hands_btn=_row(QPushButton('Hand controls & 3D workspace'),self._BTN_DIM)
+        hands_btn.clicked.connect(self.hand_settings_requested.emit)
+        updates_btn = _row(QPushButton('Zaya updates'), self._BTN_DIM)
+        def show_updates():
+            from core.update.update_ui import UpdateDialog
+            dialog = getattr(self, '_updates_dialog', None)
+            if dialog is None:
+                dialog = self._updates_dialog = UpdateDialog(self)
+            dialog.show(); dialog.raise_(); dialog.activateWindow()
+        updates_btn.clicked.connect(show_updates)
+        self._last_update_notice = ''
+        def notify_update(message):
+            if message != self._last_update_notice:
+                self._last_update_notice = message
+                show_updates()
+        self.update_available.connect(notify_update)
+        from core.update.desktop_updater import desktop_updater, UpdateStatus
+        desktop_updater.add_listener(lambda state, message: self.update_available.emit(message)
+                                    if state == UpdateStatus.AVAILABLE else None)
+        coding_btn = _row(QPushButton('Coding Skill'), self._BTN_DIM)
+        def show_coding():
+            from core.update.coding_ui import CodingSkillDialog
+            dialog = getattr(self, '_coding_dialog', None)
+            if dialog is None:
+                dialog = self._coding_dialog = CodingSkillDialog(self)
+            dialog.show(); dialog.raise_(); dialog.activateWindow()
+        coding_btn.clicked.connect(show_coding)
 
         self._brief_btn = _row(QPushButton())
         self._brief_btn.clicked.connect(self._toggle_brief)
@@ -4686,6 +5001,25 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._content_display)
 
         return w
+
+    def _apply_display_request(self, packet):
+        try:
+            if packet.get('cancelled'):
+                return
+            action = packet.get('action', 'show')
+            if action == 'show':
+                self._show_content(packet['title'], packet['text'])
+            elif action == 'clear':
+                self._content_display.clear()
+            elif action == 'close':
+                self._content_panel.hide()
+                if getattr(self, '_desktop_mode', False):
+                    self._results_window.hide()
+            packet['ok'] = True
+        except Exception as error:
+            packet['error'] = str(error)
+        finally:
+            packet['done'].set()
 
     def _show_content(self, title: str, text: str):
         if getattr(self, '_desktop_mode', False):
@@ -5620,6 +5954,20 @@ class MainWindow(QMainWindow):
         self._centre_overlay(ov)
         self._audio_overlay = ov            # keep a reference so it isn't GC'd
 
+    def _open_ai_engine(self):
+        cw = self.centralWidget()
+        ov = AIEngineOverlay(cw)
+        ov.saved.connect(self._log.append_log)
+        width, height = AIEngineOverlay._OW, AIEngineOverlay._OH
+        ov.setGeometry(
+            max(0, (cw.width() - width) // 2),
+            max(0, (cw.height() - height) // 2),
+            width, height,
+        )
+        ov.show()
+        ov.raise_()
+        self._ai_engine_overlay = ov
+
     def _on_audio_devices_applied(self):
         self._log.append_log("SYS: Audio devices updated.")
         if self.on_audio_device_change:
@@ -5796,6 +6144,13 @@ class MainWindow(QMainWindow):
         if not API_FILE.exists(): return False
         try:
             d = json.loads(API_FILE.read_text(encoding="utf-8"))
+            from core.ai.settings import engine_mode
+            if engine_mode() == "local_pipeline":
+                provider = str(d.get("local_llm_provider") or "ollama").strip().lower()
+                local_provider = (provider in {"ollama", "lmstudio", "llamacpp", "vllm"}
+                                  or (provider == "custom" and bool(d.get("custom_local"))))
+                has_key = bool(d.get("local_llm_api_key") or d.get(f"{provider}_api_key"))
+                return bool(d.get("os_system")) and (local_provider or has_key)
             return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
         except Exception:
             return False
@@ -5803,20 +6158,47 @@ class MainWindow(QMainWindow):
     def _show_setup(self):
         if getattr(self, '_desktop_mode', False):
             self.showNormal()
-        ov = SetupOverlay(self.centralWidget())
-        from core.gemini_keys import parse_keys
-        saved = _read_full_config()
-        ov._key_input.setText(', '.join(parse_keys(saved.get('gemini_api_keys') or saved.get('gemini_api_key', ''))))
-        cw = self.centralWidget()
-        ow, oh = 460, 390
-        ov.setGeometry(
-            (cw.width()  - ow) // 2,
-            (cw.height() - oh) // 2,
-            ow, oh,
-        )
-        ov.done.connect(self._on_setup_done)
-        ov.show()
-        self._overlay = ov
+        try:
+            from core.onboarding.wizard import OnboardingWizard
+            cw = self.centralWidget()
+            ow, oh = 580, 520
+            wizard = OnboardingWizard(cw)
+            wizard.setGeometry(
+                (cw.width()  - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh,
+            )
+            wizard.completed.connect(self._on_onboarding_completed)
+            wizard.show()
+            self._overlay = wizard
+        except Exception as err:
+            self._log_sig.emit(f"WARN: Onboarding wizard fallback: {err}")
+            ov = SetupOverlay(self.centralWidget())
+            from core.gemini_keys import parse_keys
+            saved = _read_full_config()
+            ov._key_input.setText(', '.join(parse_keys(saved.get('gemini_api_keys') or saved.get('gemini_api_key', ''))))
+            cw = self.centralWidget()
+            ow, oh = 460, 390
+            ov.setGeometry(
+                (cw.width()  - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh,
+            )
+            ov.done.connect(self._on_setup_done)
+            ov.show()
+            self._overlay = ov
+
+    def _on_onboarding_completed(self):
+        self._ready = True
+        self._ready_event.set()
+        if self._overlay:
+            self._overlay.hide()
+            self._overlay = None
+        self._apply_state("LISTENING")
+        self._assistant_name = "Zaya"
+        self._log.append_log(f"SYS: Initialised. {self._assistant_name} online.")
+        if self.on_credentials_change:
+            self.on_credentials_change()
 
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -5855,11 +6237,19 @@ class JarvisUI:
         self._app.setStyle("Fusion")
         self._win = MainWindow(face_path)
         self._win.configure_desktop_interface()
+        from core.ghost_overlay import install_ghost_overlay
+        self._ghost_overlay = install_ghost_overlay(
+            lambda text: self._win.on_text_command(text) if self._win.on_text_command else None,
+            parent=self._win)
+        from core.ghost_overlay import show_hand_settings
+        self._win.hand_settings_requested.connect(show_hand_settings)
         self.root = _RootShim(self._app)
         self._bar = None
         self.on_companion_reaction = None
         self.on_companion_audio_activity = None
         self.on_shutdown = None
+        self.on_restart = None
+        self._win.restart_requested.connect(self._handle_restart)
         self._app.aboutToQuit.connect(self._shutdown_audio)
         try:
             from core.zayabar_config import load_config
@@ -5883,6 +6273,13 @@ class JarvisUI:
     def _bar_reaction(self, text):
         if self.on_companion_reaction:
             self.on_companion_reaction(text)
+
+    def request_restart(self):
+        self._win.restart_requested.emit()
+
+    def _handle_restart(self):
+        if self.on_restart:
+            self.on_restart()
 
     def _shutdown_audio(self):
         if self.on_shutdown:
@@ -6083,9 +6480,29 @@ class JarvisUI:
         """Read configuration readiness without inspecting Qt widget state."""
         return self._win._ready_event.is_set()
 
-    def show_content(self, title: str, text: str):
-        """Thread-safe: display content in the panel below the HUD."""
-        self._win._content_sig.emit(title[:48], text[:4000])
+    def _display_request(self, action, **values):
+        from PyQt6.QtCore import QThread
+        packet = dict(values, action=action, done=threading.Event())
+        if QThread.currentThread() == self._win.thread():
+            self._win._apply_display_request(packet)
+        else:
+            self._win._display_request_sig.emit(packet)
+            if not packet['done'].wait(3):
+                packet['cancelled'] = True
+                raise TimeoutError('The display did not acknowledge this request.')
+        if not packet.get('ok'):
+            raise RuntimeError(packet.get('error', 'Display request failed.'))
+        return True
+
+    def show_content(self, title: str, text: str, format='text'):
+        """Render on the Qt thread and acknowledge actual display delivery."""
+        return self._display_request('show', title=str(title)[:48], text=str(text))
+
+    def clear_content(self):
+        return self._display_request('clear')
+
+    def close_content(self):
+        return self._display_request('close')
 
     def show_quiz(self, topic: str, questions, grade=None) -> None:
         """Thread-safe: put an interactive quiz on the board.

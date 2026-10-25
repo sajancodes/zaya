@@ -1,6 +1,20 @@
 """Zaya desktop assistant — created and developed by Sajan Rai."""
 import platform as _platform
 import subprocess as _subprocess
+import sys as _bootstrap_sys
+
+if '--install-coding-skill' in _bootstrap_sys.argv:
+    from core.coding_skill import install as _install_coding_skill
+    try:
+        _install_coding_skill()
+    except Exception:
+        if _platform.system() == 'Windows':
+            import ctypes as _bootstrap_ctypes
+            _bootstrap_ctypes.windll.user32.MessageBoxW(None,
+                'Zaya installed successfully. Coding Skill could not be installed. Try again from Coding Skill settings.',
+                'Zaya Coding Skill', 0x30)
+        raise SystemExit(1)
+    raise SystemExit(0)
 
 # ── Nuclear: force CREATE_NO_WINDOW on EVERY subprocess call on Windows ───────
 # This patches Popen itself, so no per-file flag is needed anywhere.
@@ -102,8 +116,9 @@ def get_base_dir():
 
 BASE_DIR        = get_base_dir()
 LIVE_CONNECT_TIMEOUT = 20.0
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+from core.runtime_paths import get_config_dir, get_resource_dir
+API_CONFIG_PATH = get_config_dir() / "api_keys.json"
+PROMPT_PATH     = get_resource_dir() / "core" / "prompt.txt"
 
 
 @asynccontextmanager
@@ -127,7 +142,7 @@ async def _connect_live(client, model, config):
 # stepped over and the assistant keeps talking instead of failing to start.
 LIVE_MODEL          = _gemini.LIVE_MODELS[0]
 CHANNELS            = 1
-SEND_SAMPLE_RATE    = 16000 
+SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
@@ -343,179 +358,13 @@ def _is_repeat_chunk(txt: str, buf: list) -> bool:
     joined = " ".join(buf)
     return txt in joined
 
-def _clean_transcript(text: str) -> str:    
+def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
 
-TOOL_DECLARATIONS = [
-    # ── Inline tools ─────────────────────────────────────────────────────────
-    # These stay here (rather than in an actions/*.py TOOL dict) because their
-    # handling is woven into live-session state — vision capture/injection,
-    # camera stream, memory writes, the monitor engine, and shutdown. All other
-    # tools live in their own action file and are auto-discovered by
-    # core.action_loader (see JarvisLive.__init__).
-    {
-        "name": "system_status",
-        "description": (
-            "Returns real-time system metrics: CPU usage, RAM, GPU load, CPU temperature, "
-            "uptime, and process count. Use when the user asks about computer performance, "
-            "temperature, memory, or resource usage."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {},
-        }
-    },
-    {
-        "name": "screen_process",
-        "description": (
-            "Captures the screen or webcam image and lets you analyze it. "
-            "MUST be called when user asks what is on screen, what you see, "
-            "look at camera, analyze my screen, etc. "
-            "You have NO visual ability without this tool. "
-            "After the image is captured it is sent directly to you — describe what you see and answer the user's question. "
-            "When using camera: the live view stays open until user says close it or calls close_camera."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "angle": {"type": "STRING", "description": "'screen' to capture display, 'camera' for webcam. Default: 'screen'"},
-                "text":  {"type": "STRING", "description": "The question or instruction about the captured image"}
-            },
-            "required": ["text"]
-        }
-    },
-    {
-        "name": "close_camera",
-        "description": (
-            "Closes the live camera view shown on screen. "
-            "Call when the user says (in ANY language): close camera, stop camera, "
-            "turn off camera, that's creepy, etc."
-        ),
-        "parameters": {"type": "OBJECT", "properties": {}, "required": []}
-    },
-    {
-        "name": "manage_monitor",
-        "description": (
-            "Add, remove, or list background monitoring topics. "
-            "Zaya checks these topics once a day and alerts the user when there is a new development. "
-            "Use 'add' when the user says 'monitor X', 'track X', 'follow X'. "
-            "Use 'remove' when the user says 'stop monitoring X'. "
-            "Use 'list' when the user asks what is being monitored. "
-            "Do NOT add crypto, financial, or trading topics."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "action": {
-                    "type":        "STRING",
-                    "description": "add | remove | list",
-                },
-                "topic": {
-                    "type":        "STRING",
-                    "description": "Topic to monitor or stop monitoring (e.g. 'space exploration', 'AI news')",
-                },
-            },
-            "required": ["action"],
-        },
-    },
-    {
-        "name": "shutdown_jarvis",
-        "description": (
-            "Shuts down the assistant completely. "
-            "Call this when the user expresses intent to end the conversation, "
-            "close the assistant, say goodbye, or stop Zaya. "
-            "The user can say this in ANY language."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {},
-        }
-    },
-    {
-        "name": "save_memory",
-        "description": (
-            "Save an important personal fact about the user to long-term memory. "
-            "Call this silently whenever the user reveals something worth remembering: "
-            "name, age, city, job, preferences, hobbies, relationships, projects, or future plans. "
-            "Do NOT call for: weather, reminders, searches, or one-time commands. "
-            "Do NOT announce that you are saving — just call it silently. "
-            "Values must be in English regardless of the conversation language."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "category": {
-                    "type": "STRING",
-                    "description": (
-                        "identity — name, age, birthday, city, job, language, nationality | "
-                        "preferences — favorite food/color/music/film/game/sport, hobbies | "
-                        "projects — active projects, goals, things being built | "
-                        "relationships — friends, family, partner, colleagues | "
-                        "wishes — future plans, things to buy, travel dreams | "
-                        "notes — habits, schedule, anything else worth remembering"
-                    )
-                },
-                "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, favorite_food, sister_name)"},
-                "value": {"type": "STRING", "description": "Concise value in English (e.g. Fatih, pizza, older sister)"},
-            },
-            "required": ["category", "key", "value"]
-        }
-    },
-    {
-        "name": "recall_memory",
-        "description": (
-            "Look up a fact you have stored about the user but which is NOT in "
-            "the memory block of your system prompt. "
-            "The prompt lists the keys it did not have room for under "
-            "'[ALSO REMEMBERED]' — if the user asks about anything named there, "
-            "call this FIRST. "
-            "Also call it before saying you do not know something personal, and "
-            "when the user asks what you remember about them (leave query empty "
-            "for everything). "
-            "This is a local file search: it is instant and costs nothing."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "query": {
-                    "type": "STRING",
-                    "description": (
-                        "Keyword to search for — a name, a topic, a category "
-                        "(e.g. 'ayse', 'coffee', 'projects'). "
-                        "Leave empty to list everything stored."
-                    ),
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "undo",
-        "description": (
-            "Reverse the last change YOU made to this computer — a file you "
-            "moved, renamed, created or wrote, or a setting you changed such as "
-            "volume, brightness, dark mode or WiFi. "
-            "Call this whenever the user says undo, revert, take it back, put it "
-            "back, cancel that, or tells you that you did the wrong thing, in ANY "
-            "language. "
-            "Use action='list' when they ask what can be undone. "
-            "This only covers your own actions — it is not the Ctrl+Z of whatever "
-            "application is on screen (that is computer_settings with action 'undo')."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "action": {
-                    "type": "STRING",
-                    "description": "undo (default) — reverse the last change | list — show what can be undone",
-                },
-            },
-            "required": [],
-        },
-    },
-]
+from core.live_tools import INLINE_TOOL_DECLARATIONS, compact_tool_declarations
+TOOL_DECLARATIONS = INLINE_TOOL_DECLARATIONS
 
 class _ReconnectSignal(Exception):
     """Raised inside the session TaskGroup to force a clean, voluntary reconnect
@@ -565,11 +414,76 @@ def _keep_context_of(exc: BaseException) -> bool:
     return True
 
 
+class _LocalSession:
+    """Session-shaped facade over the modular pipeline.
+
+    Dashboard, notifications and phone commands already speak this interface.
+    Keeping the shape means those systems do not need a second code path just
+    because the live model is replaced by local STT -> LLM -> TTS.
+    """
+
+    def __init__(self, host: "JarvisLive"):
+        self.host = host
+        self._video_warned = False
+
+    async def send_client_content(self, turns=None, turn_complete=True, **kwargs):
+        parts = []
+        if isinstance(turns, dict):
+            parts = turns.get("parts") or []
+        elif isinstance(turns, list):
+            for turn in turns:
+                if isinstance(turn, dict):
+                    parts.extend(turn.get("parts") or [])
+        text_parts = []
+        image_parts = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            if isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+            if part.get("inline_data") or part.get("inlineData"):
+                image_parts.append(part)
+        pipeline = getattr(self.host, "_local_pipeline", None)
+        if pipeline is None:
+            return None
+        text = "\n".join(value for value in text_parts if value.strip()).strip()
+        if image_parts and not self._video_warned:
+            self._video_warned = True
+            self.host.ui.write_log(
+                "SYS: The modular engine does not process images yet; "
+                "the text part was kept."
+            )
+        if text:
+            await pipeline.submit_text(text, source="injected")
+        return None
+
+    async def send_realtime_input(self, **kwargs):
+        # Phone microphone audio is fed into out_queue by _relay_phone_audio
+        # before it reaches the engine. Video is optional and has no equivalent
+        # in the text/audio pipeline, so it is reported once rather than
+        # pretending it was analyzed.
+        if (kwargs.get("video") or kwargs.get("media")) and not self._video_warned:
+            self._video_warned = True
+            self.host.ui.write_log(
+                "SYS: The modular engine does not process camera video yet; "
+                "audio continues."
+            )
+        return None
+
+    async def send_tool_response(self, **kwargs):
+        return None
+
+    async def close(self):
+        return None
+
+
 class JarvisLive:
     def __init__(self, ui: JarvisUI):
         self.ui             = ui
         self._asst_name     = "Zaya"
         self.session              = None
+        self._local_pipeline      = None
+        self._local_caption       = ""
         self.audio_in_queue       = None
         self.out_queue            = None
         self._loop                     = None
@@ -659,9 +573,6 @@ class JarvisLive:
         try:
             self._conversation = ConversationStore()
             previous = self._conversation.has_history()
-            state = self._conversation.state()
-            self._operator_scope = state.get('operator_scope', self._operator_scope)
-            self._operator_goal = state.get('operator_goal', '')
             if previous:
                 self.ui.write_log('SYS: Previous conversation saved in History. Ask what we were doing to recall the last five messages.')
         except (OSError, sqlite3.Error):
@@ -919,6 +830,13 @@ class JarvisLive:
         from core.execution_policy import TRUST_LOCAL_OWNER
         actual_trust = trust or TRUST_LOCAL_OWNER
         self._begin_owner_goal(text, trust=actual_trust)
+        with self._speaking_lock:
+            speaking = self._is_speaking
+        if speaking:
+            # A typed request is a deliberate barge-in too. Clear queued audio
+            # before the next answer so the old sentence cannot play over it.
+            self.interrupt()
+        self.ui.write_log(f"You: {text}")
         asyncio.run_coroutine_threadsafe(
             self._send_owner_text(text),
             self._loop
@@ -950,6 +868,8 @@ class JarvisLive:
         self._shutdown_requested = True
         from core.coding_jobs import close_jobs
         close_jobs()
+        from actions.port_tunnel import stop_all_tunnels
+        stop_all_tunnels()
         self._audio_ducker.close()
         task = getattr(self, '_run_task', None)
         if task and self._loop and not self._loop.is_closed():
@@ -1031,6 +951,9 @@ class JarvisLive:
         # owner's next response even though the server was never speaking.
         self._interrupted = not getattr(self, '_notification_active', False)
         self._notification_active = False
+        local = getattr(self, '_local_pipeline', None)
+        if local is not None:
+            local.interrupt()
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -1129,7 +1052,8 @@ class JarvisLive:
             ),
         })
 
-        parts = [time_ctx, identity_ctx]
+        from core.security.untrusted_content import boundary_prompt
+        parts = [time_ctx, identity_ctx, boundary_prompt()]
         from core.zayabar_config import emotion_tones
         parts.append('[VOICE AND FACE DELIVERY]\nUse the same selected emotion for your face and your Nika voice.\n' +
                      '\n'.join(f'{emotion}: {tone}' for emotion, tone in emotion_tones().items()))
@@ -1146,7 +1070,7 @@ class JarvisLive:
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction="\n".join(parts),
-            tools=[{"function_declarations": _all_decls}],
+            tools=[{"function_declarations": compact_tool_declarations(_all_decls)}],
             # Resume transient reconnects within this process only. A fresh
             # launch deliberately does not load a saved provider checkpoint.
             session_resumption=types.SessionResumptionConfig(
@@ -1253,8 +1177,8 @@ class JarvisLive:
         import uuid
         from core.audit import redact
         from core.execution_policy import set_trust, TRUST_LOCAL_OWNER
-        self._operator_scope = str(scope) or uuid.uuid4().hex
-        self._operator_goal = str(redact(text))[:300]
+        self._operator_scope = str(scope).strip() if scope is not None and str(scope).strip() else uuid.uuid4().hex
+        self._operator_goal = str(redact(text))
         self._operator_trust = trust or TRUST_LOCAL_OWNER
         set_trust(self._operator_trust)
         store = getattr(self, '_conversation', None)
@@ -1299,14 +1223,23 @@ class JarvisLive:
             with with_trust(effective):
                 result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
                                                                goal=goal or fc.name,
-                                                               trust_level=trust or '')
+                                                               trust_level=trust or '',
+                                                               arguments=dict(fc.args or {}))
         finally:
             self._tools_active -= 1
             self._last_tool_end = time.monotonic()
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
-        response.response["result"] = result.to_dict()
-        if result.status == 'success' and (fc.name in {'dev_agent', 'code_helper'}
+        from core.security.untrusted_content import mark_tool_result
+        response.response["result"] = mark_tool_result(result.to_dict(), fc.name)
+        if result.status in {'started', 'partial'}:
+            from core.event_bus import bus as _bus
+            _bus.publish('tool.progress', tool=fc.name, status=result.status,
+                         summary=result.summary, data=result.data)
+        # An individual tool can be only an inspection step in a larger goal.
+        # Leave the originating remote request acknowledged until a scoped
+        # whole-goal completion exists; a tool receipt must not claim it is done.
+        if result.status in {'success', 'started'} and (fc.name in {'dev_agent', 'code_helper'}
                 or (fc.name == 'coding_job' and dict(fc.args or {}).get('action') in {'start', 'continue'})
                 or (fc.name == 'git_control' and dict(fc.args or {}).get('action') in
                     {'stage', 'commit', 'push', 'pull', 'checkout', 'create_branch'})):
@@ -1366,7 +1299,18 @@ class JarvisLive:
                 import time as _t_mod
                 _now = _t_mod.monotonic()
                 _cooldown = 4.0  # seconds — covers echo window after speaking ends
-                if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
+                local_engine = getattr(self, "_local_pipeline", None)
+                if local_engine is not None and not local_engine.capabilities.supports_images:
+                    from core.tool_result import ToolResult
+                    result = ToolResult(
+                        "failed",
+                        "Visual capture is unavailable in the modular engine; it "
+                        "handles text and microphone audio only. Switch to Gemini "
+                        "Live for screen or camera analysis.",
+                        {"capability": "vision", "executed": False},
+                        retryable=False,
+                    )
+                elif self._vision_busy or (_now - self._vision_last_time) < _cooldown:
                     _wait = max(0, _cooldown - (_now - self._vision_last_time))
                     print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
                     result = "Vision is still processing the previous request. I will not call this again."
@@ -1419,6 +1363,15 @@ class JarvisLive:
                 else:
                     result = "Specify action (add/remove/list) and a topic."
 
+            elif name == "restart_zaya":
+                from core.execution_policy import require_owner
+                require_owner()
+                self.ui.request_restart()
+                from core.tool_result import ToolResult
+                result = ToolResult('partial',
+                    'Restart requested. The current Zaya will close before the replacement starts.',
+                    {'restart_requested': True}, side_effect=True)
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 async def _do_shutdown():
@@ -1434,6 +1387,8 @@ class JarvisLive:
                     await asyncio.sleep(1.5)
                     from core.coding_jobs import close_jobs
                     await asyncio.to_thread(close_jobs)
+                    from actions.port_tunnel import stop_all_tunnels
+                    await asyncio.to_thread(stop_all_tunnels)
                     import os as _os
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
@@ -1498,7 +1453,10 @@ class JarvisLive:
                 self.ui.stop_camera_stream()
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
-            self.speak_error(name, e)
+            # Keep the exact component failure in logs and the tool result.
+            # Do not inject a generic spoken "operator task failed" line into
+            # the conversation; the model can report the actual result once.
+            self.ui.write_log(f"ERR: {name} — {type(e).__name__}: {e}")
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -1594,6 +1552,10 @@ class JarvisLive:
         try:
             while True:
                 await asyncio.sleep(2)
+                # Timed phone calls must not become laptop reminder speech or
+                # wait for the desktop microphone/announcement quiet period.
+                from core.mobile_calls import get_call_manager
+                await asyncio.to_thread(get_reminders().deliver_due_call, get_call_manager())
                 if not self.session or self.ui.muted:
                     continue
                 busy = self._notifications_busy()
@@ -1975,6 +1937,7 @@ class JarvisLive:
         print("[Zaya] 👂 Recv started")
         out_buf, in_buf = [], []
         input_row = None
+        input_scope = None
         canceled, seen_calls = set(), set()
 
         try:
@@ -2067,8 +2030,10 @@ class JarvisLive:
                                                                    TRUST_AUTHENTICATED_REMOTE_OWNER)
                                 self._begin_owner_goal(
                                     " ".join(in_buf),
+                                    scope=input_scope,
                                     trust=(TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
                                            else TRUST_LOCAL_OWNER))
+                                input_scope = self._operator_scope
                                 self._last_user_speech = time.monotonic()
 
                         if getattr(sc, 'generation_complete', False) or getattr(sc, 'waiting_for_input', False):
@@ -2088,6 +2053,7 @@ class JarvisLive:
                                 self._interrupted = False
                                 in_buf  = []
                                 input_row = None
+                                input_scope = None
                                 out_buf = []
                                 self._visemes.reset()
                                 continue
@@ -2105,6 +2071,7 @@ class JarvisLive:
                                     }))
                             in_buf = []
                             input_row = None
+                            input_scope = None
 
                             full_out = " ".join(out_buf).strip()
                             # Second line of defence: even if a repeat slips
@@ -2128,13 +2095,9 @@ class JarvisLive:
                                     }))
                             out_buf = []
 
-                            # A remote command has now been answered: move its
-                            # request from 'acknowledged' to 'completed' so the
-                            # phone can stop waiting (and stop resending).
-                            pending_remote = getattr(self, '_pending_remote', None)
-                            if pending_remote:
-                                from core.remote_commands import get_gate
-                                get_gate().complete(pending_remote.popleft(), ok=True)
+                            # Spoken turn completion is not evidence that a
+                            # particular remote action completed. Keep its
+                            # acknowledgement instead of inventing completion.
 
                             if self._vision_close_pending:
                                 # This turn_complete IS the vision answer — close camera + release busy flag
@@ -2168,156 +2131,19 @@ class JarvisLive:
                 await self._conversation_write('append', 'model', ' '.join(out_buf))
 
     async def _play_audio(self):
-        print("[Zaya] 🔊 Play started")
-
-        try:
-            from core.mobile_bridge import get_bridge
-            mobile = get_bridge()
-        except Exception:
-            mobile = None
-
-        _spk_name = get_output_device()
-        _spk_dev  = audio_devices.resolve(_spk_name, "output")
-        if _spk_dev is not None:
-            print(f"[Zaya] 🔊 Output device: {_spk_name}")
-
-        def _open_spk(dev):
-            st = sd.RawOutputStream(
-                samplerate=RECEIVE_SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype="int16",
-                blocksize=CHUNK_SIZE,
-                device=dev,
-            )
-            st.start()
-            return st
-
-        try:
-            stream = _open_spk(_spk_dev)
-        except Exception as _e:
-            # A chosen output that the host API accepts by name but refuses to
-            # open (exclusive mode, wrong sample rate, device asleep) must not
-            # cost the user their voice. Fall back to the default and say so.
-            if _spk_dev is None:
-                raise
-            print(f"[Zaya] ⚠️  Output device '{_spk_name}' failed: {_e} — using default")
-            self.ui.write_log(f"SYS: Speaker '{_spk_name}' unavailable — using system default.")
-            stream = _open_spk(None)
-
-        # Ask the device how far behind the speakers actually are, rather than
-        # assuming. This is what the echo tail is sized from, so a machine with a
-        # large audio buffer gets a correspondingly longer guard — and one with a
-        # tiny buffer is not penalised with a delay it does not need.
-        try:
-            lat = float(getattr(stream, "latency", 0.0) or 0.0)
-            if 0.0 < lat < 1.0:
-                self._out_latency = lat
-            print(f"[Zaya] 🔊 Output latency {self._out_latency*1000:.0f} ms "
-                  f"→ echo tail {(self._out_latency + _TAIL_MARGIN)*1000:.0f} ms")
-        except Exception:
-            pass
-
-        last_audio = time.monotonic()
-        try:
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(
-                        self.audio_in_queue.get(),
-                        timeout=0.1
-                    )
-                except asyncio.TimeoutError:
-                    # Tool calls and delayed server turn markers can leave a
-                    # response open after its sound has drained. Only actual
-                    # playback owns the speaking gate; the echo tail still
-                    # covers the device buffer after releasing it.
-                    if self._is_speaking and time.monotonic() - last_audio >= 0.35:
-                        self.set_speaking(False)
-                        self._notification_active = False
-                    if self._turn_done_event and self._turn_done_event.is_set():
-                        if self._is_speaking:
-                            self.set_speaking(False)
-                        self._turn_done_event.clear()
-                    continue
-
-                self.set_speaking(True)
-
-                # Batch all immediately-available chunks into one write to reduce
-                # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
-                # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
-                batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
-
-                # Drive the HUD waveform and the avatar's mouth from JARVIS's
-                # own voice. The batch is up to 200 ms long, so we hand over a
-                # *schedule* of 20 ms viseme frames instead of a single averaged
-                # level and let the HUD play it out in step with the audio.
-                try:
-                    pcm = np.frombuffer(bytes(batch), dtype=np.int16)
-                    hop = _VIS_HOP / RECEIVE_SAMPLE_RATE
-                    frames = _pcm_visemes(pcm, sr=RECEIVE_SAMPLE_RATE)
-                    # When does this batch become audible? The stream was
-                    # started at launch and its callback has been pulling
-                    # silence ever since, so the first bytes of a reply reach
-                    # the speaker about one callback period later — NOT one
-                    # buffer later. `stream.latency` reports the buffer's
-                    # capacity, which is how much can be queued ahead, and on
-                    # Windows that is commonly 300-500 ms. Anchoring on it put
-                    # the entire schedule a buffer late; that is the half second
-                    # of lag, and it grew with whatever the device reported.
-                    #
-                    # After the anchor nothing needs measuring: the device
-                    # consumes at exactly realtime, so each batch sounds one
-                    # batch-duration after the one before it. The cursor is
-                    # re-anchored only when it leaves the range physically
-                    # possible — behind `now` means the device drained and this
-                    # batch starts a fresh stretch of speech, while further
-                    # ahead than the buffer can hold means it has drifted.
-                    now = time.time()
-                    horizon = self._out_latency + _CURSOR_SLACK
-                    if not (now <= self._play_cursor <= now + horizon):
-                        self._play_cursor = now + _FIRST_SOUND
-                    at = self._play_cursor
-                    # Advance by the batch's own duration whether or not it
-                    # yielded frames, so a block too short to analyse cannot
-                    # shift everything after it out of step with the audio.
-                    self._play_cursor += pcm.size / RECEIVE_SAMPLE_RATE
-                    if frames:
-                        frames = self._visemes.frames(frames, hop)
-                        self.ui.push_visemes(frames, hop, at)
-                        # Barge-in needs to know what we are playing, not just
-                        # how loud: the guard subtracts this from the microphone.
-                        self._out_level = max(f[0] for f in frames)
-                        self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE,
-                                               self._out_level)
-                    else:
-                        lvl = _pcm_level(pcm)
-                        self.ui.set_audio_level(lvl)
-                        self._out_level = lvl
-                        self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
-                except Exception:
-                    pass
-
-                try:
-                    if mobile is None or mobile.desktop_enabled():
-                        await asyncio.to_thread(stream.write, bytes(batch))
-                    if mobile is not None:
-                        # The very same PCM Zaya is speaking with. Never a second
-                        # synthesis: the phone hears this session or nothing.
-                        mobile.push_output_audio(bytes(batch))
-                    last_audio = time.monotonic()
-                except asyncio.CancelledError:
-                    raise
-        except Exception as e:
-            print(f"[Zaya] ❌ Play: {e}")
-            raise
-        finally:
-            self.set_speaking(False)
-            stream.stop()
-            stream.close()
+        from core.audio_pipeline import AudioPlaybackPipeline
+        pipeline = AudioPlaybackPipeline(
+            audio_in_queue=self.audio_in_queue,
+            ui=self.ui,
+            echo_guard=self._echo,
+            viseme_tracker=self._visemes,
+            set_speaking_cb=self.set_speaking,
+            turn_done_event=self._turn_done_event,
+            pcm_visemes=_pcm_visemes,
+            pcm_level=_pcm_level,
+        )
+        self._audio_pipeline = pipeline
+        await pipeline.run()
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
@@ -2358,21 +2184,8 @@ class JarvisLive:
                        if lang else "")
         name_clause = f" Address the user as {name}." if name else ""
 
-        # Inject last session context if available — pop removes it so it's never repeated
-        last = await asyncio.to_thread(pop_last_session)
-        session_clause = ""
-        if last:
-            try:
-                _delta = (datetime.now() - datetime.strptime(last["date"], "%Y-%m-%d")).days
-                _when  = "earlier today" if _delta == 0 else ("yesterday" if _delta == 1 else f"{_delta} days ago")
-            except Exception:
-                _when = "last time"
-            session_clause = (
-                f" Also briefly and naturally mention that {_when}: {last['summary']}"
-            )
-
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
+            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now. "
             f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
         )
 
@@ -2674,6 +2487,16 @@ class JarvisLive:
             "the decision you need. Do not ask him to explain the situation."
         )
 
+        if call.direction == 'outgoing':
+            instruction = (
+                "[PHONE CALL CONNECTED] The owner called you from his phone. Your voice now "
+                "plays on his phone and his phone microphone is the call input. Start speaking "
+                "now: greet him warmly and respectfully in your own words, then briefly invite "
+                "him to say what he needs. Choose natural, varied wording for the current "
+                "conversation; do not recite a fixed greeting or invent a reason for his call. "
+                "This is a greeting, not an instruction to start a task."
+            )
+
         async def _speak():
             try:
                 self._phone_active = True
@@ -2748,16 +2571,246 @@ class JarvisLive:
                     self.wake(reason="remote command")
                 self._begin_owner_goal(text, trust=TRUST_AUTHENTICATED_REMOTE_OWNER,
                                        scope=item.get("scope"))
-                get_gate().begin(request_id)
                 self.ui.write_log(f"[{item.get('source', 'Web')}]: {text}")
                 from core.event_bus import bus
-                bus.publish('owner.message', text=text, source=item.get('source', 'remote'))
-                get_gate().acknowledge(request_id)
-                self._pending_remote.append(request_id)
+                bus.publish('owner.message', text=text, source=item.get('source', 'remote'), request_id=request_id)
                 await self._send_owner_text(text)
+                # Delivery to the live session is an acknowledgement, not proof
+                # that the requested action has executed or completed.
+                get_gate().acknowledge(request_id)
             except Exception as e:
                 print(f"[Dashboard] Command error: {e}")
                 get_gate().complete(request_id, ok=False, error=str(e))
+
+    # ── modular engine ──────────────────────────────────────────────────────
+
+    def _local_on_user_text(self, text: str, language: str, source: str) -> None:
+        self._last_user_speech = time.monotonic()
+        self._local_caption = ""
+        if source == "microphone":
+            from core.execution_policy import (
+                TRUST_AUTHENTICATED_REMOTE_OWNER, TRUST_LOCAL_OWNER,
+            )
+            trust = (TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
+                     else TRUST_LOCAL_OWNER)
+            self._begin_owner_goal(text, trust=trust)
+            self.ui.write_log(f"You: {text}")
+            self._session_log.append(f"User: {text}")
+            asyncio.create_task(self._conversation_write("append", "user", text))
+            from core.event_bus import bus
+            bus.publish("owner.message", text=text, source="local_voice")
+            if self._dashboard:
+                asyncio.create_task(self._dashboard.broadcast({
+                    "type": "log", "speaker": "user", "text": text,
+                }))
+
+    def _local_on_state(self, state: str) -> None:
+        if state == "SPEAKING":
+            self.set_speaking(True)
+        elif state == "THINKING":
+            self.ui.set_state("THINKING")
+            from core.event_bus import bus
+            bus.publish("avatar.caption", text="Thinking…")
+        elif state == "LISTENING" and not self._is_speaking:
+            self.ui.set_state("SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING")
+
+    def _local_on_delta(self, text: str) -> None:
+        if not text:
+            return
+        self._local_caption += text
+        from core.event_bus import bus
+        bus.publish("avatar.caption", text=self._local_caption)
+        try:
+            self._visemes.feed_text(text)
+        except Exception:
+            pass
+
+    def _local_on_display_final(self, text: str) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        self._local_caption = value
+        self._last_out_logged = value
+        asyncio.create_task(self._conversation_write("append", "model", value))
+        self.ui.write_log(f"{self._asst_name}: {value}")
+        self._session_log.append(f"{self._asst_name}: {value}")
+        from core.event_bus import bus
+        bus.publish("zaya.message", text=value)
+        if self._dashboard:
+            asyncio.create_task(self._dashboard.broadcast({
+                "type": "log", "speaker": "jarvis", "text": value,
+            }))
+        self._owner_request_pending = False
+        self._owner_turn_pending = False
+
+    def _local_on_tool_result(self, name: str, result) -> None:
+        from core.event_bus import bus
+        bus.publish("tool.progress", tool=name, status=result.status,
+                    summary=result.summary, data=result.data)
+        if result.status in {"failed", "partial", "started"}:
+            self.ui.write_log(f"SYS: {name} — {result.summary}")
+
+    def _local_on_error(self, message: str) -> None:
+        text = str(message or "Unknown local engine error")
+        print(f"[Zaya/local] {text}")
+        self.ui.write_log(f"ERR: {text}")
+
+    def _local_on_readiness(self, state: dict) -> None:
+        from core.ai.settings import write_readiness
+        write_readiness(state)
+        self._local_readiness = dict(state)
+
+    def _local_on_timing(self, values: dict) -> None:
+        if not getattr(self, "_local_timing_enabled", True):
+            return
+        payload = {
+            "time": round(time.time(), 3),
+            "engine": "local_pipeline",
+            "provider": str(values.get("provider") or ""),
+            "stt_ms": values.get("stt_ms"),
+            "llm_first_text_ms": values.get("llm_first_text_ms"),
+            "turn_ms": values.get("turn_ms"),
+            "tts": values.get("tts"),
+        }
+        path = BASE_DIR / "logs" / "runtime" / "local_pipeline_timings.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > 2_000_000:
+                path.replace(path.with_suffix(".jsonl.1"))
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    async def _execute_pipeline_tool(self, name: str, arguments: dict):
+        from types import SimpleNamespace
+        from core.tool_result import normalize
+        import uuid as _uuid
+        call = SimpleNamespace(
+            id=f"local_{_uuid.uuid4().hex[:10]}",
+            name=name,
+            args=dict(arguments or {}),
+        )
+        try:
+            response = await self._execute_tool(
+                call, owner_scope=self._operator_scope,
+                owner_goal=self._operator_goal)
+            payload = getattr(response, "response", {}) or {}
+            return normalize(payload.get("result", payload))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            return normalize({"status": "failed", "summary": f"{name} failed: {type(error).__name__}: {error}"})
+
+    def _local_tool_declarations(self):
+        return (TOOL_DECLARATIONS
+                + self._action_registry.get_tool_declarations()
+                + self._plugin_registry.get_tool_declarations())
+
+    async def _run_local_engine(self):
+        from core.ai.pipeline import LocalConversationPipeline, PipelineCallbacks
+        from core.ai.runtime import build_local_runtime
+        from core.ai.settings import local_pipeline_settings, write_readiness
+
+        while not getattr(self, "_shutdown_requested", False):
+            pipeline = None
+            try:
+                values = local_pipeline_settings()
+                self._local_timing_enabled = bool(values.timings)
+                self.ui.set_state("CONNECTING")
+                self.ui.write_log(
+                    f"SYS: Modular engine — {values.provider} / {values.stt_model} / {values.tts_provider}.")
+                bundle = build_local_runtime(values)
+                self.session = _LocalSession(self)
+                self.audio_in_queue = asyncio.Queue()
+                self.out_queue = asyncio.Queue(maxsize=16)
+                self._turn_done_event = asyncio.Event()
+                self._interrupted = False
+                self._notification_active = False
+                self._owner_request_pending = False
+                self._owner_turn_pending = False
+                self._active_selective_audio = False
+                config = self._build_config()
+                pipeline = LocalConversationPipeline(
+                    stt=bundle.stt,
+                    tts=bundle.tts,
+                    llm=bundle.llm,
+                    provider=bundle.provider,
+                    settings=values,
+                    input_queue=self.out_queue,
+                    audio_queue=self.audio_in_queue,
+                    tool_executor=self._execute_pipeline_tool,
+                    tool_declarations=self._local_tool_declarations(),
+                    system_prompt=(config.system_instruction or ""),
+                    callbacks=PipelineCallbacks(
+                        on_state=self._local_on_state,
+                        on_user_text=self._local_on_user_text,
+                        on_display_delta=self._local_on_delta,
+                        on_display_final=self._local_on_display_final,
+                        on_tool_result=self._local_on_tool_result,
+                        on_error=self._local_on_error,
+                        on_readiness=self._local_on_readiness,
+                        on_timing=self._local_on_timing,
+                        is_speaking=lambda: self._is_speaking,
+                    ),
+                )
+                self._local_pipeline = pipeline
+                readiness = await pipeline.warmup()
+                write_readiness(readiness)
+                if not readiness.get("LLM_READY"):
+                    self.ui.write_log("ERR: Local LLM is not ready. — keeping typed input available.")
+                if not readiness.get("STT_READY"):
+                    self.ui.write_log("SYS: Voice input is unavailable; typed commands still work.")
+                if not readiness.get("TTS_READY"):
+                    self.ui.write_log("SYS: Voice output is unavailable; text replies still work.")
+                ready_note = "SYS: Modular engine ready."
+                if not readiness.get("STT_READY"):
+                    ready_note += " STT unavailable."
+                if not readiness.get("TTS_READY"):
+                    ready_note += " TTS unavailable."
+                self.ui.write_log(ready_note)
+                if self._wake_enabled:
+                    self._ensure_wake_detector()
+                    self._awake = False
+                    self.ui.set_state("SLEEPING")
+                else:
+                    self._awake = True
+                    self.ui.set_state("LISTENING")
+                if self._dashboard:
+                    await self._dashboard.broadcast({"type": "status", "state": "active"})
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(self._listen_audio())
+                    tg.create_task(self._play_audio())
+                    tg.create_task(self._run_system_monitor())
+                    tg.create_task(self._run_background_monitor())
+                    tg.create_task(self._run_proactive_mode())
+                    tg.create_task(self._run_sleep_watch())
+                    if self._dashboard:
+                        tg.create_task(self._relay_phone_audio())
+                        tg.create_task(self._relay_phone_video())
+                    tg.create_task(pipeline.run())
+            except asyncio.CancelledError:
+                raise
+            except KeyboardInterrupt:
+                raise
+            except Exception as error:
+                # TaskGroup wraps the failing service. Report the actual cause
+                # (for example "STT failed (...)" or "LLM failed: provider")
+                # instead of a generic ExceptionGroup.
+                root = error
+                while isinstance(root, BaseExceptionGroup) and root.exceptions:
+                    root = root.exceptions[0]
+                self.ui.write_log(f"ERR: Modular engine stopped — {type(root).__name__}: {root}")
+                self.ui.set_state("SLEEPING")
+                await asyncio.sleep(8)
+            finally:
+                self._local_pipeline = None
+                if pipeline is not None:
+                    try:
+                        await pipeline.stop()
+                    except Exception:
+                        pass
+                self.session = None
 
     # ── main loop ───────────────────────────────────────────────────────────
 
@@ -2794,6 +2847,7 @@ class JarvisLive:
         try:
             from dashboard.server import DashboardServer
             self._dashboard = DashboardServer()
+            self._dashboard.assistant_ready = lambda: self.session is not None
             self._dashboard.set_connect_callback(self._on_phone_connected)
             asyncio.create_task(self._dashboard.serve())
             # Runs for the whole lifetime, not just inside an active session
@@ -2821,6 +2875,11 @@ class JarvisLive:
             lambda: owner_is_away(phone_call_settings().away_seconds))
         self._calls.set_reachable_provider(self._phone_reachable)
         self._calls.set_available_provider(lambda: self.session is not None)
+
+        from core.ai.settings import engine_mode
+        if engine_mode() == "local_pipeline":
+            await self._run_local_engine()
+            return
 
         while True:
             _resumed_with = False
@@ -3082,8 +3141,10 @@ class JarvisLive:
 def _run_desktop_agent(ui, stopping):
     agent = None
     try:
-        if not ui.wait_for_api_key(stopping):
-            return
+        from core.ai.settings import engine_mode
+        if engine_mode() != "local_pipeline":
+            if not ui.wait_for_api_key(stopping):
+                return
         agent = JarvisLive(ui)
         if not stopping.is_set():
             asyncio.run(agent.run())
@@ -3122,10 +3183,43 @@ def main():
     if not instance.acquire():
         return
     try:
+        from core.desktop_lifecycle import record_desktop
+        record_desktop()
         from core.runtime_logging import install_runtime_logging
         install_runtime_logging()
         ui = JarvisUI("face.png")
         instance.on_activate = ui.activate_existing
+        restart_pending = False
+        def restart_desktop():
+            nonlocal restart_pending
+            if restart_pending:
+                return
+            try:
+                from core.desktop_lifecycle import schedule_restart
+                schedule_restart()
+            except OSError as error:
+                ui.write_log(f'ERR: Could not schedule restart: {error}')
+                return
+            restart_pending = True
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(800, app.quit)
+        ui.on_restart = restart_desktop
+        def prepare_phone_wake():
+            try:
+                from core.phone_wake import install
+                install()
+            except OSError as error:
+                ui.write_log(f'ERR: Phone wake launcher unavailable: {error}')
+        threading.Thread(target=prepare_phone_wake, daemon=True, name='phone-wake-setup').start()
+        try:
+            from core.telemetry import telemetry_client
+            telemetry_client.start()
+            from core.update.desktop_updater import desktop_updater
+            if _sys.platform == 'win32':
+                desktop_updater.start_background_poller()
+        except Exception:
+            pass
+
         stopping = threading.Event()
 
         worker = threading.Thread(target=_run_desktop_agent, args=(ui, stopping), daemon=True)
@@ -3136,9 +3230,26 @@ def main():
             stopping.set()
             ui._shutdown_audio()
             worker.join(timeout=2)
+            try:
+                from services.whatsapp.service import close_if_started
+                close_if_started()
+            except Exception as error:
+                ui.write_log(f'ERR: WhatsApp shutdown cleanup failed: {type(error).__name__}')
     finally:
         # Keep the lock until UI shutdown has restored audio and hidden Zaya.
         instance.close()
 
 if __name__ == "__main__":
     main()
+    # The UI, audio, owned bridge/jobs and startup lock are already closed.
+    # Outstanding executor workers must not keep a closed assistant alive or
+    # prevent a requested replacement from starting. Only exit this process.
+    import logging as _logging
+    _logging.shutdown()
+    for _output in (sys.stdout, sys.stderr):
+        if _output is not None:
+            try:
+                _output.flush()
+            except (OSError, ValueError):
+                pass
+    __import__('os')._exit(0)

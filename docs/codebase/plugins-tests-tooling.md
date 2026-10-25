@@ -8,6 +8,12 @@ reference below points at that revision; this survey was read-only.
 
 Companion notes live in this directory alongside this file.
 
+October 21 update: the owner requested test-source and fixture removal after
+repair verification. References to the suite below describe the historical
+snapshot. Current CI is `.github/workflows/code-checks.yml`, which compiles
+application sources and checks undefined names. Android releases run lint and
+a signed build. See the dated repair notes for the pre-removal check results.
+
 ---
 
 ## 1. Plugin API contract
@@ -127,8 +133,8 @@ Enable state is an opt-out model: `get_plugin_enabled` returns `True` unless
 ## 2. Plugin inventory
 
 Twelve `.py` files ship in `plugins/`: the empty package marker, two files skipped
-by discovery (a template and a shared helper), and nine plugin candidates. Eight
-are live; one is rejected by name collision.
+by discovery (a template and a shared helper), and eight plugin candidates. All eight
+are live.
 
 | File | Tool name | Entry points | What it does | Settings | Tests |
 | --- | --- | --- | --- | --- | --- |
@@ -136,7 +142,6 @@ are live; one is rejected by name collision.
 | `_telegram_ops.py` | — (helper) | `EXTRA_OPS` :67, `produce()` :665 | Shared Telegram extras (screenshots, hardware readout, STT/TTS) behind the bridge. | — | — |
 | `telegram_remote.py` | `telegram_remote` | `PLUGIN` :670, `run` :1851 | Remote-control bridge: phone drives the computer over Telegram, machine pushes screenshots/status back. | :613 | — |
 | `chat_takeover.py` | `chat_takeover` | `PLUGIN` :45, `run` :658 | Watches a visible non-WhatsApp chat and replies in the user's style until told to stop. | — | refusal path only |
-| `game_updater.py` | `game_updater` (rejected) | `PLUGIN` :2461, `run` :2452 | Steam/Epic install, update, list, download status, daily schedule. | :111 (unreachable) | — |
 | `water_reminder.py` | `water_reminder` | `PLUGIN` :24, `run` :181 | Periodic spoken hydration reminders plus intake tracking against a daily goal; state in `memory/water_state.json` (:22). | — | — |
 | `pomodoro.py` | `pomodoro` | `PLUGIN` :27, `run` :240 | Focus/break timer with spoken transitions and today's focus totals; state in `memory/pomodoro_state.json` (:25). | — | — |
 | `calorie_counter.py` | `calorie_counter` | `PLUGIN` :25, `run` :162 | Takes its own webcam photo of food and reports calories/macros. | — | — |
@@ -146,8 +151,8 @@ are live; one is rejected by name collision.
 
 Notes:
 
-- The two giants are `telegram_remote.py` (~2,100 lines) and `game_updater.py`
-  (~2,515); every other plugin is roughly 180-740 lines.
+- The largest plugin is `telegram_remote.py` (~2,100 lines); other plugins are roughly 180-740 lines.
+- `game_updater` is now canonically maintained as an action in `actions/game_updater.py` with UIA support and scheduling.
 - No plugin declares `behavior` or `scheduling`, so every plugin runs blocking
   with default scheduling behavior.
 - Stateful plugins write JSON under `memory/`; both state files are currently
@@ -198,20 +203,11 @@ Notes:
   `whatsapp` and for an unspecified platform without ever grabbing the screen
   (`tests/test_whatsapp_identity_notifications.py:62-67`).
 
-### 3.3 `plugins/game_updater.py` — a rejected duplicate
+### 3.3 `game_updater` — canonical action consolidation
 
-- The plugin and the core action both declare `"name": "game_updater"`
-  (`plugins/game_updater.py:2462`, `actions/game_updater.py:1064`). Discovery
-  prefers the action (core names win, `core/plugin_loader.py:256-258`), so the
-  plugin is rejected at startup and its settings never render.
-- This is intentional and documented: "One existing plugin is intentionally
-  rejected because `game_updater.py` duplicates the core `game_updater` tool;
-  diagnostics expose that exact reason" (`docs/VALIDATION.md:53-55`).
-- Consequence: the 2,514-line plugin is unreachable through the tool schema
-  while its `--scheduled` CLI path still runs when invoked by hand
-  (`:2424-2427`); the scheduled task it installs points back at this file
-  (`:2188`, `:2211`, `:2236`), so the duplication is not inert — it can drift from
-  the core action that actually serves model calls.
+- The duplicate plugin implementation in `plugins/game_updater.py` was removed in Phase 1 hygiene.
+- Its full UIA accessibility tree automation, manifest verification, and `--scheduled` CLI capabilities were migrated into the canonical action `actions/game_updater.py`.
+- Discovery now loads `actions/game_updater.py` with 0 rejections and 0 collisions across plugins and actions.
 
 ---
 
@@ -304,6 +300,15 @@ Conventions worth keeping:
 - `tools/generate_poke_voices.py` — pre-renders each configured Nika reaction once
   so playback never calls AI; writes 24 kHz mono 16-bit WAVs atomically via a
   `.tmp` replace (`:9-27`).
+- `tools/analyze_codebase.py` — read-only static analysis of the source tree.
+  Standard library only (`ast`, `tokenize`, `importlib.metadata`): structure,
+  dependencies, line/comment/docstring metrics, per-function complexity and
+  nesting, and the findings that follow from them. Test folders and test files
+  are excluded from the scope by default; `--include-tests` brings them back.
+  Writes `docs/generated/codebase_analysis.md` and `.json` (both gitignored).
+  `--verify` prints the scope and environment checklist, `--self-check` proves
+  the analyzer still honours its own Python 3.3 syntax floor, and
+  `--include-generated` walks build output and caches too.
 
 ### 6.3 Dependencies
 

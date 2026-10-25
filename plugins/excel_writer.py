@@ -18,6 +18,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from core.artifact_paths import save_artifact, sheet_title
 
 PLUGIN = {
     "name": "excel_writer",
@@ -112,7 +113,7 @@ def _build_xlsx(spec: dict, path: Path) -> dict:
 
     wb = Workbook()
     ws = wb.active
-    ws.title = (str(spec.get("title") or "Sheet1"))[:31]
+    ws.title = sheet_title(spec.get('title'))
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="1F4E78")
@@ -209,7 +210,11 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     path = _output_dir() / f"{fname}_{stamp}.xlsx"
 
     try:
-        info = _build_xlsx(spec, path)
+        metadata = {}
+        def write_artifact(destination):
+            metadata.update(_build_xlsx(spec, destination))
+        path = save_artifact(write_artifact, path)
+        info = metadata
     except Exception as e:
         return f"I built the layout but couldn't write the file: {e}"
 

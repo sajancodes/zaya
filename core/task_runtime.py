@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
+from core.runtime_paths import mutable_path
 from core import audit
 from core.event_bus import bus
 from core.tool_result import ToolResult
@@ -44,8 +45,10 @@ class TaskRuntime:
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS runtime_tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS tool_results (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS tool_request_claims (request_id TEXT PRIMARY KEY, created_at REAL NOT NULL)')
         # A process restart cannot prove an in-flight side effect failed. Do not replay it.
-        for task in self.list():
+        rows = self.db.execute('SELECT id,payload FROM runtime_tasks').fetchall()
+        for task in (self._load_task(*row) for row in rows):
             if task.state not in TERMINAL:
                 self.transition(task.id, 'paused', error='Application restarted; inspect evidence before resuming.')
 
@@ -132,7 +135,8 @@ class TaskRuntime:
                 # Keep evidence of a late side effect without undoing cancellation.
                 return self._save(task, event=None)
             state = {'success': 'completed', 'failed': 'failed', 'partial': 'waiting_external',
-                     'cancelled': 'cancelled', 'waiting_confirmation': 'waiting_confirmation'}.get(result.status, 'failed')
+                     'cancelled': 'cancelled', 'waiting_confirmation': 'waiting_confirmation',
+                     'ambiguous': 'waiting_confirmation', 'started': 'waiting_external'}.get(result.status, 'failed')
             return self.transition(task_id, state, evidence=task.evidence, side_effects=task.side_effects,
                                    error=result.summary if state == 'failed' else None)
 
@@ -159,6 +163,18 @@ class TaskRuntime:
             self.db.execute('INSERT OR IGNORE INTO tool_results VALUES (?,?)',
                             (request_id, json.dumps(audit.redact(result.to_dict()), default=str)))
 
+    def claim_request(self, request_id: str) -> bool:
+        """Durably reserve an invocation before any side effect can start."""
+        with self._lock, self.db:
+            cursor = self.db.execute('INSERT OR IGNORE INTO tool_request_claims VALUES (?,?)',
+                                     (request_id, time.time()))
+            return cursor.rowcount == 1
+
+    def release_request(self, request_id: str) -> None:
+        """Release only requests whose completed result proves no side effect."""
+        with self._lock, self.db:
+            self.db.execute('DELETE FROM tool_request_claims WHERE request_id=?', (request_id,))
+
 
 _runtime: TaskRuntime | None = None
 _runtime_lock = threading.Lock()
@@ -168,5 +184,5 @@ def get_runtime() -> TaskRuntime:
     global _runtime
     with _runtime_lock:
         if _runtime is None:
-            _runtime = TaskRuntime(Path(__file__).resolve().parent.parent / 'memory' / 'zaya_runtime.db')
+            _runtime = TaskRuntime(mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'zaya_runtime.db'))
     return _runtime

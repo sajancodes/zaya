@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 import json
 import os
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import queue
 import subprocess
 import threading
@@ -27,7 +28,7 @@ from core.shell_session import terminate_tree
 from core.task_runtime import get_runtime
 from core.runtime_logging import log_line
 
-STORE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json'
+STORE_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'coding_jobs.json')
 ACTIVE = {'starting', 'planning', 'working', 'reviewing'}
 _HIDDEN = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
            if os.name == 'nt' else {'start_new_session': True})
@@ -267,6 +268,12 @@ class CodingJobs:
         narrator, tally = Narrator(Path(job.project).name), Tally()
         try:
             brief = self._supervisor.prepare(job.goal, job.project)
+            from core.coding_artifacts import requested_formats, verify_artifacts
+            expected_formats = requested_formats(job.goal)
+            artifact_requirements = []
+            for extension in expected_formats:
+                brief.requirements.append(f'Deliver a valid .{extension} file in this project; another format is not a substitute.')
+                artifact_requirements.append(len(brief.requirements))
             if self._stop.is_set():
                 return
             job.requirements, job.checks = brief.requirements, brief.checks
@@ -294,6 +301,11 @@ class CodingJobs:
                 self.runtime.transition(job.runtime_id, 'verifying', active_step=f'review pass {number}')
                 self._save()
                 review = self._supervisor.review(job.goal, brief, job.response, job.observations)
+                if review.get('decision') == 'complete' and expected_formats:
+                    missing = verify_artifacts(job.project, expected_formats, job.created_at)
+                    if missing:
+                        review = {'decision': 'continue', 'requirements': [
+                            artifact_requirements[expected_formats.index(ext)] for ext in missing], 'checks': []}
                 if self._stop.is_set():
                     break
                 job.review = review.get('decision', 'blocked')

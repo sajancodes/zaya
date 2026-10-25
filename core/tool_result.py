@@ -5,7 +5,18 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-STATUSES = {'success', 'failed', 'partial', 'waiting_confirmation'}
+STATUSES = {'success', 'failed', 'partial', 'waiting_confirmation', 'started', 'ambiguous'}
+
+# Semantic names used in prompts, telemetry and mission state. The wire names
+# stay stable so existing tools and stored tasks keep working.
+SEMANTIC_STATUS = {
+    'success': 'SUCCESS',
+    'partial': 'UNVERIFIED',
+    'failed': 'FAILED',
+    'waiting_confirmation': 'ASK',
+    'ambiguous': 'ASK',
+    'started': 'STARTED',
+}
 
 
 def truncate(text: str, limit: int = 16384) -> tuple[str, bool]:
@@ -26,16 +37,50 @@ class ToolResult:
     retryable: bool = False
     side_effect: bool = False
     undo_id: str | None = None
+    trust: str = ""
+    external_content: bool = False
+    content_is_data_not_instructions: bool = False
 
     def __post_init__(self) -> None:
         if self.status not in STATUSES:
             raise ValueError(f'Invalid tool status: {self.status}')
 
+    @property
+    def semantic(self) -> str:
+        return SEMANTIC_STATUS.get(self.status, 'FAILED')
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in {'success', 'failed'}
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {**asdict(self), 'semantic_status': self.semantic}
 
     def __str__(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, default=str)
+
+
+def success(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
+    return ToolResult('success', summary, data or {}, **kwargs)
+
+
+def started(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
+    """The operation genuinely began but has not completed; do not call it done."""
+    return ToolResult('started', summary, data or {}, **kwargs)
+
+
+def unverified(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
+    """The request was dispatched but completion cannot be proven."""
+    return ToolResult('partial', summary, data or {}, **kwargs)
+
+
+def failed(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
+    return ToolResult('failed', summary, data or {}, **kwargs)
+
+
+def ask(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
+    """Clarification is required; nothing has executed."""
+    return ToolResult('ambiguous', summary, {**(data or {}), 'executed': False, 'needs_clarification': True}, **kwargs)
 
 
 def normalize(value: Any) -> ToolResult:

@@ -1,43 +1,152 @@
-"""
-Ghost Mini Overlay Dock (Chapter 06 / PC Specs)
-Manages floating quick-access mini overlay positioned near current cursor coordinate.
-"""
+"""A real Qt quick-command window, controlled through queued GUI requests."""
 from __future__ import annotations
 
-import ctypes
-from typing import Dict, Any, Tuple
+import threading
 
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+_bridge = None
 
-_overlay_state = {
-    "visible": False,
-    "position": [0, 0]
-}
 
-def get_cursor_pos() -> Tuple[int, int]:
-    """Returns (x, y) coordinates of the mouse cursor."""
-    try:
-        pt = POINT()
-        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-        return int(pt.x), int(pt.y)
-    except Exception:
-        return (500, 300)
+def install_ghost_overlay(command_callback, parent=None):
+    """Call once on the Qt GUI thread; callback accepts owner-entered text."""
+    global _bridge
+    from PyQt6.QtCore import QObject, pyqtSignal as Signal, pyqtSlot as Slot, QThread, Qt
+    from PyQt6.QtGui import QCursor
+    from PyQt6.QtWidgets import QApplication, QFrame, QVBoxLayout, QLabel, QLineEdit, QPushButton
 
-def toggle_ghost_overlay_window(force_state: bool | None = None) -> Dict[str, Any]:
-    """Toggles or sets the mini ghost overlay window visibility."""
-    global _overlay_state
-    if force_state is not None:
-        _overlay_state["visible"] = force_state
+    app = QApplication.instance()
+    if app is None or QThread.currentThread() != app.thread():
+        raise RuntimeError('Install the quick-command overlay on the application GUI thread.')
+    if _bridge is not None:
+        return _bridge
+
+    class OverlayBridge(QObject):
+        requested = Signal(object)
+
+        def __init__(self):
+            super().__init__(parent)
+            self.window = QFrame(parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+            self.window.setWindowTitle('Zaya quick command')
+            self.window.resize(340, 140)
+            layout = QVBoxLayout(self.window)
+            layout.addWidget(QLabel('Zaya — at your service', self.window))
+            self.entry = QLineEdit(self.window)
+            self.entry.setPlaceholderText('What would you like me to do?')
+            layout.addWidget(self.entry)
+            send = QPushButton('Send', self.window)
+            layout.addWidget(send)
+            send.clicked.connect(self.submit)
+            self.entry.returnPressed.connect(self.submit)
+            self.requested.connect(self.apply)
+            self.passive = None
+            self.hand_settings = None
+            self.pending = None
+            self.pending_lock = threading.Lock()
+            app.aboutToQuit.connect(self.shutdown_optional)
+
+        def shutdown_optional(self):
+            from core.gesture.controller import hands
+            from core.perception.screen_perception import perception
+            hands.stop()
+            perception.stop()
+            # Optional renderer owns no voice/runtime state.
+            from services.spatial_server import stop
+            stop()
+
+        def queue_passive(self, packet):
+            with self.pending_lock:
+                notify = self.pending is None
+                self.pending = dict(packet)
+            if notify:
+                self.requested.emit({'passive_flush': True, 'done': threading.Event()})
+
+        @Slot()
+        def submit(self):
+            text = self.entry.text().strip()
+            if text:
+                command_callback(text)
+                self.entry.clear()
+
+        @Slot(object)
+        def apply(self, packet):
+            try:
+                if packet.get('cancelled'):
+                    return
+                if packet.get('hand_settings'):
+                    if self.hand_settings is None:
+                        from core.gesture.settings_panel import HandSettingsPanel
+                        self.hand_settings=HandSettingsPanel(parent)
+                    if packet.get('mode') and hasattr(self.hand_settings, 'set_mode_ui'):
+                        self.hand_settings.set_mode_ui(packet['mode'])
+                    self.hand_settings.showFullScreen();self.hand_settings.raise_();self.hand_settings.activateWindow()
+                    return
+                if packet.get('passive_flush'):
+                    with self.pending_lock:
+                        latest, self.pending = self.pending, None
+                    if latest is not None:
+                        if self.hand_settings is not None and self.hand_settings.isVisible():
+                            if self.passive is not None and self.passive.isVisible():
+                                self.passive.hide()
+                            return
+                        if self.passive is None:
+                            from core.gesture.keyboard_overlay import PassiveOverlay
+                            self.passive = PassiveOverlay()
+                        self.passive.apply(latest)
+                    return
+                desired = packet['force_state']
+                visible = not self.window.isVisible() if desired is None else desired
+                if visible:
+                    point = QCursor.pos()
+                    screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+                    if screen:
+                        rect = screen.availableGeometry()
+                        point.setX(max(rect.left(), min(point.x(), rect.right() - self.window.width() + 1)))
+                        point.setY(max(rect.top(), min(point.y(), rect.bottom() - self.window.height() + 1)))
+                    self.window.move(point)
+                    self.window.show()
+                    self.window.raise_()
+                    self.window.activateWindow()
+                    self.entry.setFocus()
+                else:
+                    self.window.hide()
+                packet['result'] = {'status': 'success', 'visible': self.window.isVisible(),
+                                    'position': [self.window.x(), self.window.y()]}
+            except Exception as error:
+                packet['result'] = {'status': 'error', 'message': str(error), 'visible': False}
+            finally:
+                packet['done'].set()
+
+    _bridge = OverlayBridge()
+    return _bridge
+
+
+def toggle_ghost_overlay_window(force_state=None):
+    if _bridge is None:
+        return {'status': 'error', 'visible': False, 'message': 'The Zaya quick-command window is not initialized.'}
+    from PyQt6.QtCore import QThread
+    packet = {'force_state': force_state, 'done': threading.Event()}
+    if QThread.currentThread() == _bridge.thread():
+        _bridge.apply(packet)
     else:
-        _overlay_state["visible"] = not _overlay_state["visible"]
+        _bridge.requested.emit(packet)
+        if not packet['done'].wait(3):
+            packet['cancelled'] = True
+            return {'status': 'error', 'visible': False, 'message': 'The quick-command window did not acknowledge the request.'}
+    return packet.get('result', {'status': 'error', 'visible': False})
 
-    if _overlay_state["visible"]:
-        x, y = get_cursor_pos()
-        _overlay_state["position"] = [x, y]
 
-    return {
-        "status": "success",
-        "visible": _overlay_state["visible"],
-        "position": _overlay_state["position"]
-    }
+def passive_overlay_available():
+    return _bridge is not None
+
+
+def update_passive_overlay(packet):
+    if _bridge is not None:
+        _bridge.queue_passive(packet)
+
+
+def show_hand_settings(mode=None):
+    if _bridge is None:return False
+    _bridge.requested.emit({'hand_settings':True,'mode':mode,'done':threading.Event()})
+    return True
+
+
+show_vision_control_center = show_hand_settings

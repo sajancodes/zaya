@@ -85,6 +85,10 @@ class CellularCallManager(
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    private var phoneListener: PhoneStateListener? = null
+    private var phoneRegistered = false
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     init {
         try {
             tts = TextToSpeech(context.applicationContext, this)
@@ -106,30 +110,30 @@ class CellularCallManager(
 
     // ── Telephony Listener ──────────────────────────────────────────────────
 
+    fun refreshPermissions() { mainHandler.post { registerTelephonyListener() } }
+
     private fun registerTelephonyListener() {
-        val tm = telephonyManager ?: return
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-                    override fun onCallStateChanged(state: Int) {
-                        handleCallStateUpdate(state, null)
-                    }
-                }
-                tm.registerTelephonyCallback(context.mainExecutor, callback)
-            } else {
-                @Suppress("DEPRECATION")
-                val listener = object : PhoneStateListener() {
-                    @Deprecated("Deprecated in Java")
-                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                        handleCallStateUpdate(state, phoneNumber)
-                    }
-                }
-                @Suppress("DEPRECATION")
-                tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not register telephony state listener: ${e.message}")
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            refreshPermissions(); return
         }
+        val tm = telephonyManager ?: return
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        if (!granted || phoneRegistered) return
+        try {
+            // The legacy listener still exposes the optional caller number when
+            // Android grants READ_CALL_LOG; modern state-only callbacks do not.
+            @Suppress("DEPRECATION")
+            val listener = object : PhoneStateListener() {
+                @Deprecated("Deprecated in Java")
+                override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                    handleCallStateUpdate(state, phoneNumber)
+                }
+            }
+            @Suppress("DEPRECATION")
+            tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+            phoneListener = listener
+            phoneRegistered = true
+        } catch (e: Exception) { Log.w(TAG, "Could not register telephony listener", e) }
     }
 
     fun handleCallStateUpdate(state: Int, incomingNumber: String?) {
@@ -162,6 +166,7 @@ class CellularCallManager(
     }
 
     fun getIncomingCallInfo(): IncomingCallInfo {
+        refreshPermissions()
         val isRinging = currentCallState == TelephonyManager.CALL_STATE_RINGING
         return IncomingCallInfo(
             isRinging = isRinging,
@@ -325,6 +330,12 @@ class CellularCallManager(
     }
 
     fun shutdown() {
+        mainHandler.post {
+            @Suppress("DEPRECATION")
+            phoneListener?.let { telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE) }
+            phoneListener = null
+            phoneRegistered = false
+        }
         tts?.stop()
         tts?.shutdown()
         tts = null

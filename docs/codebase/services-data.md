@@ -72,7 +72,6 @@ The bar subscribes to **every** event — `bus.subscribe('*', self.runtime_event
 | Event | Effect |
 |---|---|
 | `avatar.caption` | `reply` bubble (model output transcription, `main.py:1889-1890`) |
-| `avatar.reaction.playing` | extends `poked_until` by `min(10000, max(reaction_duration_ms, duration_ms))`; **no publisher exists in this repo** — currently dead code |
 | `avatar.emotion` | updates `emotion` when known, reloads media |
 | `task.*` | `task_id = task['task_id'] or task['id']`; `created`/`executing`/`verifying` add to `active_tasks`, anything else removes (`191-199`) |
 

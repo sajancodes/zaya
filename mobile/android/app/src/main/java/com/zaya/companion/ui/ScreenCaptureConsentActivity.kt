@@ -33,6 +33,8 @@ class ScreenCaptureConsentActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             Log.i(TAG, "Screen capture consent granted by user")
             ScreenCaptureManager.setProjectionConsent(result.resultCode, result.data!!)
+            com.zaya.companion.service.ZayaService.request(this,
+                com.zaya.companion.service.ZayaService.ACTION_PROJECTION_BEGIN)
         } else {
             Log.w(TAG, "Screen capture consent denied or dismissed by user")
             ScreenCaptureManager.onConsentDenied()

@@ -20,6 +20,8 @@ import logging
 import threading
 import time
 from collections import deque
+from typing import Any
+import uuid
 
 from core.event_bus import bus
 from core import mobile_protocol as protocol
@@ -141,6 +143,64 @@ class MobileBridge:
         self.sink_failures = 0
         self.last_failure = ''
         self._unsubscribe = None
+        self._pending_requests: dict[str, tuple[threading.Event, dict, str]] = {}
+
+    # Phone transport is device-addressed; generic event sinks do not prove connectivity.
+    def bind_phone_transport(self, devices, send) -> None:
+        self._phone_devices = devices
+        self._phone_send = send
+
+    def connected_devices(self) -> list[str]:
+        provider = getattr(self, '_phone_devices', None)
+        return sorted(set(provider())) if provider else []
+
+    def phone_connected(self) -> bool:
+        return bool(self.connected_devices())
+
+    def register_response(self, request_id: str, data: dict, *, device_id: str = '') -> bool:
+        with self._lock:
+            entry = self._pending_requests.get(request_id)
+            if entry is None or entry[2] != device_id:
+                return False
+            event, result_slot, _ = entry
+            if event.is_set():
+                return False
+            status = str(data.get('status') or '').lower()
+            if status in {'needs_confirmation', 'permission_required', 'pending'}:
+                return True  # Only a final, approved outcome releases the caller.
+            result_slot.update(data)
+            result_slot['status'] = 'success' if status == 'success' else 'failed'
+            event.set()
+            return True
+
+    def dispatch_phone_action(self, action: str, params: dict | None = None,
+                              timeout_sec: float = 120.0, *, device_id: str = '') -> dict:
+        devices = self.connected_devices()
+        if not device_id:
+            if len(devices) != 1:
+                return {'status': 'failed', 'error': 'No phone connected.' if not devices else
+                        'More than one phone is connected. Specify the target device.'}
+            device_id = devices[0]
+        if device_id not in devices:
+            return {'status': 'failed', 'error': 'The selected phone is offline.'}
+        req_id = 'act_' + uuid.uuid4().hex
+        event, slot = threading.Event(), {}
+        with self._lock:
+            self._pending_requests[req_id] = (event, slot, device_id)
+        try:
+            self._phone_send(protocol.envelope('action.invoke', {
+                'request_id': req_id, 'action_id': action, 'arguments': params or {},
+                'device_id': device_id, 'expires_at': time.time() + min(timeout_sec, 120.0),
+            }), device_id)
+            if not event.wait(max(1.0, min(timeout_sec, 120.0))):
+                return {'status': 'failed', 'error': 'Phone action expired without a confirmed result.', 'request_id': req_id}
+            return dict(slot)
+        finally:
+            with self._lock:
+                self._pending_requests.pop(req_id, None)
+
+    def dispatch_screen_capture(self, prompt: str = '', timeout_sec: float = 120.0, *, device_id: str = '') -> dict:
+        return self.dispatch_phone_action('capture_screen', {'prompt': prompt}, timeout_sec, device_id=device_id)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 

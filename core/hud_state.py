@@ -2,7 +2,9 @@
 TOOLS = {'git_control': 'Git operation', 'terminal_exec': 'Terminal task',
          'whatsapp': 'WhatsApp', 'runtime_status': 'Checking task state',
          'system_diagnostics': 'Checking capabilities', 'browser_control': 'Browser task'}
-STATES = {'waiting_confirmation': 'awaiting your confirmation', 'waiting_external': 'awaiting verification',
+STATES = {'waiting_confirmation': 'awaiting your confirmation',
+          'waiting_clarification': 'needs clarification',
+          'waiting_external': 'awaiting verification',
           'executing': 'working', 'verifying': 'verifying', 'completed': 'completed',
           'failed': 'failed', 'cancelled': 'cancelled', 'paused': 'paused', 'created': 'starting'}
 

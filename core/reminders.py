@@ -2,6 +2,7 @@
 from datetime import datetime
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import platform
 import shutil
 import sqlite3
@@ -10,7 +11,7 @@ import threading
 import time
 import uuid
 
-DB_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'reminders.db'
+DB_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'reminders.db')
 
 
 class ReminderStore:
@@ -27,15 +28,22 @@ class ReminderStore:
                 created_at REAL NOT NULL, cancelled_at REAL, voice_queued_at REAL,
                 desktop_notified_at REAL, scheduler_id TEXT, error TEXT NOT NULL DEFAULT '',
                 voice_retry_at REAL NOT NULL DEFAULT 0)''')
+            columns = {row[1] for row in self.db.execute('PRAGMA table_info(reminders)')}
+            for name, definition in {'delivery': "TEXT NOT NULL DEFAULT 'voice'",
+                                     'call_requested_at': 'REAL', 'call_id': 'TEXT'}.items():
+                if name not in columns:
+                    self.db.execute(f'ALTER TABLE reminders ADD COLUMN {name} {definition}')
 
     def close(self):
         self.db.close()
 
-    def create(self, message, due_at):
+    def create(self, message, due_at, delivery='voice'):
+        if delivery not in {'voice', 'call'}:
+            raise ValueError('Choose voice or call delivery.')
         rid = uuid.uuid4().hex
         with self.lock, self.db:
-            self.db.execute('INSERT INTO reminders(id,message,due_at,created_at) VALUES(?,?,?,?)',
-                            (rid, message, due_at, self.clock()))
+            self.db.execute('INSERT INTO reminders(id,message,due_at,created_at,delivery) VALUES(?,?,?,?,?)',
+                            (rid, message, due_at, self.clock(), delivery))
         return self.get(rid)
 
     def get(self, rid):
@@ -49,6 +57,7 @@ class ReminderStore:
         result = dict(row)
         result['due_local'] = datetime.fromtimestamp(result['due_at']).astimezone().isoformat()
         result['state'] = ('cancelled' if result['cancelled_at'] is not None else
+                           'call_requested' if result['call_requested_at'] is not None else
                            'voice_queued' if result['voice_queued_at'] is not None else
                            'desktop_notified' if result['desktop_notified_at'] is not None else
                            'due' if result['due_at'] <= self.clock() else 'scheduled')
@@ -62,7 +71,7 @@ class ReminderStore:
     def next_due(self):
         with self.lock:
             row = self.db.execute('''SELECT * FROM reminders WHERE due_at<=? AND cancelled_at IS NULL
-                AND voice_queued_at IS NULL AND voice_retry_at<=? ORDER BY due_at,created_at LIMIT 1''',
+                AND delivery='voice' AND voice_queued_at IS NULL AND voice_retry_at<=? ORDER BY due_at,created_at LIMIT 1''',
                                   (self.clock(), self.clock())).fetchone()
         if row is None:
             return None
@@ -72,7 +81,7 @@ class ReminderStore:
         return item
 
     def update(self, rid, **values):
-        if not values or set(values) - {'scheduler_id', 'error', 'cancelled_at', 'voice_queued_at', 'desktop_notified_at', 'voice_retry_at'}:
+        if not values or set(values) - {'scheduler_id', 'error', 'cancelled_at', 'voice_queued_at', 'desktop_notified_at', 'voice_retry_at', 'call_requested_at', 'call_id'}:
             raise ValueError('Invalid reminder update.')
         with self.lock, self.db:
             self.db.execute('UPDATE reminders SET ' + ','.join(f'{key}=?' for key in values) + ' WHERE id=?', (*values.values(), rid))
@@ -87,6 +96,39 @@ class ReminderStore:
         self.get(rid)
         self.update(rid, cancelled_at=self.clock())
         return self.get(rid)
+
+    def deliver_due_call(self, manager):
+        """Dispatch one explicit timed call; never substitute reminder speech.
+
+        The durable timestamp records a ringing request, not an answered call.
+        Missed/declined calls are not repeatedly redialled.
+        """
+        with self.lock:
+            row = self.db.execute("""SELECT * FROM reminders WHERE delivery='call'
+                AND due_at<=? AND cancelled_at IS NULL AND call_requested_at IS NULL
+                AND voice_retry_at<=? ORDER BY due_at,created_at LIMIT 1""",
+                (self.clock(), self.clock())).fetchone()
+            if row is None:
+                return None
+            rid = row['id']
+            try:
+                if not manager.available() or not manager.phone_reachable() or manager.active() is not None:
+                    self.update(rid, error='Scheduled call pending: phone/session unavailable or another call active.',
+                                voice_retry_at=self.clock() + 30)
+                    return None
+                call = manager.request_call(title='Scheduled call from Zaya', detail=row['message'],
+                    reason='The owner asked you to call at this time.',
+                    briefing='This is the scheduled call the owner requested. Briefly explain the purpose in your own words: ' + row['message'],
+                    source='scheduled_call', key='scheduled:' + rid, requested=True)
+                if call is None:
+                    self.update(rid, error='Scheduled call could not ring; retained for retry.', voice_retry_at=self.clock() + 30)
+                    return None
+                self.update(rid, call_requested_at=self.clock(), call_id=call.call_id, error='')
+                return self.get(rid)
+            except Exception as error:
+                self.update(rid, error=f'Scheduled call failed ({type(error).__name__}); retained for retry.',
+                            voice_retry_at=self.clock() + 30)
+                return None
 
 
 def notify_desktop(message, os_name=None):
@@ -129,6 +171,22 @@ def notify_scheduled(rid, database, os_name):
     store = ReminderStore(database)
     try:
         item = store.get(rid)
+        if item['delivery'] == 'call':
+            if item['cancelled_at'] is not None or item['call_requested_at'] is not None:
+                return True
+            remaining = item['due_at'] - store.clock()
+            if remaining > 60:
+                raise RuntimeError('The scheduler ran before this call was due.')
+            if remaining > 0:
+                time.sleep(remaining)
+            item = store.get(rid)
+            if item['cancelled_at'] is not None or item['call_requested_at'] is not None:
+                return True
+            from core.desktop_lifecycle import launch_desktop
+            launch_desktop()
+            # The live desktop owns the authenticated phone connection. It
+            # consumes this durable due call after startup; this process cannot.
+            return True
         if item['cancelled_at'] is not None or item['desktop_notified_at'] is not None or item['voice_queued_at'] is not None:
             return True
         remaining = item['due_at'] - store.clock()
@@ -136,6 +194,10 @@ def notify_scheduled(rid, database, os_name):
             raise RuntimeError('The scheduler ran before this reminder was due.')
         if remaining > 0:
             time.sleep(remaining)  # Minute-resolution schedulers may start early.
+        item = store.get(rid)
+        if (item['cancelled_at'] is not None or item['desktop_notified_at'] is not None
+                or item['voice_queued_at'] is not None):
+            return True
         notify_desktop(item['message'], os_name)
         store.update(rid, desktop_notified_at=store.clock(), error='')
         return True

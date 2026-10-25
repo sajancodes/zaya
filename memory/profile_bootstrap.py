@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import re
 from memory.memory_manager import update_memory
 
-PROFILE_PATH = Path(__file__).resolve().parent / 'profile.json'
+PROFILE_PATH = mutable_path(Path(__file__).resolve().parent / 'profile.json')
 CATEGORIES = {'identity', 'preferences', 'projects', 'device', 'notes'}
 SENSITIVE_KEY = re.compile(r'password|secret|token|api.?key|credential|bank|wallet|phone|address|national.?id|medical', re.I)
 

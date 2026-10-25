@@ -16,13 +16,14 @@ import logging
 import sys
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import time
 
 log = logging.getLogger(__name__)
 
 DEFAULT_AWAY_SECONDS = 600.0
 _MIN_AWAY_SECONDS = 60.0
-PRESENCE_PATH = Path(__file__).resolve().parent.parent / 'memory' / 'presence_state.json'
+PRESENCE_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'presence_state.json')
 
 
 def declared_presence():

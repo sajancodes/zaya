@@ -204,6 +204,7 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
 
             for t_dict in module_tools:
                 rec = _validate(t_dict, path.name)
+
                 if rec.valid and rec.name in reserved:
                     rec = ActionRecord(name=rec.name, file=path.name,
                                        error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
@@ -211,6 +212,7 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                     other = valid[rec.name].file
                     rec = ActionRecord(name=rec.name, file=path.name,
                                        error=f"Name '{rec.name}' already used by action '{other}' — rejected.")
+
                 all_records.append(rec)
                 if rec.valid:
                     valid[rec.name] = rec
@@ -225,7 +227,35 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
             all_records.append(rec)
             logger(f"Action rejected: {path.name} — {rec.error}")
 
+    from core.runtime_paths import get_resource_dir
+    canonical_actions = get_resource_dir() / "actions"
+    if not canonical_actions.is_dir():
+        canonical_actions = Path(__file__).resolve().parent.parent / "actions"
+    try:
+        is_canonical = actions_dir.resolve() == canonical_actions.resolve()
+    except Exception:
+        is_canonical = False
+
     registry = ActionRegistry(valid, logger)
     registry._all_records = all_records
     logger(f"Action discovery complete: {len(valid)} active.")
+    if is_canonical:
+        global _global_registry
+        _global_registry = registry
     return registry
+
+
+_global_registry: ActionRegistry | None = None
+
+
+def get_action_registry(actions_dir: Path | None = None) -> ActionRegistry:
+    """Return the global ActionRegistry, discovering actions from actions_dir if not initialized."""
+    global _global_registry
+    if _global_registry is None:
+        if actions_dir is None:
+            from core.runtime_paths import get_resource_dir
+            actions_dir = get_resource_dir() / "actions"
+            if not actions_dir.is_dir():
+                actions_dir = Path(__file__).resolve().parent.parent / "actions"
+        _global_registry = discover_actions(actions_dir, logger=lambda _: None)
+    return _global_registry

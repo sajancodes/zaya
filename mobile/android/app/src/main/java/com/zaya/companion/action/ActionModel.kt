@@ -73,6 +73,7 @@ sealed class AndroidAction(
 
     data class SetFlashlight(val enabled: Boolean) : AndroidAction("set_flashlight", ActionRisk.LOW)
 
+
     data object GetFlashlightState : AndroidAction("get_flashlight_state", ActionRisk.LOW)
 
     data class OpenSystemSettings(
@@ -86,10 +87,13 @@ sealed class AndroidAction(
 
     data class LookUpContact(val query: String) : AndroidAction("lookup_contact", ActionRisk.LOW)
 
+    data class BrowseMedia(val kind: String, val query: String = "", val limit: Int = 10,
+                           val uri: String = "") : AndroidAction("browse_media", ActionRisk.LOW)
     data class InitiateCall(
         val queryOrNumber: String,
         val directCall: Boolean = false,
         val confirmed: Boolean = false,
+        val app: String = "phone",
     ) : AndroidAction("initiate_call", ActionRisk.HIGH, requiresConfirmation = true)
 
     data object GetIncomingCallState : AndroidAction("get_incoming_call_state", ActionRisk.LOW)
@@ -249,7 +253,8 @@ sealed class AndroidAction(
     ) : AndroidAction("inspect_storage", ActionRisk.LOW)
 
     data class SetVolume(
-        val level: Int,
+        val level: Int = 50,
+        val percent: Int = level,
         val streamType: String = "media",
     ) : AndroidAction("set_volume", ActionRisk.LOW)
 

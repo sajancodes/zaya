@@ -43,6 +43,7 @@ class RemoteCommand:
     request_id: str
     text: str
     source: str = 'remote'
+    device_id: str = ''
     trust: str = ''
     scope: str = field(default_factory=lambda: uuid.uuid4().hex)
     status: str = SUBMITTED
@@ -62,7 +63,9 @@ class RemoteCommand:
 
 class RemoteCommandGate:
     def __init__(self, *, ttl: float = DEFAULT_TTL, history: int = DEFAULT_HISTORY,
-                 dedupe_window: float = DEDUPE_WINDOW, clock=time.time) -> None:
+                 dedupe_window: float = DEDUPE_WINDOW, clock=time.time, publish=None) -> None:
+        self._publish = publish
+        self.instance_id = uuid.uuid4().hex
         self._lock = threading.RLock()
         self._commands: dict[str, RemoteCommand] = {}
         self._order: list[str] = []
@@ -76,7 +79,7 @@ class RemoteCommandGate:
     # ── intake ────────────────────────────────────────────────────────────────
 
     def submit(self, text: str, *, request_id: str = '', source: str = 'remote',
-               trust: str = '') -> tuple[RemoteCommand | None, str]:
+               trust: str = '', device_id: str = '') -> tuple[RemoteCommand | None, str]:
         """Register a command. Returns (command, 'accepted' | 'duplicate' | 'rejected').
 
         `command` is the existing record when the outcome is `duplicate`, so the
@@ -92,6 +95,8 @@ class RemoteCommandGate:
             self._prune(now)
             if request_id:
                 existing = self._commands.get(request_id)
+                if existing is not None and existing.device_id != device_id:
+                    return None, 'rejected'
                 if existing is not None:
                     self.duplicates += 1
                     return existing, 'duplicate'
@@ -102,7 +107,7 @@ class RemoteCommandGate:
                     return twin, 'duplicate'
                 request_id = uuid.uuid4().hex
             command = RemoteCommand(request_id=request_id, text=body, source=source,
-                                    trust=trust, created_at=now, updated_at=now)
+                                    trust=trust, device_id=device_id, created_at=now, updated_at=now)
             self._commands[request_id] = command
             self._order.append(request_id)
             self.accepted += 1
@@ -136,11 +141,26 @@ class RemoteCommandGate:
             command = self._commands.get((request_id or '').strip())
             if command is None:
                 return None
+            if command.status in {COMPLETED, FAILED}:
+                return command
+            if command.status == EXECUTING and status == ACKNOWLEDGED:
+                return command
             command.status = status
             if error:
                 command.error = str(error)[:1200]
             command.updated_at = self._clock()
-            return command
+            envelope = command.envelope()
+        if self._publish:
+            self._publish(envelope)
+        return command
+
+    def complete_scope(self, scope: str, *, ok: bool, error: str = '') -> None:
+        if not scope:
+            return
+        with self._lock:
+            ids = [c.request_id for c in self._commands.values() if c.scope == scope]
+        for request_id in ids:
+            self.complete(request_id, ok=ok, error=error)
 
     def get(self, request_id: str) -> RemoteCommand | None:
         with self._lock:
@@ -177,5 +197,6 @@ def get_gate() -> RemoteCommandGate:
     global _gate
     with _gate_lock:
         if _gate is None:
-            _gate = RemoteCommandGate()
+            from core.mobile_bridge import get_bridge
+            _gate = RemoteCommandGate(publish=lambda envelope: get_bridge().emit(envelope))
         return _gate

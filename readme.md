@@ -15,6 +15,7 @@ history is also available on `zaya-updates`.
 - [Capabilities](#capabilities)
 - [Requirements and installation](#requirements-and-installation)
 - [Multiple Gemini keys and rate limits](#multiple-gemini-keys-and-rate-limits)
+- [Modular local AI engine](#modular-local-ai-engine)
 - [Everyday controls](#everyday-controls)
 - [Character artwork, voices, and bubbles](#character-artwork-voices-and-bubbles)
 - [Media and audio ducking](#media-and-audio-ducking)
@@ -61,7 +62,9 @@ as unverified until Zaya observes the result.
 - Windows is the primary tested desktop environment. Some modules include
   macOS/Linux implementations; OS-specific tools and audio mixing vary.
 - A microphone and working audio output for voice conversation.
-- A configured Gemini API key, network access, and available provider quota.
+- Gemini Live: a configured Gemini API key, network access, and available
+  provider quota. The optional modular engine can instead use a local or
+  OpenAI-compatible provider.
 - Playwright browser binaries for interactive automation.
 - Optional: Hermes and its Node dependencies for WhatsApp.
 
@@ -121,6 +124,36 @@ not guarantee that rate limits disappear. See [Google's rate-limit guide](https:
 Connection setup has a 20-second deadline. A slow or unavailable provider shows
 connection/retry status rather than leaving a permanent Thinking state. Startup
 worker failures are visible and recorded in `logs/startup_failure.log`.
+
+## Modular local AI engine
+
+Gemini Live remains Zaya's preferred low-latency voice path. The optional
+modular engine replaces one live connection with separate speech-to-text,
+language-model, and text-to-speech stages. Open **AI ENGINE** in the settings
+drawer, choose **LOCAL PIPELINE**, then choose a provider and speech models.
+Engine and provider changes apply after restarting Zaya.
+
+Local language models can run through Ollama, LM Studio, llama.cpp server, vLLM,
+or any compatible `/v1/chat/completions` endpoint. The speech stages need the
+optional local packages:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-local-speech.txt
+```
+
+Download a Piper `.onnx` voice plus its `.onnx.json` metadata file and enter the
+voice path in **AI ENGINE**. faster-whisper downloads its selected model on first
+use; a smaller model starts faster and uses less memory. The default `small`
+model is a practical balance. The engine writes component readiness to
+`logs/runtime/local_engine_readiness.json`; timed, content-free stage timings go
+to `logs/runtime/local_pipeline_timings.jsonl`.
+
+Failures name the component and provider. If transcription is unavailable,
+typed commands still work. If voice synthesis fails, the text answer remains
+visible. If the language model fails, Zaya reports that provider rather than
+blaming the microphone or voice. Cloud failover is off by default for the local
+pipeline: selecting a local provider never silently sends text to a cloud
+service. See `docs/local-ai-engine.md` for configuration keys and limits.
 
 ## Everyday controls
 
@@ -441,8 +474,7 @@ services/whatsapp/       Pairing, identity, transport, inbox and chat policy
 memory/                  Configuration helpers and private state interfaces
 dashboard/               Optional phone dashboard
 mobile/android/          Native Android companion app
-tests/                   Offline regression and integration tests
-tools/                   Setup helpers and poke-voice generation
+tools/                   Setup helpers, poke-voice generation and code analysis
 docs/                    Character, implementation and validation documentation
 ```
 
@@ -450,22 +482,21 @@ Internal names such as `JarvisLive`, `JarvisUI`, legacy profile folders, and
 startup keys remain where changing them would break compatibility. The visible
 assistant identity is Zaya, created by Sajan Rai.
 
-## Testing and troubleshooting
+## Checks and troubleshooting
 
 Run checks with the same interpreter used to launch Zaya:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install ruff
-.venv\Scripts\python.exe -m playwright install chromium
-.venv\Scripts\python.exe -m unittest discover -s tests -v
-.venv\Scripts\python.exe -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py tests tools
+.venv\Scripts\python.exe -m ruff check --isolated --select E9,F63,F7,F82 core actions services memory main.py ui.py dashboard plugins tools
+.venv\Scripts\python.exe -m compileall -q core actions services memory dashboard plugins tools main.py ui.py
 ```
 
-The suite covers temporary repositories/processes, browser recovery against
-local HTTP pages, Qt UI integration, audio restoration, command permissions,
-and simulated WhatsApp events. It does not send live WhatsApp messages. GitHub
-Actions runs Windows checks on pushes to `main` and `zaya-updates`; local test
-success and hosted CI status are reported separately.
+The owner requested removal of project test files on October 21, after the
+repair verification run. Its results and physical-device limits are recorded in
+the dated repair notes under `docs/`. GitHub Actions runs source checks on
+pushes to `main` and `zaya-updates`; Android releases run lint and a signed build.
+Source checks do not establish that live audio, messages or phone permissions work.
 
 | Symptom | Check |
 | --- | --- |
@@ -486,6 +517,23 @@ See [validation and rollback notes](docs/VALIDATION.md),
 [implementation plan](docs/ZAYA_IMPLEMENTATION_PLAN.md). Before reverting a
 feature, inspect dependent commits and preserve private configuration, memory,
 and linked-device credentials.
+
+### Codebase analysis
+
+`tools/analyze_codebase.py` is a read-only static analyzer for this tree. It
+uses only the Python standard library, so it needs no extra packages:
+
+```powershell
+.venv\Scripts\python.exe tools\analyze_codebase.py            # full report
+.venv\Scripts\python.exe tools\analyze_codebase.py --verify   # checklist
+```
+
+It reports the project structure, the dependency state of `requirements.txt`
+against the running interpreter, per-file line metrics, and per-function
+complexity and nesting, then lists the findings those numbers imply. The
+Markdown and JSON reports land in `docs/generated/` (gitignored). Test folders
+and test files are left out of the analysis by default; `--include-tests`
+includes them.
 
 ## Creator, credits, and license
 

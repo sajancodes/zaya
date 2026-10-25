@@ -56,6 +56,9 @@ class MicCapture(
                 AudioFormat.ENCODING_PCM_16BIT,
                 max(minBuffer * 2, FRAME_BYTES * 4),
             )
+        } catch (error: SecurityException) {
+            onError("Microphone permission is off. Allow it in Android settings to speak with Zaya.")
+            return false
         } catch (error: Exception) {
             onError(error.message ?: "No microphone available")
             return false

@@ -1,23 +1,25 @@
-"""
-Widget Forge & Live UI Generation (Chapter 14 / PC Specs)
-Spawn live, floating desktop widgets like timers, clocks, calculators, or stock monitors.
+"""Widget Forge & Live UI Generation.
+Created and developed by Sajan Rai for Zaya.
+Spawn live, floating desktop widgets like timers, clocks, calculators, or custom tools.
 Generates standalone, reactive HTML/CSS/JS widgets with modern dark-mode aesthetic.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import webbrowser
 from pathlib import Path
 from typing import Optional
+
 from core.execution_policy import require_owner
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
+
 
 def _get_widgets_dir() -> Path:
     out = get_base_dir() / "dashboard" / "widgets"
@@ -157,9 +159,17 @@ def widget_forge(parameters: dict, **_kwargs) -> str:
     path = forge_live_widget(w_type, custom_html=custom_html)
     if auto_open:
         try:
-            webbrowser.open(f"file://{os.path.abspath(path)}")
-        except Exception:
-            pass
+            # as_uri() produces a proper file:///C:/... URI. The old
+            # "file://" + os.path.abspath() form left Windows backslashes in
+            # the URL ("file://C:\Users\..."), which browsers refuse to open.
+            webbrowser.open(Path(path).resolve().as_uri())
+        except Exception as e:
+            return json.dumps({
+                "status": "partial",
+                "widget_type": w_type,
+                "widget_path": path,
+                "message": f"Widget was created at {path}, but it could not be opened automatically: {e}"
+            }, indent=2)
 
     return json.dumps({
         "status": "success",
@@ -171,7 +181,7 @@ def widget_forge(parameters: dict, **_kwargs) -> str:
 
 TOOL = {
     "name": "widget_forge",
-    "description": "Interactive UI Generation & Widget Forge: Spawns live, reactive desktop widgets (timers, calculators, world clocks, stock tickers) rendered with modern dark-mode aesthetics.",
+    "description": "Interactive UI Generation & Widget Forge: Spawns live, reactive desktop widgets (timers, calculators, world clocks, custom HTML tools) rendered with modern dark-mode aesthetics.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

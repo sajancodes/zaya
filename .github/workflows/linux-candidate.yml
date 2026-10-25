@@ -1,0 +1,47 @@
+name: Native Linux candidate (private verification)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install native build and desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm xvfb libportaudio2 libasound2 libasound2-plugins libpulse0 libegl1 libgles2 libgl1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 gnome-keyring xdg-utils xclip ffmpeg
+          python -m pip install -r requirements.txt pyinstaller pytest pip-audit mediapipe
+      - name: Build spatial renderer
+        working-directory: spatial_renderer
+        run: |
+          npm ci
+          npm run build
+      - name: Verify Linux safety prerequisites
+        run: |
+          python -m pytest tests/test_linux_vault.py tests/test_linux_distribution.py -q
+          python -m pip_audit -r requirements.txt
+      - name: Build native binaries
+        run: |
+          xvfb-run -a python -m PyInstaller --noconfirm --clean --distpath dist/linux-worker packaging/linux/zaya-hand-worker.spec
+          xvfb-run -a python -m PyInstaller --noconfirm --clean --distpath dist/linux-app packaging/linux/zaya.spec
+          cp dist/linux-worker/ZayaHandWorker dist/linux-app/Zaya/ZayaHandWorker
+          python tools/prepare_linux_release.py --app-dir dist/linux-app/Zaya
+          python tools/prepare_linux_variants.py --app-dir dist/linux-app/Zaya --output dist/linux-candidate/variants
+          dpkg-deb --info dist/linux-candidate/Zaya.deb
+          dpkg-deb --contents dist/linux-candidate/Zaya.deb
+      - name: Save candidate for native installation verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-candidate-needs-installation-verification
+          path: dist/linux-candidate/
+          retention-days: 7

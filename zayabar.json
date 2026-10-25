@@ -19,11 +19,11 @@
     "thinking": "",
     "poked": "assets/poked.png",
     "talking": {
-      "neutral": "assets/neutral.png",
-      "happy": "assets/happy.png",
-      "sad": "sad.png",
-      "angry": "assets/angry.png",
-      "surprised": "assets/surprised.png"
+      "neutral": "assets/speaking.gif",
+      "happy": "",
+      "sad": "",
+      "angry": "",
+      "surprised": ""
     }
   },
   "poke_reactions": [

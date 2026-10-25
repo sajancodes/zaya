@@ -57,6 +57,7 @@ class _Pending:
     run:     Callable[[], str]
     at:      float
     on_cancel: Optional[Callable[[str], None]] = None
+    task_id: Optional[str] = None
 
 
 _pending: Optional[_Pending] = None
@@ -107,9 +108,11 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
                 f"not available, so I have not done it.")
 
     with _lock:
+        from core.operator import current_task
         old = _pending
         _pending = _Pending(key=key, title=title, detail=detail,
-                            run=run, at=time.monotonic(), on_cancel=on_cancel)
+                            run=run, at=time.monotonic(), on_cancel=on_cancel,
+                            task_id=current_task.get())
         current = _pending
     if old and old.on_cancel:
         old.on_cancel('Superseded by another confirmation.')
@@ -201,3 +204,12 @@ def pending_title() -> str:
         if time.monotonic() - _pending.at > TIMEOUT_SECONDS:
             return ""
         return _pending.title
+
+
+def cancel_task(task_id: str) -> None:
+    """Cancel only the gate belonging to this originating operator task."""
+    with _lock:
+        pending = _pending
+        if pending is None or pending.task_id != task_id:
+            return
+        resolve(False, expected=pending)

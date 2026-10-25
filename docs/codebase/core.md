@@ -21,37 +21,47 @@ reproduced here.
 | `audio_ducking.py` | VAD-driven sidechain ducking of render sessions on Windows; `SpeechDetector` VAD reused elsewhere | `AudioDucker`, `SpeechDetector`, `SessionLevels`, `WindowsSessions`, `settings` | `main.py:568-574`; `voice_turns.py:3`; `zayabar_config.py:58`; `tests/test_audio_ducking.py` |
 | `avatar.py` | Software-rendered holographic head: animation, rigging, painting | `HoloAvatar` (`step`, `paint`, `glance`), `_rate`, `_blend` | `ui.py:60` |
 | `avatar_mesh.py` | Builds the head mesh (MediaPipe canonical face OBJ + generated cranium/neck/rigs) | `build_head`, `get_head_mesh`, `LANDMARKS`, `JAW_PIVOT`, `JAW_MAX` | `avatar.py:35` |
-| `confirm.py` | UI-issued confirmation gate for irreversible actions | `request`, `resolve`, `bind`, `pending_title`, `TIMEOUT_SECONDS` | `main.py:84`, `main.py:2465` (bind); `ui.py:5645` (`resolve`); `plugins/_telegram_ops.py:382` (`pending_title`) |
-| `diagnostics.py` | Non-destructive capability inspection | `inspect`, `registries` | `main.py:691`; `actions/system_diagnostics.py:1`; `tests/test_diagnostics.py` |
-| `echo.py` | Self-echo classification for the mic path (band-energy subtraction + learned statistics) | `EchoGuard` (`note_output`, `is_user_speech`, `calibrated`, `reliable`), `band_energies` | `main.py:87`, `606`, `1634`, `2111`; `tests/test_live_listening.py`, `tests/test_audio_ducking.py:230` |
-| `event_bus.py` | In-process pub/sub; subscriber faults are swallowed and logged | `EventBus`, `bus` | `main.py:1889`, `2501`, `2764`; `audio_ducking.py`, `task_runtime.py`, `operator.py`; `services/whatsapp/*`; `actions/whatsapp.py`, `avatar_expression.py`; `tests/test_runtime.py` |
-| `execution_policy.py` | Trust-context policy and shell-command classification (git/shell/python rules) | `trust_context`, `require_owner`, `classify`, `Decision`, `TRUST_*` | every tool entry point: `action_loader.py:100`, `plugin_loader.py:88`, `git_utils.py:5`, `confirm.py:95`, `actions/terminal_exec.py:4`, `actions/browser_control.py:1017`, `session_activity.py`, `memory/config_manager.py:145` |
-| `gemini.py` | One-shot Gemini calls: live-model ladder, REST ladders, cooldowns, quota handling | `call`, `text`, `as_json`, `LIVE_MODELS`, `live_model`, `note_live_failure`, `client`, `api_key`, `FAST/SMART/SEARCH/LIVE` | `main.py:80`; ~15 actions/plugins (e.g. `actions/code_helper.py:21`, `actions/web_search.py:85`, `services/whatsapp/importance.py:3`); `tools/generate_poke_voices.py` |
-| `gemini_keys.py` | Multi-key failover pool with provider-directed cooldowns | `KeyPool`, `pool`, `parse_keys`, `quota_failure`, `retry_delay`, `KeysCooling` | `main.py:81`; `gemini.py:303`, `485`; `notification_voice.py:5`; `ui.py:5776`, `5792`; `memory/config_manager.py:30` |
-| `git_utils.py` | Structured Git operations with secret-path checks and verified pushes | `GitRepo`, `resolve_repo`, `SECRET_PATH`, `SECRET_CONTENT` | `actions/git_control.py:1`; `tests/test_git.py` |
-| `hotkey.py` | Push-to-talk: Windows global `GetAsyncKeyState` polling, Qt-shortcut fallback | `PushToTalk`, `DEFAULT_CHORD`, `chord_label`, `qt_sequence` | `main.py:967-979`; `ui.py:5295`, `5380` |
-| `hud_state.py` | Human-readable activity labels from runtime bus events | `label`, `TOOLS`, `STATES` | `ui.py:5506`; `tests/test_hud_state.py` |
-| `installer.py` | Dependency auto-installer (core/STT/TTS/Windows package lists, Playwright) | `install_for_config`, `_CORE`, `_WINDOWS`, `_STT`, `_TTS` | **none — currently unreferenced** |
-| `llm_client.py` | Local LLM client (Ollama / OpenAI-compatible), streaming with sentence splitting | `call_llm`, `call_llm_stream`, `call_llm_text`, `ensure_ollama_running`, `warmup_model`, `get_llm_settings` | **none — currently unreferenced** |
-| `notification_voice.py` | Speaks inbox/poke lines in an isolated tool-free Live session | `synthesize_notice`, `_synthesize_once` | `main.py:1515`; `tools/generate_poke_voices.py:5` |
-| `operator.py` | Bounded operator execution, retry rules, dedup cache, audit emission | `Operator`, `current_task`, `current_request` | `main.py:1236-1251`; `actions/terminal_exec.py:33`; `services/whatsapp/service.py:161`; tests |
-| `plugin_loader.py` | Discovery/validation/dispatch of drop-in `plugins/*.py` | `PluginRecord`, `PluginRegistry`, `discover_plugins`, `_call_run`, `_load_error` | `main.py:82`, `682`; `ui.py` via bound callbacks (`main.py:693-694`); `tests/test_app_integration.py` |
-| `proactive_manager.py` | Deterministic WhatsApp notice selection (relay/inbox/alert) with mute + rate limit | `ProactiveManager` (`next`, `delivered`, `mute`, `close`) | `main.py:1498-1504`; `actions/whatsapp.py:25`; tests |
-| `prompt.txt` | System-instruction template for the Live session | section headers `[IDENTITY] … [VOICE AND LANGUAGE]`; placeholders `{platform}`, `{capabilities}`, `{limits}` | `main.py:105`, `317` (`_load_system_prompt`) |
-| `session_activity.py` | Expiring owner-authorized activity summaries for contextual WhatsApp auto replies | `SessionActivity` (`set`, `clear`, `snapshot`, `media`), `activity` | `main.py:1262`; `ui.py:3508`, `3531`; `actions/session_activity.py:3`; `services/whatsapp/policy.py:13`; tests |
-| `shell_session.py` | Bounded subprocess execution: cwd sessions, output buffers, process-tree kill, cancellation | `ShellSessions`, `OutputBuffer`, `terminate_tree`, `sessions` | `actions/terminal_exec.py:5`; `git_utils.py:6`; `services/whatsapp/pairing.py:12`, `native_bridge.py:15`; `tests/test_terminal.py` |
-| `single_instance.py` | One desktop instance per user; activates the running window over a local socket | `SingleInstance` (`acquire`, `activate_existing`, `close`) | `main.py:2780`; `tests/test_single_instance.py` |
-| `site_registry.py` | Canonical site names, URL/git-remote normalisation, navigation postcondition match | `resolve_url`, `normalize_git_remote`, `matches`, `SITES`, `browser_state` | `actions/browser_control.py:41`, `517`, `716`; `git_utils.py:141`; `diagnostics.py:14`; `tests/test_browser.py` |
-| `stt.py` | Offline STT engines (faster-whisper, Vosk) | `WhisperSTT`, `VoskSTT` | **none — currently unreferenced** |
-| `task_runtime.py` | Durable task state and request-result cache in WAL SQLite | `TaskRuntime`, `Task`, `get_runtime`, `STATES`, `TERMINAL` | `main.py:1237`; `diagnostics.py:13`; `actions/runtime_status.py:2`; `operator.py:8`; tests |
-| `tool_result.py` | Evidence-bearing result type + legacy-text normalisation + head/tail truncation | `ToolResult`, `normalize`, `truncate`, `STATUSES` | ~20 modules: `operator.py`, `shell_session.py`, `git_utils.py`, most `actions/*`, `services/whatsapp/*` |
-| `tts.py` | Local TTS engines (Edge/Kokoro/ElevenLabs) + blocking `TTSPlayer` wrapper | `TTSPlayer`, `create_tts_player`, `EdgeTTSEngine`, `KokoroTTSEngine`, `ElevenLabsTTSEngine` | **none — currently unreferenced** |
-| `undo.py` | One shared bounded undo stack; actions push reversal closures | `push_undo`, `undo_last`, `peek`, `history`, `can_undo`, `clear`, `MAX_DEPTH` | `main.py:83`, `1307-1312`; `actions/computer_settings.py:25`, `actions/file_controller.py:13`; `plugins/_telegram_ops.py:403` |
-| `viseme.py` | Text→mouth-shape sequence fused with audio-derived timing | `text_to_visemes`, `VisemeStream`, `to_latin`, `coverage`, `VISEMES` | `main.py:88`, `599`, `1522`, `1895`, `2078-2107` |
-| `voice_turns.py` | Speech turn segmentation with a retained prefix of pre-speech frames | `VoiceTurns` (`feed`, `reset`) | `main.py:1548-1589`; `tests/test_voice_turns.py` |
-| `wake_word.py` | openWakeWord "hey_jarvis" install/readiness/detection | `WakeWordDetector`, `install_and_download`, `is_ready`, `is_installed`, `WAKE_MODEL` | `main.py:89`, `704-739`, `1618`; `ui.py:5254`, `5422` |
-| `zayabar_config.py` | `zayabar.json` desktop-companion config validation + emotion tone/asset helpers | `load_config`, `emotion_tones`, `asset_path`, `local_path`, `EMOTIONS`, `DEFAULT_TONES` | `main.py:569`, `1112`; `ui.py:5836`; `services/zayabar.py:13`; `actions/avatar_expression.py:4`; `tools/generate_poke_voices.py:6`; tests |
-| `face_model.obj` | MediaPipe canonical face model (Apache-2.0, 468 verts / 898 tris) used by `avatar_mesh.py` | asset | `avatar_mesh.py:34` |
+| `coding_jobs.py` | Durable coding session persistence, briefs, reviews and passes | `CodingJobs`, `Job`, `get_jobs` | `actions/coding_job.py`, `core/coding_supervisor.py` |
+| `coding_projects.py` | Project root resolution, discovery and path safety | `resolve_project`, `list_projects` | `actions/coding_job.py`, `core/coding_supervisor.py` |
+| `coding_supervisor.py` | Tool-free brief preparation and bounded review passes for OpenCode | `Supervisor`, `Brief`, `MAX_PASSES` | `actions/coding_job.py`, `tests` |
+| `confirm.py` | UI-issued confirmation gate for irreversible actions | `request`, `resolve`, `bind`, `pending_title`, `TIMEOUT_SECONDS` | `main.py`, `ui.py`, `actions/*` |
+| `device_registry.py` | Authenticated remote companion device pairing, keys and revocation | `DeviceRegistry`, `get_registry` | `dashboard/mobile_api.py`, `core/remote_commands.py` |
+| `diagnostics.py` | Non-destructive capability inspection | `inspect`, `registries` | `main.py`, `actions/system_diagnostics.py`, tests |
+| `echo.py` | Self-echo classification for the mic path (band-energy subtraction + learned statistics) | `EchoGuard`, `band_energies` | `main.py`, tests |
+| `event_bus.py` | In-process pub/sub; subscriber faults are swallowed and logged | `EventBus`, `bus` | `main.py`, `actions/*`, `services/*`, tests |
+| `execution_policy.py` | Trust-context policy and shell-command classification | `trust_context`, `require_owner`, `classify`, `Decision`, `TRUST_*` | Every tool entry point |
+| `gemini.py` | Centralized Gemini routing: LIVE ladder, FAST, SMART, SEARCH tiers, cooldowns, quota handling | `call`, `text`, `as_json`, `FAST`, `SMART`, `SEARCH`, `LIVE` | `main.py`, `actions/*`, `core/*` |
+| `gemini_keys.py` | Multi-key failover pool with provider-directed cooldowns | `KeyPool`, `pool`, `parse_keys`, `quota_failure` | `gemini.py`, `notification_voice.py`, `ui.py` |
+| `git_utils.py` | Structured Git operations with secret-path checks and verified pushes | `GitRepo`, `resolve_repo`, `SECRET_PATH` | `actions/git_control.py`, tests |
+| `hotkey.py` | Push-to-talk: Windows global GetAsyncKeyState polling, Qt-shortcut fallback | `PushToTalk`, `DEFAULT_CHORD` | `main.py`, `ui.py` |
+| `hud_state.py` | Human-readable activity labels from runtime bus events | `label`, `TOOLS`, `STATES` | `ui.py`, tests |
+| `mobile_bridge.py` | Bridge between runtime event bus and remote phone interfaces | `MobileBridge`, `get_bridge`, `AudioListener` | `main.py`, `dashboard/mobile_api.py` |
+| `mobile_calls.py` | WebRTC / audio call state machine and priority handling for phone | `MobileCallManager`, `get_call_manager` | `dashboard/mobile_api.py`, `main.py` |
+| `mobile_protocol.py` | Mobile wire protocol contracts, envelope types and serializers | `envelope`, `normalize_event`, `LIMITS` | `dashboard/mobile_api.py`, `core/mobile_bridge.py` |
+| `notification_voice.py` | Speaks inbox/poke lines in an isolated tool-free Live session | `synthesize_notice`, `_synthesize_once` | `main.py`, tools |
+| `opencode_cli.py` | Subprocess driver and runner for OpenCode CLI sessions | `OpenCodeRunner`, `run_opencode` | `core/coding_supervisor.py`, `actions/coding_job.py` |
+| `opencode_events.py` | Streaming JSON event parser for OpenCode CLI output | `parse_opencode_event` | `actions/coding_job.py`, tests |
+| `opencode_narrator.py` | First-person voice progress templates for coding session milestones | `narrate_progress` | `actions/coding_job.py` |
+| `operator.py` | Bounded operator execution, retry rules, dedup cache, audit emission | `Operator`, `current_task`, `current_request` | `main.py`, `services/*`, tests |
+| `plugin_loader.py` | Discovery/validation/dispatch of drop-in `plugins/*.py` | `PluginRecord`, `PluginRegistry`, `discover_plugins` | `main.py`, `ui.py`, tests |
+| `presence.py` | Owner presence tracking via Windows idle input time or declared mode | `owner_is_away`, `set_presence`, `declared_presence` | `core/proactive_manager.py`, `actions/owner_presence.py` |
+| `proactive_manager.py` | Deterministic WhatsApp and alert notice selection with rate limits | `ProactiveManager` | `main.py`, `actions/whatsapp.py`, tests |
+| `prompt.txt` | System-instruction template for the Live session | section headers, placeholders `{platform}`, `{capabilities}` | `main.py` |
+| `reminders.py` | Durable reminder scheduling and background execution | `ReminderManager`, `get_reminder_manager` | `actions/reminder.py`, `main.py` |
+| `remote_commands.py` | Safe remote command parser and executor for authenticated phone owner | `execute_remote_command` | `dashboard/mobile_api.py` |
+| `runtime_logging.py` | Centralized ring buffer and log subscription sink | `get_runtime_logger` | `actions/runtime_logs.py`, `main.py` |
+| `session_activity.py` | Expiring owner-authorized activity summaries for contextual replies | `SessionActivity`, `activity` | `main.py`, `ui.py`, `services/whatsapp/*` |
+| `shell_session.py` | Bounded subprocess execution: cwd sessions, buffers, tree termination | `ShellSessions`, `terminate_tree`, `sessions` | `actions/terminal_exec.py`, `git_utils.py` |
+| `single_instance.py` | One desktop instance per user; activates running window via local socket | `SingleInstance` | `main.py`, tests |
+| `site_registry.py` | Canonical site names, URL normalization, navigation match | `resolve_url`, `matches`, `SITES` | `actions/browser_control.py`, `git_utils.py` |
+| `task_runtime.py` | Durable task state and request-result cache in WAL SQLite | `TaskRuntime`, `Task`, `get_runtime`, `STATES` | `main.py`, `operator.py`, `actions/runtime_status.py` |
+| `tool_result.py` | Evidence-bearing result type + legacy-text normalization | `ToolResult`, `normalize`, `truncate`, `STATUSES` | Core runtime, actions, services |
+| `undo.py` | One shared bounded undo stack; actions push reversal closures | `push_undo`, `undo_last`, `peek`, `can_undo` | `main.py`, `actions/*` |
+| `viseme.py` | Text→mouth-shape sequence fused with audio-derived timing | `text_to_visemes`, `VisemeStream` | `main.py`, `ui.py` |
+| `voice_turns.py` | Speech turn segmentation with retained prefix of pre-speech frames | `VoiceTurns` | `main.py`, tests |
+| `wake_word.py` | openWakeWord "hey_jarvis" readiness/detection | `WakeWordDetector`, `install_and_download` | `main.py`, `ui.py` |
+| `zayabar_config.py` | `zayabar.json` config validation + emotion tone/asset helpers | `load_config`, `asset_path`, `EMOTIONS` | `main.py`, `services/zayabar.py` |
+| `face_model.obj` | MediaPipe canonical face model used by `avatar_mesh.py` | asset | `avatar_mesh.py:34` |
 
 **Layering note.** `core/` is not a leaf: `plugin_loader.py:20` imports `memory.config_manager`, and
 `core/*` import each other (`operator → task_runtime → tool_result/audit/event_bus`,
@@ -265,28 +275,20 @@ any environment-variable value whose *name* looks secret-like and is ≥6 chars 
 
 ## 4. Audio stack
 
-### 4.1 `stt.py` (currently unreferenced — see §8)
+Zaya's live speech input and output run entirely through the Gemini Live API, supplemented by WebRTC VAD, self-echo cancellation, and an isolated Live notification voice channel.
 
-`WhisperSTT` (faster-whisper): `cuda/float16` when torch reports CUDA else `cpu/int8` (`:14-53`);
-a load failure that looks like an offline/cache miss clears the HF offline flags and retries once,
-surfacing an actionable download error otherwise (`:27-50`). `transcribe` is greedy
-(`beam_size=1`, `best_of=1`), `condition_on_previous_text=False`, `vad_filter=True` with 300 ms
-min-silence, expecting float32 mono 16 kHz (`:55-70`). `VoskSTT` wraps `KaldiRecognizer(model,
-16000)` with `process_chunk(bytes) -> (text, is_final)` via `AcceptWaveform`/`PartialResult`
-(`:73-93`).
+### 4.1 `voice_turns.py` and `audio_ducking.py`
 
-### 4.2 `tts.py` (currently unreferenced — see §8)
+- `VoiceTurns` provides speech turn segmentation with WebRTC VAD (`webrtcvad`), retaining a prefix of pre-speech frames.
+- `AudioDucker` provides sidechain ducking of background Windows render sessions during active speech.
 
-Engines: `EdgeTTSEngine` (internet, new event loop per utterance, MP3 decoded via `miniaudio` and
-played over sounddevice, `:105-127`), `KokoroTTSEngine` (offline, blocking `_init()` on its own
-thread, GPU preferred, CPU thread caps, an auto-`pip install kokoro>=0.9` retry on a transformers
-version mismatch (`:139-195`, `:238-308`), and a producer/consumer `speak()` overlapping synthesis
-of chunk N+1 with playback of N through a bounded queue (`:310-350`)), and `ElevenLabsTTSEngine`
-(REST `eleven_multilingual_v2`, `:353-376`). `TTSPlayer` (`:383-422`) is the thread-safe wrapper:
-`speak(text, on_start, on_done)` toggles `is_playing`, swallows engine exceptions and always fires
-`on_done`; `stop()` calls `sd.stop()`. `create_tts_player` selects by `tts_engine` (`edgetts`
-default, `kokoro`, `elevenlabs`, `:429-442`); `_to_numpy` bridges PyTorch/numpy mismatches and
-`_compress_silence` trims Kokoro's punctuation pauses to ≤500 ms (`:33-77`).
+### 4.2 `echo.py`
+
+`EchoGuard` provides self-echo classification for the mic path using band-energy subtraction and learned statistics, preventing Zaya's speaker output from interrupting or hallucinating into its own microphone stream.
+
+### 4.3 `notification_voice.py`
+
+`synthesize_notice(text, verbatim=False)` speaks in an isolated, tool-free Live session with `prebuilt_voice_config.voice_name = "Nika"`. Output PCM is queued and played without interfering with the primary conversation session.
 
 ### 4.3 `echo.py` — `EchoGuard`
 
@@ -468,22 +470,13 @@ than hammer quota (`:57-77`). Pooling is *per resource* — `live` (`main.py:314
 (`gemini.py:492-495`) — so one exhausted key on one surface does not block the others.
 `pool` is a module-level singleton (`:91`).
 
-### 5.3 `llm_client.py` (currently unreferenced — see §8)
+### 5.3 `coding_supervisor.py` and `coding_jobs.py`
 
-Backend selected by `llm_provider` in `config/api_keys.json`: `ollama` (default, port 11434) or any
-OpenAI-compatible server (LM Studio/Jan/LocalAI/llama.cpp; `openai`, `lmstudio`, `localai`, `jan`,
-`llamacpp` all map to the OpenAI branch) (`:42-52`). `ensure_ollama_running` pings `/api/tags` and
-auto-launches `ollama serve` (no window on Windows) waiting up to 15 s; OpenAI-compatible servers
-are only pinged and must be started manually (`:62-122`). `warmup_model(system_prompt)` pre-loads
-the model with `keep_alive: -1` and primes Ollama's KV prefix cache with the *static* system prompt
-so first-token latency drops from ~17 s to <1 s (`:125-184`). `check_model_available` reports an
-actionable `ollama pull <model>` warning when the model is missing (`:187-218`).
-`call_llm` (non-streaming, dual backend, OpenAI `tool_calls` normalised into Ollama-shaped dicts,
-ConnectionError triggers one auto-restart retry, `:229-328`); `call_llm_text` (text-only,
-Ollama-shaped request — see §8); `call_llm_stream` yields `{"type":"sentence", …}` as `_SENT_END`
-boundaries accumulate (regex avoids splitting decimals, `:29-31`) and a final
-`{"type":"done", "content", "tool_calls"}`, accumulating fragmented OpenAI tool-call deltas by
-index before parsing the argument string (`:372-586`).
+Zaya supervises local OpenCode CLI operations through a tool-free brief compiler and review engine (`core/coding_supervisor.py`).
+- Requests are compiled into small, concrete execution briefs (`Brief(requirements, checks)`).
+- File listings provided to the model are restricted to bounded, non-hidden filenames.
+- After OpenCode completes a pass, a tool-free SMART review evaluates output against original brief requirements, capping follow-ups at 3 passes without scope expansion.
+- Job states are persisted in `memory/coding_jobs.json`.
 
 ### 5.4 `notification_voice.py`
 
@@ -612,14 +605,10 @@ actual vision/mic build decide what the model is told it can do.
 
 All claims below are grounded in the cited lines; nothing here is inferred behaviour.
 
-1. **Four orphan modules.** `core/stt.py`, `core/tts.py`, `core/llm_client.py` and
-   `core/installer.py` have no importers anywhere in the repository (verified by import search;
-   `installer.py:87` `install_for_config` has zero call sites). The app's speech in/out is Gemini
-   Live audio and `notification_voice.py`. Consequences: `installer.py`'s package lists and
-   `tts.py`'s engines are dead weight; `llm_client.py`'s provider logic is untested by the running
-   app; and `tts.py:_import_kokoro_pipeline` can run `pip install kokoro>=0.9` (`tts.py:170-181`)
-   from a code path nobody currently calls, but which would perform a network install at speak
-   time if it were re-wired.
+1. **Legacy orphan modules removed.** `core/stt.py`, `core/tts.py`, `core/llm_client.py` and
+   `core/installer.py` had no importers anywhere in the repository and were safely removed during
+   codebase hygiene. Speech in/out is authoritative through Gemini Live audio, WebRTC VAD, and
+   `notification_voice.py`.
 2. **Duplicated loader machinery.** `action_loader.py` and `plugin_loader.py` each carry their own
    `_NAME_RE` (`:37` / `:22`), `_DEFAULT_PARAMS` (`:38` / `:23`), `_opt_upper` (`:52` / `:32`),
    `_validate` (`:126` / `:157`), dispatch helper (`_call_handler` `:113` / `_call_run` `:144`) and

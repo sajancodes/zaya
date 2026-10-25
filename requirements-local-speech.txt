@@ -1,0 +1,10 @@
+# Zaya — optional local speech dependencies, created by Sajan Rai.
+#
+# Install only when using Settings → AI ENGINE → LOCAL PIPELINE:
+#   .venv\Scripts\python.exe -m pip install -r requirements-local-speech.txt
+#
+# Gemini Live does not need these packages. Missing speech packages disable the
+# affected stage with a named component error; typed input and text replies stay
+# available.
+faster-whisper>=1.0,<2
+piper-tts>=1.2,<2

@@ -149,7 +149,7 @@ class ZayaNotificationListener : NotificationListenerService() {
             )
 
             if (!targetKey.isNullOrBlank()) {
-                notifications.firstOrNull { it.key == targetKey }?.let { return it }
+                return notifications.firstOrNull { it.key == targetKey }
             }
 
             if (!targetSender.isNullOrBlank()) {

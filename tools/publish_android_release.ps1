@@ -1,4 +1,4 @@
-# Build and publish a tested APK without uploading private source.
+# Check, build and publish the APK and Play App Bundle without uploading private source.
 $ErrorActionPreference = 'Stop'
 $releaseRoot = Split-Path -Parent $PSScriptRoot
 $previousCode = $env:ZAYA_VERSION_CODE
@@ -19,9 +19,23 @@ try {
     $next = [Math]::Max(10001, $previous + 1)
     $env:ZAYA_VERSION_CODE = [string]$next
     $env:ZAYA_VERSION_NAME = '0.4.' + ($next - 10000)
-    & .\mobile\android\gradlew.bat -p mobile/android :app:testDebugUnitTest :app:assembleRelease --console=plain
-    if ($LASTEXITCODE -ne 0) { throw 'Android tests or release build failed.' }
-    & .\.venv\Scripts\python.exe tools/prepare_android_release.py --apk mobile/android/app/build/outputs/apk/release/app-release.apk --metadata mobile/android/app/build/outputs/apk/release/output-metadata.json --output dist/android-release
+    & .\mobile\android\gradlew.bat -p mobile/android :app:lintRelease --console=plain --max-workers=2
+    if ($LASTEXITCODE -ne 0) { throw 'Android lint failed.' }
+    & .\mobile\android\gradlew.bat -p mobile/android :app:assembleRelease --console=plain --max-workers=2
+    if ($LASTEXITCODE -ne 0) { throw 'Android release build failed.' }
+    & .\mobile\android\gradlew.bat -p mobile/android :app:bundleRelease --console=plain --max-workers=2
+    if ($LASTEXITCODE -ne 0) { throw 'Android bundle build failed.' }
+    $aabPath = "mobile/android/app/build/outputs/bundle/release/app-release.aab"
+    $prepareArgs = @(
+        "tools/prepare_android_release.py",
+        "--apk", "mobile/android/app/build/outputs/apk/release/app-release.apk",
+        "--metadata", "mobile/android/app/build/outputs/apk/release/output-metadata.json",
+        "--output", "dist/android-release"
+    )
+    if (Test-Path $aabPath) {
+        $prepareArgs += @("--aab", $aabPath)
+    }
+    & .\.venv\Scripts\python.exe @prepareArgs
     if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed.' }
     gh release create "android-$env:ZAYA_VERSION_NAME" --repo sajancodes/zaya-companion-releases --title "Zaya Companion $env:ZAYA_VERSION_NAME" --notes-file dist/android-release/notes.md --latest dist/android-release/Zaya-Companion.apk dist/android-release/update.json
     if ($LASTEXITCODE -ne 0) { throw 'Public release publishing failed.' }

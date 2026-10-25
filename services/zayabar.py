@@ -70,6 +70,7 @@ class ZayaBar(QWidget):
         self.context_menu.addAction('Mute / unmute microphone', main_window._toggle_mute)
         self.context_menu.addAction('Show companion', self.show)
         self.context_menu.addSeparator()
+        self.context_menu.addAction('Restart Zaya', main_window.restart_requested.emit)
         self.context_menu.addAction('Close Zaya', QApplication.instance().quit)
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
@@ -179,11 +180,6 @@ class ZayaBar(QWidget):
     def on_runtime(self, event):
         if event['event'] == 'avatar.caption':
             self.show_bubble(event.get('text', ''), 'reply')
-        elif event['event'] == 'avatar.reaction.playing':
-            duration = min(10000, max(self.config['reaction_duration_ms'], event.get('duration_ms', 0)))
-            self.poked_until = time.monotonic() + duration / 1000
-            self.restore_timer.start(int(duration))
-            self.refresh_mode()
         elif event['event'] == 'avatar.emotion':
             if event.get('emotion') in EMOTIONS:
                 self.emotion = event['emotion']

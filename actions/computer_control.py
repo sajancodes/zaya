@@ -1,4 +1,6 @@
 #computer_control.py
+from __future__ import annotations
+
 import io
 import json
 import platform
@@ -6,6 +8,7 @@ import re
 import string
 import subprocess
 import sys
+from typing import Any
 
 if platform.system() == "Windows":
     _WIN_HIDE: dict = {"creationflags": subprocess.CREATE_NO_WINDOW}
@@ -312,22 +315,303 @@ def _focus_window(title: str) -> str:
 
     return f"focus_window: unknown OS '{os_name}'"
 
-def _screen_find(description: str) -> tuple[int, int] | None:
-    api_key = _get_api_key()
-    if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
+def _find_via_uia(description: str) -> tuple[int, int] | None:
+    """Tier A: Inspect active/visible window accessibility hierarchy using pywinauto UIA."""
+    if platform.system() != "Windows":
+        return None
+    try:
+        from pywinauto import Desktop
+        import ctypes
+        user32 = ctypes.windll.user32
+        fg_hwnd = user32.GetForegroundWindow()
+
+        desc_lower = description.lower().strip()
+        desktop = Desktop(backend="uia")
+
+        # Prioritize foreground window descendants first
+        windows = desktop.windows(visible_only=True)
+        ordered_windows = []
+        for win in windows:
+            try:
+                if win.handle == fg_hwnd:
+                    ordered_windows.insert(0, win)
+                else:
+                    ordered_windows.append(win)
+            except Exception:
+                ordered_windows.append(win)
+
+        candidates: list[tuple[float, tuple[int, int], str]] = []
+
+        for win in ordered_windows[:6]:
+            try:
+                is_fg = (win.handle == fg_hwnd)
+                fg_bonus = 0.15 if is_fg else 0.0
+
+                for ctrl in win.descendants():
+                    try:
+                        text = (ctrl.window_text() or "").strip()
+                        c_type = ctrl.element_info.control_type or ""
+                        auto_id = ctrl.element_info.automation_id or ""
+                        name = ctrl.element_info.name or ""
+
+                        rect = ctrl.rectangle()
+                        if rect.width() <= 0 or rect.height() <= 0:
+                            continue
+
+                        text_l = text.lower()
+                        auto_id_l = auto_id.lower()
+                        name_l = name.lower()
+
+                        score = 0.0
+                        if desc_lower == text_l or desc_lower == name_l:
+                            score = 1.0
+                        elif desc_lower == auto_id_l:
+                            score = 0.95
+                        elif desc_lower and (desc_lower in text_l or desc_lower in name_l):
+                            score = 0.8
+                        elif desc_lower and ((text_l and text_l in desc_lower)
+                                             or (name_l and name_l in desc_lower)):
+                            # The empty-string guard matters: "" in description
+                            # is always True, so every nameless control in the
+                            # tree used to score 0.7 and flood the candidate
+                            # list until the ambiguity check rejected the match.
+                            score = 0.7
+                        elif desc_lower and auto_id_l and auto_id_l in desc_lower:
+                            score = 0.65
+                        else:
+                            # Token overlap
+                            tokens = [t for t in re.split(r"\W+", desc_lower) if len(t) > 2]
+                            if tokens:
+                                combined = f"{text_l} {c_type.lower()} {auto_id_l} {name_l}"
+                                overlap = sum(1 for t in tokens if t in combined)
+                                if overlap > 0:
+                                    score = 0.4 + 0.3 * (overlap / len(tokens))
+
+                        if score > 0.4:
+                            # Bonuses for enabled/visible and interactive controls
+                            try:
+                                if ctrl.is_enabled():
+                                    score += 0.05
+                            except Exception:
+                                pass
+                            if c_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox", "ListItem"):
+                                score += 0.05
+                            score += fg_bonus
+                            candidates.append((score, (rect.mid_point().x, rect.mid_point().y), text or name or auto_id))
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        if not candidates:
+            return None
+
+        # Sort descending by score
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        top_score, top_point, _ = candidates[0]
+
+        # Ambiguity check: if top two have nearly identical score (< 0.10 diff) and distinct points (> 30px distance)
+        if len(candidates) > 1:
+            second_score, second_point, _ = candidates[1]
+            dist_sq = (top_point[0] - second_point[0]) ** 2 + (top_point[1] - second_point[1]) ** 2
+            if (top_score - second_score < 0.10) and dist_sq > 900 and top_score < 1.0:
+                # Ambiguous match among distinct controls — reject to avoid mis-clicking
+                return None
+
+        return top_point
+    except Exception as e:
+        print(f"[ComputerControl] UIA element search failed: {e}")
         return None
 
-    try:
-        from google import genai
-        from google.genai import types as gtypes
 
-        _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
-        img.save(buf, format="PNG")
-        image_bytes = buf.getvalue()
+def _detect_visual_candidates(screenshot_img: Any, w: int, h: int, max_candidates: int = 50) -> list[dict]:
+    """Detect visual interactable UI candidates using OpenCV contours and edge detection."""
+    try:
+        import cv2
+        import numpy as np
+
+        # Convert PIL image to BGR numpy array
+        np_img = np.array(screenshot_img)
+        if np_img.shape[2] == 4:
+            bgr = cv2.cvtColor(np_img, cv2.COLOR_RGBA2BGR)
+        else:
+            bgr = cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
+
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        edges = cv2.Canny(blurred, 30, 120)
+
+        # Morphological close to join adjacent edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        dilated = cv2.dilate(edges, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        raw_boxes = []
+        # Use the IMAGE's own dimensions for the area filter. pyautogui.size()
+        # reports the primary monitor while the screenshot covers the whole
+        # virtual desktop, so the two disagree on a multi-monitor setup.
+        img_h, img_w = (np_img.shape[0], np_img.shape[1]) if np_img.ndim >= 2 else (h, w)
+        screen_area = max(1, img_w * img_h)
+
+        for cnt in contours:
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            area = bw * bh
+            # Filter noise and whole screen containers:
+            # Width and height > 12px, area > 150px, area < 50% screen
+            if bw > 12 and bh > 10 and area > 150 and area < (0.50 * screen_area):
+                raw_boxes.append((x, y, x + bw, y + bh))
+
+        if not raw_boxes:
+            return []
+
+        # Deduplicate overlapping boxes with IoU > 0.40
+        raw_boxes.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))  # small to large
+        deduped = []
+        for b in raw_boxes:
+            overlap = False
+            b_area = (b[2] - b[0]) * (b[3] - b[1])
+            for d in deduped:
+                # Intersection
+                ix1 = max(b[0], d[0])
+                iy1 = max(b[1], d[1])
+                ix2 = min(b[2], d[2])
+                iy2 = min(b[3], d[3])
+                if ix1 < ix2 and iy1 < iy2:
+                    inter_area = (ix2 - ix1) * (iy2 - iy1)
+                    iou = inter_area / min(b_area, (d[2] - d[0]) * (d[3] - d[1]))
+                    if iou > 0.40:
+                        overlap = True
+                        break
+            if not overlap:
+                deduped.append(b)
+                if len(deduped) >= max_candidates:
+                    break
+
+        return [
+            {
+                "box": box,
+                "center": ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2),
+            }
+            for box in deduped
+        ]
+    except Exception as e:
+        print(f"[ComputerControl] OpenCV visual candidate detection failed: {e}")
+        return []
+
+
+def _detect_uia_candidates(w: int, h: int, max_candidates: int = 40) -> list[dict]:
+    """Harvest interactive controls from the live accessibility tree (Windows only).
+
+    Kept as its own function so the SoM path can be exercised without
+    reaching into whatever happens to be on the owner's desktop: while this
+    was inlined in _find_via_som(), the SoM test silently used the real
+    screen and only passed on machines with no visible windows.
+    """
+    candidates: list[dict] = []
+    if platform.system() != "Windows":
+        return candidates
+    try:
+        from pywinauto import Desktop
+        desktop = Desktop(backend="uia")
+        for win in desktop.windows(visible_only=True)[:4]:
+            for ctrl in win.descendants():
+                try:
+                    if ctrl.element_info.control_type in ("Button", "Hyperlink", "MenuItem", "Edit", "TabItem", "CheckBox"):
+                        r = ctrl.rectangle()
+                        if 5 < r.width() < w and 5 < r.height() < h:
+                            candidates.append({
+                                "box": (r.left, r.top, r.right, r.bottom),
+                                "center": (r.mid_point().x, r.mid_point().y),
+                            })
+                            if len(candidates) >= max_candidates:
+                                break
+                except Exception:
+                    continue
+            if len(candidates) >= max_candidates:
+                break
+    except Exception:
+        pass
+    return candidates
+
+
+def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tuple[int, int] | None:
+    """Tier B: Set-of-Mark (SoM) visual candidate detection + structured LLM identification."""
+    try:
+        from PIL import ImageDraw
+        from google.genai import types as gtypes
+        from core import gemini
+
+        # Harvest interactive candidates via the accessibility tree first, and
+        # fall back to OpenCV contour detection when it yields nothing.
+        candidates: list[dict] = _detect_uia_candidates(w, h)
+        if not candidates:
+            candidates = _detect_visual_candidates(screenshot_img, w, h, max_candidates=50)
+
+        # If still no candidates found, fallback to coordinate search
+        if not candidates:
+            return None
+
+        # Draw Set-of-Mark bounding boxes and numeric badges
+        som_img = screenshot_img.copy()
+        draw = ImageDraw.Draw(som_img)
+        marks: dict[int, tuple[int, int]] = {}
+
+        for idx, cand in enumerate(candidates, start=1):
+            box = cand["box"]
+            center = cand["center"]
+            marks[idx] = center
+            draw.rectangle(box, outline=(255, 30, 30), width=2)
+            badge_box = [box[0], max(0, box[1] - 16), box[0] + 20, box[1]]
+            draw.rectangle(badge_box, fill=(255, 30, 30))
+            draw.text((box[0] + 3, max(0, box[1] - 15)), str(idx), fill=(255, 255, 255))
+
+        buf = io.BytesIO()
+        som_img.save(buf, format="PNG")
+        som_bytes = buf.getvalue()
+
+        prompt = (
+            f"You are given a Set-of-Mark screenshot with numbered tags [1..{len(marks)}] over UI elements. "
+            f"Identify the tag number corresponding to: '{description}'. "
+            f"Reply with ONLY a JSON object: {{\"id\": <number>}} or {{\"id\": null}} if not found."
+        )
+
+        resp = gemini.call(
+            [gtypes.Part.from_bytes(data=som_bytes, mime_type="image/png"), prompt],
+            tier=gemini.FAST,
+            timeout_ms=15_000,
+        )
+        if resp and resp.text:
+            text = resp.text.strip()
+            # Strict JSON parsing first
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "id" in parsed:
+                    val = parsed["id"]
+                    if isinstance(val, int) and val in marks:
+                        return marks[val]
+                    if val is None:
+                        return None
+            except Exception:
+                pass
+
+            # Regex fallback for mark id extraction
+            match = re.search(r'\{\s*"id"\s*:\s*(\d+)\s*\}', text)
+            if match:
+                mark_id = int(match.group(1))
+                if mark_id in marks:
+                    return marks[mark_id]
+    except Exception as e:
+        print(f"[ComputerControl] SoM element search failed: {e}")
+
+    return None
+
+
+def _find_via_coordinates(description: str, screenshot_bytes: bytes, w: int, h: int) -> tuple[int, int] | None:
+    """Tier C: Direct raw screenshot coordinate estimation via Gemini."""
+    try:
+        from google.genai import types as gtypes
+        from core import gemini
 
         prompt = (
             f"This is a screenshot of a {w}×{h} pixel screen. "
@@ -336,26 +620,65 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             f"If the element is not visible, reply: NOT_FOUND"
         )
 
-        from core import gemini
-        response = gemini.call(
-            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
-            tier=gemini.FAST, timeout_ms=20_000,
+        resp = gemini.call(
+            [gtypes.Part.from_bytes(data=screenshot_bytes, mime_type="image/png"), prompt],
+            tier=gemini.FAST,
+            timeout_ms=20_000,
         )
-        if response is None:
+        if resp is None:
             return None
 
-        text = (response.text or "").strip()
+        text = (resp.text or "").strip()
         if "NOT_FOUND" in text.upper():
             return None
 
         match = re.search(r"(\d+)\s*,\s*(\d+)", text)
         if match:
             return int(match.group(1)), int(match.group(2))
-
     except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+        print(f"[ComputerControl] Coordinate fallback failed: {e}")
 
     return None
+
+
+def _screen_find(description: str) -> tuple[int, int] | None:
+    """Robust 3-tier UI element grounding:
+    Tier A: Accessibility tree inspection (pywinauto UIA).
+    Tier B: Set-of-Mark (SoM) visual candidate tagging with structured LLM detection.
+    Tier C: Direct coordinate estimation fallback.
+    """
+    if not description:
+        return None
+
+    # Tier A: UIA accessibility inspection
+    coords = _find_via_uia(description)
+    if coords is not None:
+        return coords
+
+    # Capture screen for visual tiers
+    try:
+        _require_pyautogui()
+        img = pyautogui.screenshot()
+        # pyautogui.screenshot() captures the whole virtual desktop, which on
+        # a multi-monitor setup is larger than pyautogui.size() (the primary
+        # monitor). Every coordinate the accessibility tree reports is in
+        # virtual-desktop space, so the visual tiers must use the same space.
+        shot_w, shot_h = img.size
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        screenshot_bytes = buf.getvalue()
+    except Exception as e:
+        print(f"[ComputerControl] Screenshot capture failed: {e}")
+        return None
+
+    # Tier B: Set-of-Mark visual tagging
+    coords = _find_via_som(description, img, shot_w, shot_h)
+    if coords is not None:
+        return coords
+
+    # Tier C: Raw screenshot coordinate prediction
+    return _find_via_coordinates(description, screenshot_bytes, shot_w, shot_h)
+
 
 def computer_control(
     parameters: dict,

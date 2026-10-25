@@ -4,12 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
 
-DEFAULT_PATH = Path(__file__).resolve().parent / 'conversation.db'
+DEFAULT_PATH = mutable_path(Path(__file__).resolve().parent / 'conversation.db')
 HANDLE_SECONDS = 2 * 60 * 60
 # Checkpoints made before the stalled-session recovery fix can accept input
 # forever without answering. Keep the local chat, but never reopen those handles.

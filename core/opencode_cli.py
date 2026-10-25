@@ -78,6 +78,10 @@ def candidate_binaries() -> list[Path]:
     """Ordered candidates. Only real executables are returned: a ``.cmd`` shim
     cannot be launched without a shell, which the runner refuses to use."""
     ordered: list[Path] = list(desktop_cli_binaries())
+    from core.coding_skill import executable as managed_executable
+    managed = managed_executable()
+    if managed.is_file():
+        ordered.insert(0, managed)
     for name in (("opencode-cli.exe", "opencode.exe") if os.name == 'nt' else ('opencode',)):
         located = shutil.which(name)
         if located:

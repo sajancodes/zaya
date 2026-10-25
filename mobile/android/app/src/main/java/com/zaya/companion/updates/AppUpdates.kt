@@ -44,7 +44,7 @@ class AppUpdates(private val context: Context) {
             JSONObject(response.body?.string() ?: "{}")
         }
         val tag = release.getString("tag_name")
-        require(tag.matches(Regex("android-[0-9A-Za-z._-]{1,80}"))) { "Invalid release tag" }
+        require(tag.matches(Regex("(android-|v)[0-9A-Za-z._-]{1,80}"))) { "Invalid release tag" }
         val base = "https://github.com/$repository/releases/download/$tag/"
         val manifestRequest = Request.Builder().url(base + "update.json").build()
         val manifest = client.newCall(manifestRequest).execute().use { response ->
@@ -72,7 +72,25 @@ class AppUpdates(private val context: Context) {
     private val mutex = Mutex()
     private var lastCheck = 0L
 
+    private fun isInstalledFromGooglePlay(): Boolean {
+        return try {
+            val installer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getInstallerPackageName(context.packageName)
+            }
+            installer == "com.android.vending"
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun check(force: Boolean = false) {
+        if (isInstalledFromGooglePlay()) {
+            mutable.value = UpdateState(available = null, message = "Installed via Google Play. Updates are managed by Google Play.")
+            return
+        }
         if (!force && System.currentTimeMillis() - lastCheck < 6 * 60 * 60 * 1000L) return
         if (!mutex.tryLock()) return
         try {

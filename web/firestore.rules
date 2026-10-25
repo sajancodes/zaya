@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Website APIs use server-side credentials. Never expose product analytics
+    // or admin session records directly to browsers or desktop clients.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -10,16 +10,28 @@ def get_base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
+def _resolve_config_dir() -> Path:
+    try:
+        from core.runtime_paths import get_config_dir
+        return get_config_dir()
+    except Exception:
+        return get_base_dir() / "config"
+
 BASE_DIR    = get_base_dir()
-CONFIG_DIR  = BASE_DIR / "config"
+CONFIG_DIR  = _resolve_config_dir()
 CONFIG_FILE = CONFIG_DIR / "api_keys.json"
 
 _CONFIG_LOCK = threading.RLock()
 
 
 def _read_config(path=None) -> dict:
+    target = Path(path or CONFIG_FILE)
+    if not target.is_file() and target != BASE_DIR / "config" / "api_keys.json":
+        fallback = BASE_DIR / "config" / "api_keys.json"
+        if fallback.is_file():
+            target = fallback
     try:
-        raw = Path(path or CONFIG_FILE).read_text(encoding="utf-8")
+        raw = target.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
     data = json.loads(raw)
@@ -57,19 +69,39 @@ def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 def config_exists() -> bool:
-    return CONFIG_FILE.exists()
+    return CONFIG_FILE.exists() or (BASE_DIR / "config" / "api_keys.json").exists()
 
 def save_api_keys(gemini_api_key: str) -> None:
     from core.gemini_keys import parse_keys
+    from core.security.key_vault import encrypt_secret
     keys = parse_keys(gemini_api_key)
     if not keys:
         raise ValueError('Enter at least one Gemini API key.')
-    _patch_config(gemini_api_key=keys[0], gemini_api_keys=keys)
+    enc_keys = [encrypt_secret(k) for k in keys]
+    _patch_config(gemini_api_key=enc_keys[0], gemini_api_keys=enc_keys)
 
 def load_api_keys() -> dict:
     with _CONFIG_LOCK:
         try:
-            return _read_config()
+            data = _read_config()
+            try:
+                from core.security.key_vault import decrypt_secret
+                for k in ('gemini_api_key', 'openai_api_key'):
+                    if k in data and isinstance(data[k], str) and data[k]:
+                        data[k] = decrypt_secret(data[k])
+                if 'gemini_api_keys' in data and isinstance(data['gemini_api_keys'], list):
+                    data['gemini_api_keys'] = [decrypt_secret(str(x)) for x in data['gemini_api_keys']]
+                enc_keys = data.get("encrypted_keys")
+                if isinstance(enc_keys, dict):
+                    for prov, enc_val in enc_keys.items():
+                        if isinstance(enc_val, str) and enc_val:
+                            dec = decrypt_secret(enc_val)
+                            data[f"{prov}_api_key"] = dec
+                            if prov == "custom":
+                                data["custom_api_key"] = dec
+            except Exception:
+                pass
+            return data
         except (OSError, ValueError) as error:
             print(f"Failed to load api_keys.json ({type(error).__name__}).")
             return {}
@@ -137,6 +169,16 @@ def get_push_to_talk_enabled() -> bool:
 
 def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
+
+
+def get_double_clap_enabled() -> bool:
+    """Whether acoustic double-clap wake activation is on."""
+    return load_api_keys().get("double_clap_enabled", False) is True
+
+
+def save_double_clap_enabled(enabled: bool) -> None:
+    """Persist the double-clap preference without touching any other setting."""
+    _save_flag("double_clap_enabled", bool(enabled))
 
 
 def get_auto_execute_enabled() -> bool:

@@ -219,7 +219,9 @@ def normalize_event(event) -> list[dict]:
 
     if name == 'owner.message':
         text = clip(event.get('text'), LIMITS['text'])
-        return [envelope('chat.message', {'role': 'user', 'text': text},
+        return [envelope('chat.message', {'role': 'user', 'text': text,
+                         'request_id': clip(event.get('request_id'), 120),
+                         'source': clip(event.get('source'), 40)},
                          timestamp=stamp)] if text else []
 
     if name in {'zaya.message', 'assistant.message'}:
@@ -268,6 +270,53 @@ def normalize_event(event) -> list[dict]:
         return [envelope('pc.command', {
             'command': clip(event.get('command'), 60),
             'parameters': event.get('parameters', {}) if isinstance(event.get('parameters'), dict) else {},
+        }, timestamp=stamp)]
+
+    if name in {'call.incoming', 'call.answered', 'call.ended', 'call.dialing', 'call.missed'}:
+        return [envelope(name, {
+            'caller_name': clip(event.get('caller_name'), LIMITS['title']),
+            'caller_number': clip(event.get('caller_number'), 40),
+            'call_id': clip(event.get('call_id'), LIMITS['reference']),
+            'priority': int(event.get('priority', P1_IMMEDIATE)),
+        }, timestamp=stamp)]
+
+    if name == 'notification.received':
+        return [envelope('notification.received', {
+            'app': clip(event.get('app') or 'unknown', 40),
+            'sender': clip(event.get('sender'), LIMITS['title']),
+            'text': clip(event.get('text'), LIMITS['detail']),
+            'package': clip(event.get('package'), 100),
+        }, timestamp=stamp)]
+
+    if name in {'hardware.control', 'hardware.status'}:
+        return [envelope('hardware.status', {
+            'target': clip(event.get('target'), 40),
+            'state': clip(event.get('state'), 40),
+            'battery': int(event.get('battery', 100)),
+        }, timestamp=stamp)]
+
+    if name == 'screen.frame':
+        return [envelope('screen.frame', {
+            'request_id': clip(event.get('request_id'), LIMITS['reference']),
+            'width': int(event.get('width', 0)),
+            'height': int(event.get('height', 0)),
+            'prompt': clip(event.get('prompt'), LIMITS['detail']),
+            'jpeg': event.get('jpeg', ''),
+        }, timestamp=stamp)]
+
+    if name == 'action.request':
+        return [envelope('action.request', {
+            'request_id': clip(event.get('request_id'), LIMITS['reference']),
+            'action': clip(event.get('action'), 60),
+            'params': event.get('params', {}) if isinstance(event.get('params'), dict) else {},
+        }, timestamp=stamp)]
+
+    if name == 'action.response':
+        return [envelope('action.response', {
+            'request_id': clip(event.get('request_id'), LIMITS['reference']),
+            'status': clip(event.get('status'), 30),
+            'result': event.get('result'),
+            'error': clip(event.get('error'), LIMITS['detail']) if event.get('error') else None,
         }, timestamp=stamp)]
 
     return []

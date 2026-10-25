@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import shutil
 import threading
 import time
@@ -31,13 +32,13 @@ class WhatsAppService:
 
     def _start(self) -> None:
         if self.receiver is None:
+            self.closed.clear()
             from services.whatsapp.bridge import HookReceiver
             from services.whatsapp.handler import ReplyWorker
             self.worker = ReplyWorker(self.store, self.adapter)
             self.receiver = HookReceiver(self.on_hook)
             self.receiver.start()
             self.connect_live()
-            self.closed.clear()
             self.supervisor = threading.Thread(target=self._supervise, daemon=True, name='ZayaWhatsAppRecovery')
             self.supervisor.start()
 
@@ -50,6 +51,8 @@ class WhatsAppService:
             self._connect_live()
 
     def _connect_live(self) -> None:
+        if self.closed.is_set():
+            return
         if self.native_bridge and self.native_bridge.process and self.native_bridge.process.poll() is None:
             return
         if self.native_bridge:
@@ -63,6 +66,9 @@ class WhatsAppService:
             if connection:
                 bridge = NativeBridge(self.ingest, connection, read_state_callback=self.store.sync_read_state)
                 bridge.start()
+                if self.closed.is_set():
+                    bridge.close()
+                    return
                 self.native_bridge = bridge
                 self.adapter.transport = bridge
                 self.bridge_error = None
@@ -73,14 +79,17 @@ class WhatsAppService:
         self.closed.set()
         if hasattr(self, 'supervisor'):
             self.supervisor.join(timeout=5)
-        if self.native_bridge:
-            self.native_bridge.close()
-            self.native_bridge = None
-        if self.worker:
-            self.worker.close()
-        if self.receiver:
-            self.receiver.close()
-            self.receiver = None
+        with self.lifecycle_lock:
+            if self.native_bridge:
+                self.native_bridge.close()
+                self.native_bridge = None
+            self.adapter.transport = None
+            if self.worker:
+                self.worker.close()
+                self.worker = None
+            if self.receiver:
+                self.receiver.close()
+                self.receiver = None
 
     def on_hook(self, event: str, context: dict) -> None:
         self.gateway_seen_at = time.time()
@@ -174,9 +183,17 @@ _service: WhatsAppService | None = None
 _lock = threading.Lock()
 
 
+def close_if_started() -> None:
+    """Release an owned bridge on desktop exit without creating a new service."""
+    with _lock:
+        service = _service
+    if service is not None:
+        service.close()
+
+
 def get_service() -> WhatsAppService:
     global _service
     with _lock:
         if _service is None:
-            _service = WhatsAppService(WhatsAppStore(Path(__file__).resolve().parents[2] / 'memory' / 'zaya_runtime.db'))
+            _service = WhatsAppService(WhatsAppStore(mutable_path(Path(__file__).resolve().parents[2] / 'memory' / 'zaya_runtime.db')))
     return _service

@@ -3,6 +3,8 @@ package com.zaya.companion.action
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.ContentUris
+import android.provider.ContactsContract
 import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
@@ -85,12 +87,18 @@ class ActionExecutor(
 
         return@withContext when (action) {
             is AndroidAction.SetFlashlight -> executeFlashlight(action.enabled)
+            is AndroidAction.SetVolume -> {
+                if (hardwareController.setMediaVolume(action.percent.coerceIn(0,100)))
+                    ActionResult.success("Phone media volume adjusted.")
+                else ActionResult.failure("Could not change phone volume.")
+            }
             is AndroidAction.GetFlashlightState -> executeGetFlashlightState()
             is AndroidAction.OpenSystemSettings -> executeOpenSettings(action.setting, action.packageName)
             is AndroidAction.ControlMedia -> executeControlMedia(action.action)
             is AndroidAction.GetMediaStatus -> executeGetMediaStatus()
             is AndroidAction.LaunchApp -> executeLaunchApp(action.name)
             is AndroidAction.LookUpContact -> executeContactLookup(action.query)
+            is AndroidAction.BrowseMedia -> PhoneMedia(context).browse(action)
             is AndroidAction.InitiateCall -> executeInitiateCall(action)
             is AndroidAction.GetIncomingCallState -> executeGetIncomingCallState()
             is AndroidAction.SetCallerAnnouncement -> executeSetCallerAnnouncement(action.enabled)
@@ -335,6 +343,13 @@ class ActionExecutor(
     }
 
     private fun executeInitiateCall(action: AndroidAction.InitiateCall): ActionResult {
+        if (action.app == "whatsapp") return executeWhatsappCall(action)
+        if (action.app != "phone") return ActionResult.unsupported("Unsupported calling app.")
+        if (!action.confirmed) {
+            val targetLabel = if (action.queryOrNumber.all { it.isDigit() || it in "+-() " }) {
+                action.queryOrNumber
+            } else {
+                when (val lookup = contactManager.lookupContact(action.queryOrNumber)) {
         val query = action.queryOrNumber.trim()
         if (query.isBlank()) {
             return ActionResult.failure("Call recipient or phone number cannot be blank.", error = "malformed_parameters")
@@ -432,6 +447,49 @@ class ActionExecutor(
         }
     }
 
+    private fun executeWhatsappCall(action: AndroidAction.InitiateCall): ActionResult {
+        if (!contactManager.hasContactPermission()) return ActionResult.permissionRequired(
+            Manifest.permission.READ_CONTACTS, "Allow contacts access to find the WhatsApp contact.")
+        val contact = when (val lookup = contactManager.lookupContact(action.queryOrNumber)) {
+            is ContactLookupResult.SingleMatch -> lookup.contact
+            is ContactLookupResult.MultipleNumbers -> return ActionResult.failure(
+                "Choose a specific number for ${lookup.contact.displayName}.", "multiple_numbers",
+                mapOf("numbers" to lookup.contact.numbers.map { it.number }))
+            is ContactLookupResult.AmbiguousMatches -> return ActionResult.failure(
+                "Which contact should I call?", "ambiguous_contact",
+                mapOf("candidates" to lookup.candidates.map { it.displayName }))
+            else -> return ActionResult.failure("No matching callable contact was found.", "not_found")
+        }
+        if (!action.confirmed) return ActionResult.needsConfirmation(
+            "Start a WhatsApp call to ${contact.displayName}?", "initiate_call")
+        // Use the call action actually registered by WhatsApp for this contact.
+        // An opened activity is not evidence that the other party answered.
+        context.contentResolver.query(ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID, ContactsContract.Data.MIMETYPE, ContactsContract.Data.DATA1),
+            "${ContactsContract.Data.CONTACT_ID} = ?", arrayOf(contact.contactId), null)?.use { rows ->
+            while (rows.moveToNext()) {
+                val mime = rows.getString(1).orEmpty()
+                if (!mime.contains("whatsapp", true) || !mime.contains("voip.call", true)) continue
+                val registeredNumber = rows.getString(2).orEmpty().substringBefore('@').filter { it.isDigit() }
+                val selectedNumber = contact.numbers.single().number.filter { it.isDigit() }
+                if (registeredNumber.length < 7 || selectedNumber.length < 7 ||
+                    registeredNumber.takeLast(7) != selectedNumber.takeLast(7)) continue
+                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(
+                    ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, rows.getLong(0)), mime)
+                    .setPackage("com.whatsapp").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                return try {
+                    context.startActivity(intent)
+                    ActionResult.success("Opened WhatsApp's call action for ${contact.displayName}; connection is not confirmed.",
+                        mapOf("call_connected" to false, "target" to contact.displayName))
+                } catch (_: Exception) { ActionResult.failure("WhatsApp could not open this contact's call action.") }
+            }
+        }
+        return ActionResult.unsupported("WhatsApp has no registered voice-call action for this contact. Open the contact in WhatsApp to call manually.")
+    }
+
+    private fun executeGetIncomingCallState(): ActionResult {
+        if (!registry.hasPermission(Manifest.permission.READ_PHONE_STATE))
+            return ActionResult.permissionRequired(Manifest.permission.READ_PHONE_STATE, "Allow phone state access to read incoming calls.")
     private fun executeGetIncomingCallState(): ActionResult {
         val info = callManager.getIncomingCallInfo()
         return if (info.isRinging) {
@@ -939,7 +997,8 @@ class ActionExecutor(
                         "width" to frame.width,
                         "height" to frame.height,
                         "timestamp" to frame.timestamp,
-                        "captured" to true
+                        "captured" to true,
+                        "jpeg" to android.util.Base64.encodeToString(frame.jpeg, android.util.Base64.NO_WRAP)
                     )
                 )
             }

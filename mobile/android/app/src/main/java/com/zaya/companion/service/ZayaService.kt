@@ -36,13 +36,14 @@ class ZayaService : Service() {
 
     private var watchers: Job? = null
     private var ringingCallId: String = ""
+    private var voiceForeground = false
 
     override fun onCreate() {
         super.onCreate()
         Notifications.ensureChannels(this)
         val created = ZayaRuntime(applicationContext, scope)
         runtime = created
-        startForegroundSafely(created.connection.value, created)
+        if (!startForegroundSafely(created.connection.value, created)) { stopSelf(); return }
         ZayaApp.attach(created)
         created.start()
         watchers = scope.launch {
@@ -58,6 +59,22 @@ class ZayaService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val current = runtime
         when (intent?.action) {
+            ACTION_VOICE_BEGIN -> {
+                voiceForeground = true
+                voiceReady = startForegroundSafely(current?.connection?.value ?: ConnectionStatus(), current, projectionReady)
+            }
+            ACTION_VOICE_END -> {
+                voiceForeground = false
+                voiceReady = false
+                startForegroundSafely(current?.connection?.value ?: ConnectionStatus(), current, projectionReady)
+            }
+            ACTION_PROJECTION_BEGIN -> {
+                projectionReady = startForegroundSafely(current?.connection?.value ?: ConnectionStatus(), current, true)
+            }
+            ACTION_PROJECTION_END -> {
+                projectionReady = false
+                startForegroundSafely(current?.connection?.value ?: ConnectionStatus(), current, false)
+            }
             ACTION_RECONNECT -> current?.reconnectNow()
             ACTION_DISCONNECT -> {
                 current?.stop()
@@ -89,6 +106,9 @@ class ZayaService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        projectionReady = false
+        voiceReady = false
+        voiceForeground = false
         Ringer.stop()
         Notifications.cancel(this, Notifications.ID_CALL)
         watchers?.cancel()
@@ -132,10 +152,7 @@ class ZayaService : Service() {
     private fun updateNotification(status: ConnectionStatus, source: ZayaRuntime) {
         val name = source.pairing.value?.serverName
             ?: source.model.serverName.value
-        runCatching {
-            androidx.core.app.NotificationManagerCompat.from(this)
-                .notify(Notifications.ID_CONNECTION, Notifications.connection(this, status, name))
-        }
+        Notifications.post(this, Notifications.ID_CONNECTION, Notifications.connection(this, status, name))
         if (status.isOnline) {
             val active = source.model.call.value
             if (active !is CallUiState.Ringing && ringingCallId.isNotEmpty()) {
@@ -146,33 +163,20 @@ class ZayaService : Service() {
         }
     }
 
-    private fun startForegroundSafely(status: ConnectionStatus, source: ZayaRuntime) {
-        val notification = Notifications.connection(
-            this,
-            status,
-            source.pairing.value?.serverName ?: "Zaya",
-        )
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+    private fun startForegroundSafely(status: ConnectionStatus, source: ZayaRuntime?, projection: Boolean = false): Boolean {
+        val notification = Notifications.connection(this, status, source?.pairing?.value?.serverName ?: "Zaya")
+        val type = if (Build.VERSION.SDK_INT >= 29) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        } else {
-            0
-        }
-        runCatching {
-            if (type == 0) {
-                startForeground(Notifications.ID_CONNECTION, notification)
-            } else {
+                (if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0) or
+                (if (projection) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0) or
+                (if (voiceForeground && Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        } else 0
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 startForeground(Notifications.ID_CONNECTION, notification, type)
-            }
-        }.onFailure {
-            // A foreground start can be refused (background start restrictions).
-            // The service still runs while the app is alive; the owner can reopen
-            // the app to re-establish the ongoing notification.
-        }
+            else startForeground(Notifications.ID_CONNECTION, notification)
+            true
+        }.getOrElse { android.util.Log.w("ZayaService", "Foreground service unavailable", it); false }
     }
 
     private fun stopForegroundCompat() {
@@ -187,6 +191,14 @@ class ZayaService : Service() {
     }
 
     companion object {
+        @Volatile var voiceReady = false
+            private set
+        const val ACTION_VOICE_BEGIN = "com.zaya.companion.action.VOICE_BEGIN"
+        const val ACTION_VOICE_END = "com.zaya.companion.action.VOICE_END"
+        @Volatile var projectionReady = false
+            private set
+        const val ACTION_PROJECTION_BEGIN = "com.zaya.companion.action.PROJECTION_BEGIN"
+        const val ACTION_PROJECTION_END = "com.zaya.companion.action.PROJECTION_END"
         const val ACTION_RECONNECT = "com.zaya.companion.action.RECONNECT"
         const val ACTION_DISCONNECT = "com.zaya.companion.action.DISCONNECT"
         const val ACTION_ANSWER = "com.zaya.companion.action.ANSWER"

@@ -29,9 +29,10 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from core.runtime_paths import mutable_path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PATH = ROOT / 'memory' / 'zaya_runtime.db'
+DEFAULT_PATH = mutable_path(ROOT / 'memory' / 'zaya_runtime.db')
 
 _ITERATIONS = 120_000
 _LOCKOUT_THRESHOLD = 5

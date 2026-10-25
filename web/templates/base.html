@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title | default("Zaya — Personal Spatial AI Assistant") }}</title>
+  <meta name="description" content="{{ description | default("Zaya is an advanced personal AI assistant uniting real-time voice, continuous perception, optical hand tracking, virtual keyboard, and spatial 3D workspace. Created by Sajan Rai.") }}">
+  
+  <!-- OpenGraph Metadata -->
+  <meta property="og:title" content="{{ title | default("Zaya — Personal Spatial AI Assistant") }}">
+  <meta property="og:description" content="{{ description | default("Real-time voice, optical hand tracking, virtual keyboard, and 3D spatial intelligence. Created by Sajan Rai.") }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://zaya.sajan.codes{{ request.url.path if request else '/' }}">
+  
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header class="navbar">
+    <div class="container nav-container">
+      <a href="/" class="nav-brand">
+        ZAYA
+        <span class="author">Built by Sajan Rai</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="/features" class="{{ 'active' if active_page == 'features' else '' }}">Features</a></li>
+        <li><a href="/download" class="{{ 'active' if active_page == 'download' else '' }}">Download</a></li>
+        <li><a href="/docs/getting-started" class="{{ 'active' if active_page == 'docs' else '' }}">Docs</a></li>
+        <li><a href="/releases" class="{{ 'active' if active_page == 'releases' else '' }}">Releases</a></li>
+        <li><a href="/roadmap" class="{{ 'active' if active_page == 'roadmap' else '' }}">Roadmap</a></li>
+        <li><a href="/about" class="{{ 'active' if active_page == 'about' else '' }}">About</a></li>
+      </ul>
+
+      <div class="nav-cta">
+        <a href="/download" class="btn btn-primary">Download Zaya</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Page Content -->
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Global Footer -->
+  <footer class="footer">
+    <div class="container footer-content">
+      <div>
+        <div style="font-weight: 700; color: #ffffff; letter-spacing: 1px; margin-bottom: 4px;">ZAYA</div>
+        <div>Created and developed by Sajan Rai. Private, spatial, autonomous.</div>
+      </div>
+
+      <ul class="footer-links">
+        <li><a href="/download">Download</a></li>
+        <li><a href="/docs/getting-started">Documentation</a></li>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/security">Security</a></li>
+        <li><a href="/admin">Admin</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

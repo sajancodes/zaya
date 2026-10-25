@@ -1,20 +1,25 @@
 import json
 import re
 from datetime import datetime, timezone
-from threading import Lock
+from threading import RLock
 from pathlib import Path
 import sys
+import os
+import tempfile
+from copy import deepcopy
+from memory.fact_policy import active as fact_active, confidence as fact_confidence, expiry as fact_expiry
 
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
+        from core.runtime_paths import get_user_data_dir
+        return get_user_data_dir()
     return Path(__file__).resolve().parent.parent
 
 
 BASE_DIR         = get_base_dir()
 MEMORY_PATH      = BASE_DIR / "memory" / "long_term.json"
-_lock            = Lock()
+_lock            = RLock()
 MAX_VALUE_LENGTH = 380
 
 # ── Why there are two very different numbers here ────────────────────────────
@@ -54,7 +59,7 @@ def _empty_memory() -> dict:
         "notes":         {},
     }
 
-def load_memory() -> dict:
+def load_memory(*, strict=False) -> dict:
     if not MEMORY_PATH.exists():
         return _empty_memory()
     with _lock:
@@ -66,8 +71,12 @@ def load_memory() -> dict:
                     if key not in data:
                         data[key] = {}
                 return data
+            if strict:
+                raise ValueError('Memory must be a JSON object.')
             return _empty_memory()
         except Exception as e:
+            if strict:
+                raise
             print(f"[Memory] ⚠️ Load error: {e}")
             return _empty_memory()
 
@@ -121,15 +130,34 @@ def save_memory(memory: dict) -> None:
     memory = _trim_to_limit(memory)
     MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _lock:
-        MEMORY_PATH.write_text(
-            json.dumps(memory, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=MEMORY_PATH.parent,
+                    prefix='.zaya-memory-', suffix='.tmp', delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(memory, stream, indent=2, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, MEMORY_PATH)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
 
-def _truncate_value(val: str) -> str:
-    if isinstance(val, str) and len(val) > MAX_VALUE_LENGTH:
-        return val[:MAX_VALUE_LENGTH].rstrip() + "…"
+CATEGORY_VALUE_LENGTHS: dict[str, int] = {
+    "identity": 380,
+    "preferences": 380,
+    "relationships": 380,
+    "wishes": 500,
+    "projects": 1200,
+    "notes": 1200,
+}
+
+
+def _truncate_value(val: str, category: str = "") -> str:
+    limit = CATEGORY_VALUE_LENGTHS.get(category.lower(), MAX_VALUE_LENGTH)
+    if isinstance(val, str) and len(val) > limit:
+        return val[:limit].rstrip() + "…"
     return val
 
 
@@ -141,13 +169,15 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
         if isinstance(value, str) and not value.strip():
             continue
         if isinstance(value, dict) and "value" not in value:
+            cat_name = category or key
             if key not in target or not isinstance(target[key], dict):
                 target[key] = {}
                 changed = True
-            if _recursive_update(target[key], value, category or key):
+            if _recursive_update(target[key], value, cat_name):
                 changed = True
         else:
-            new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value))
+            cat_name = category or str(value.get("category", "") if isinstance(value, dict) else "")
+            new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value), cat_name)
             from core.personal_memory import SensitiveDataGuard
             is_sens, _ = SensitiveDataGuard.inspect(f"{key} {new_val}")
             if is_sens:
@@ -156,15 +186,20 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
             existing = target.get(key, {})
             previous = existing if isinstance(existing, dict) else {}
             metadata = value if isinstance(value, dict) else {}
-            confidence = float(metadata.get("confidence", 1.0))
+            confidence = fact_confidence(metadata.get("confidence", previous.get('confidence', 1.0)))
             if confidence < 0.7:
                 continue
+            try:
+                expires_at = fact_expiry(metadata.get('expires_at', previous.get('expires_at')))
+            except (TypeError, ValueError, OverflowError):
+                continue
             now = datetime.now(timezone.utc).isoformat()
-            entry = {"value": new_val, "updated": now[:10], "category": category,
-                     "source": metadata.get("source", "user"), "confidence": min(1.0, confidence),
+            entry = {"value": new_val, "updated": now[:10], "category": cat_name,
+                     "source": metadata.get("source", previous.get('source', "user")), "confidence": confidence,
                      "created_at": previous.get("created_at", now), "updated_at": now,
-                     "last_used_at": previous.get("last_used_at"), "expires_at": metadata.get("expires_at")}
-            if not isinstance(existing, dict) or existing.get("value") != new_val:
+                     "last_used_at": previous.get("last_used_at"), "expires_at": expires_at}
+            if not isinstance(existing, dict) or any(existing.get(k) != entry.get(k) for k in
+                    ('value', 'category', 'source', 'confidence', 'expires_at')):
                 target[key] = entry
                 changed = True
     return changed
@@ -173,16 +208,28 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
 def update_memory(memory_update: dict) -> dict:
     if not isinstance(memory_update, dict) or not memory_update:
         return load_memory()
-    memory = load_memory()
-    if _recursive_update(memory, memory_update):
-        save_memory(memory)
-        print(f"[Memory] Saved: {list(memory_update.keys())}")
+    with _lock:
+        memory = load_memory(strict=True)
+        before = deepcopy(memory)
+        if _recursive_update(memory, memory_update):
+            save_memory(memory)
+            accepted = {cat: {key: entry for key, entry in items.items()
+                            if before.get(cat, {}).get(key) != entry}
+                        for cat, items in memory.items() if isinstance(items, dict)}
+            print(f"[Memory] Saved: {list(memory_update.keys())}")
+            try:
+                from memory.knowledge_store import get_knowledge_store
+                get_knowledge_store().sync_from_json(accepted)
+            except Exception as error:
+                print(f'[Memory] Search index sync unavailable ({type(error).__name__}); JSON facts remain saved.')
     return memory
 
 def _entry_value(entry) -> str:
     """Accept both the {'value': ..., 'updated': ...} shape and a bare string,
     because early versions of the store wrote plain strings."""
     if isinstance(entry, dict):
+        if not fact_active(entry):
+            return ''
         return str(entry.get("value", "") or "").strip()
     return str(entry or "").strip()
 
@@ -362,10 +409,42 @@ def _score(query_words: list[str], cat: str, key: str, value: str) -> int:
 
 
 def search_memory(query: str, limit: int = 8) -> str:
+    with _lock:
+        return _search_memory_locked(query, limit)
+
+
+def _search_memory_locked(query: str, limit: int = 8) -> str:
     """Find stored facts matching `query`. Backs the recall_memory tool.
 
-    An empty query is treated as "show me everything you know", capped - the
-    model asks that when the user says "what do you remember about me?"."""
+    Uses SQLite FTS5 BM25 hybrid ranking when available, falling back gracefully
+    to memory JSON scanning.
+    """
+    # Attempt hybrid search through KnowledgeStore first
+    try:
+        from memory.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        ks_results = ks.search_hybrid(query, limit=limit)
+        current = load_memory()
+        # JSON is the authoritative value for mirrored facts if indexing was
+        # temporarily unavailable during an accepted update.
+        selected = []
+        for result in ks_results:
+            entries = current.get(result['category'], {})
+            entry = entries.get(result['key']) if isinstance(entries, dict) else None
+            if entry is not None:
+                value = _entry_value(entry)
+                if not value:
+                    continue
+                result = {**result, 'value': value}
+            selected.append(result)
+        ks_results = selected
+        if ks_results:
+            lines = [f"{r['category']}/{_pretty(r['key'])}: {r['value']}" for r in ks_results]
+            head = (f"Stored facts matching '{query}':" if query else "Everything currently stored:")
+            return head + "\n" + "\n".join(lines)
+    except Exception:
+        pass
+
     memory = load_memory()
     words  = [w for w in re.split(r"[^\w]+", (query or "").lower()) if len(w) > 1]
 
@@ -431,13 +510,22 @@ def remember(key: str, value: str, category: str = "notes") -> str:
 def forget(key: str, category: str = "notes") -> str:
     from core.personal_memory import get_memory_brain
     get_memory_brain().forget_memory(key)
-    memory = load_memory()
-    cat    = memory.get(category, {})
-    if key in cat:
-        del cat[key]
-        memory[category] = cat
-        save_memory(memory)
-        return f"Forgotten: {category}/{key}"
+    with _lock:
+        memory = load_memory(strict=True)
+        cat = memory.get(category, {})
+        from memory.knowledge_store import get_knowledge_store
+        store = get_knowledge_store()
+        sql_exists = store.get_fact(category, key) is not None
+        store.delete_fact(category, key)
+        if store.get_fact(category, key) is not None:
+            raise RuntimeError('Memory search index could not forget this fact; nothing was reported forgotten.')
+        if key in cat:
+            del cat[key]
+            memory[category] = cat
+            save_memory(memory)
+            return f"Forgotten: {category}/{key}"
+        if sql_exists:
+            return f"Forgotten: {category}/{key}"
     return f"Not found: {category}/{key}"
 
 
@@ -450,11 +538,16 @@ _SESSION_MAX = 3   # safety cap — in practice 0-1 entries after pop
 
 
 def save_session_summary(summary: str, language: str = "") -> None:
+    with _lock:
+        return _save_session_summary_locked(summary, language)
+
+
+def _save_session_summary_locked(summary: str, language: str = '') -> None:
     """Append a 1-2 sentence session summary to long_term.json['sessions']."""
     summary = (summary or "").strip()
     if not summary:
         return
-    memory   = load_memory()
+    memory   = load_memory(strict=True)
     sessions = memory.get("sessions", [])
     if not isinstance(sessions, list):
         sessions = []
@@ -466,12 +559,7 @@ def save_session_summary(summary: str, language: str = "") -> None:
         entry["language"] = language
     sessions.append(entry)
     memory["sessions"] = sessions[-_SESSION_MAX:]
-    with _lock:
-        MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MEMORY_PATH.write_text(
-            json.dumps(memory, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    save_memory(memory)
     print(f"[Memory] 📝 Session saved ({entry['date']}): {summary[:60]}…")
 
 
@@ -490,10 +578,7 @@ def pop_last_session() -> dict | None:
                 return None
             entry = sessions.pop()          # remove the last entry
             memory["sessions"] = sessions
-            MEMORY_PATH.write_text(
-                json.dumps(memory, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            save_memory(memory)
             return entry
         except Exception as e:
             print(f"[Memory] ⚠️ pop_last_session error: {e}")

@@ -154,7 +154,22 @@ def _capture_camera() -> tuple[bytes, str]:
     if not _CV2:
         raise RuntimeError("OpenCV (cv2) is not installed. Run: pip install opencv-python")
 
-    index   = _get_camera_index()
+    # Reuse the optional worker's sensor only on an explicit vision request.
+    # Hand tracking never pushes image frames into the Live session on its own.
+    try:
+        from core.gesture.controller import hands
+        tracker=hands.tracker
+    except ImportError:
+        tracker=None
+    if tracker is not None and tracker.state=='ACTIVE':
+        index=int(_load_config().get('camera_index',tracker.device))
+        if index==tracker.device:
+            frame=tracker.capture_frame()
+            if frame:
+                return frame,'image/jpeg'
+            raise RuntimeError('The hand camera could not return the requested vision frame.')
+    else:
+        index=_get_camera_index()
     backend = _cv2_backend()
     cap     = cv2.VideoCapture(index, backend)
 
@@ -182,3 +197,56 @@ def _capture_camera() -> tuple[bytes, str]:
     if not encoded or buf is None:
         raise RuntimeError('Camera frame could not be encoded as JPEG.')
     return buf.tobytes(), "image/jpeg"
+
+
+_LAST_FRAME_HASHES: dict[str, int] = {}
+
+
+def compute_dhash(img_bytes: bytes, hash_size: int = 8) -> int | None:
+    """Compute difference hash (dHash) of an image byte buffer."""
+    if not _PIL:
+        return None
+    try:
+        img = PIL.Image.open(io.BytesIO(img_bytes)).convert("L")
+        resized = img.resize((hash_size + 1, hash_size), PIL.Image.Resampling.BILINEAR)
+        if hasattr(resized, "get_flattened_data"):
+            pixels = list(resized.get_flattened_data())
+        else:
+            pixels = list(resized.getdata())  # type: ignore
+        diff = 0
+        for row in range(hash_size):
+            row_offset = row * (hash_size + 1)
+            for col in range(hash_size):
+                if pixels[row_offset + col] > pixels[row_offset + col + 1]:
+                    diff |= 1 << (row * hash_size + col)
+        return diff
+    except Exception as e:
+        print(f"[Vision] ⚠️ compute_dhash failed: {e}")
+        return None
+
+
+def hamming_distance(h1: int, h2: int) -> int:
+    """Return the number of differing bits between two integer hashes."""
+    return bin(h1 ^ h2).count("1")
+
+
+def frame_changed(source: str, img_bytes: bytes, threshold: int = 4) -> bool:
+    """Return True if the frame has changed by at least threshold bits compared to last capture.
+
+    If source has no prior capture recorded, records hash and returns True.
+    """
+    current_hash = compute_dhash(img_bytes)
+    if current_hash is None:
+        return True
+
+    previous_hash = _LAST_FRAME_HASHES.get(source)
+    if previous_hash is None:
+        _LAST_FRAME_HASHES[source] = current_hash
+        return True
+
+    distance = hamming_distance(current_hash, previous_hash)
+    if distance >= threshold:
+        _LAST_FRAME_HASHES[source] = current_hash
+        return True
+
+    return False

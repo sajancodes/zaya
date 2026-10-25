@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+from core.runtime_paths import mutable_path
 import secrets
 import shutil
 import threading
@@ -12,7 +13,7 @@ import time
 from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[2]
-DESCRIPTOR = ROOT / 'config' / 'hermes_bridge.json'
+DESCRIPTOR = mutable_path(ROOT / 'config' / 'hermes_bridge.json')
 
 
 class HookReceiver:

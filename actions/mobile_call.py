@@ -28,6 +28,10 @@ def call_owner(parameters, **_kwargs):
     reason = str(parameters.get('reason') or '').strip()
     if not reason:
         return ToolResult('failed', 'A call needs a concrete reason.')
+    if parameters.get('delay_seconds') is not None or parameters.get('time'):
+        from actions.reminder import reminder
+        return reminder({**parameters, 'action': 'create', 'delivery': 'call',
+                         'message': reason})
     question = str(parameters.get('question') or '').strip()
     urgency = str(parameters.get('urgency') or 'immediate').strip().lower()
     priority = _URGENCY.get(urgency, protocol.P1_IMMEDIATE)
@@ -69,7 +73,8 @@ TOOL = {
         'request he made earlier to be told directly. Also use it when the owner explicitly says '
         '"call me" or asks to test a phone call: set requested=true so the phone rings even '
         'while he is at the laptop or recently tested a call. Never set requested=true '
-        'for an automatic update. Do NOT use it for ordinary updates, '
+        'for an automatic update. For a future call supply delay_seconds or date/time; '
+        'this durably schedules a real call instead of ringing now. Do NOT use it for ordinary updates, '
         'routine progress, or anything that can wait for a normal reply — the laptop decides '
         'the priority and will downgrade a call that is not warranted. State the concrete '
         'reason; the owner hears it when he answers, so he never has to ask what happened.'
@@ -77,6 +82,9 @@ TOOL = {
     'parameters': {
         'type': 'OBJECT',
         'properties': {
+            'delay_seconds': {'type': 'NUMBER', 'description': 'Schedule a call this many seconds from now instead of calling immediately.'},
+            'date': {'type': 'STRING', 'description': 'Local date YYYY-MM-DD for a scheduled call.'},
+            'time': {'type': 'STRING', 'description': 'Local time HH:MM or HH:MM:SS for a scheduled call.'},
             'requested': {'type': 'BOOLEAN', 'description': 'True only when the owner explicitly requests an immediate/test call; false for proactive calls.'},
             'reason': {'type': 'STRING',
                        'description': 'One short sentence: why you need the owner now.'},

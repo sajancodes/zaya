@@ -62,9 +62,11 @@ class CommandTracker(
 
     /** Ids still waiting for a terminal answer; resent after a reconnect. */
     @Synchronized
-    fun inFlight(): List<Pair<String, String>> = entries.values
-        .filter { it.status != Protocol.STATUS_COMPLETED && it.status != Protocol.STATUS_FAILED }
-        .map { it.requestId to it.text }
+    fun inFlight(): List<Pair<String, String>> {
+        prune(clock())
+        return entries.values.filter { it.status != Protocol.STATUS_COMPLETED && it.status != Protocol.STATUS_FAILED }
+            .map { it.requestId to it.text }
+    }
 
     @Synchronized
     fun forget(requestId: String) {

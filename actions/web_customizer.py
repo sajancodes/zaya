@@ -1,12 +1,13 @@
-"""
-Real-time Web Customization / Reality Hacker (Chapter 11 / PC Specs)
+"""Real-time Web Customization / Reality Hacker.
+Created and developed by Sajan Rai for Zaya.
 Modify web pages in real-time by injecting custom styles and scripts to test interface variations
-or transform websites into cyber-green, terminal, or dark modes live.
+or transform websites into cyberpunk, terminal, or dark modes live.
 """
 from __future__ import annotations
 
 import json
 from typing import Any, Dict, Optional
+
 from core.execution_policy import require_owner
 
 THEME_PRESETS = {
@@ -66,21 +67,42 @@ def generate_custom_theme_css(theme_name: str) -> str:
 def inject_css_into_browser(css_content: str, script_content: Optional[str] = None) -> Dict[str, Any]:
     """Attempts to inject style and script into active browser session via browser_control."""
     try:
-        from actions.browser_control import _sessions
-        if _sessions:
-            for session in _sessions.values():
-                if session._page:
-                    async def _inject():
+        from actions.browser_control import _registry
+        with _registry._lock:
+            sessions = list(_registry._sessions.values())
+            active = _registry._active_browser
+        if sessions:
+            sessions.sort(key=lambda session: getattr(session, 'browser_name', '') != active)
+            for session in sessions:
+                if getattr(session, "_page", None):
+                    # Bind the session now: a closure over the loop variable
+                    # would read whatever the loop ended on if the coroutine
+                    # were ever started later.
+                    target = session
+
+                    async def _inject(session=target):
                         if css_content:
                             await session._page.add_style_tag(content=css_content)
                         if script_content:
                             await session._page.add_script_tag(content=script_content)
                     session.run(_inject())
-                    return {"status": "success", "message": "Injected custom CSS/JS into active browser session."}
+                    return {
+                        "status": "success",
+                        "applied": True,
+                        "message": "Injected custom CSS/JS into active browser session.",
+                    }
     except Exception as e:
-        return {"status": "partial", "message": f"Browser injection staged; active session notice: {e}"}
+        return {
+            "status": "partial",
+            "applied": False,
+            "message": f"Browser injection failed; CSS was prepared but not applied: {e}",
+        }
 
-    return {"status": "success", "message": "Custom CSS styling prepared and staged for live injection."}
+    return {
+        "status": "partial",
+        "applied": False,
+        "message": "No active browser session — the CSS was prepared but not applied.",
+    }
 
 
 def web_customize(parameters: dict, **_kwargs) -> str:
@@ -93,17 +115,28 @@ def web_customize(parameters: dict, **_kwargs) -> str:
     css_to_inject = custom_css if custom_css else generate_custom_theme_css(theme)
     result = inject_css_into_browser(css_to_inject, custom_js)
 
+    # "applied" is the authoritative answer to "did the page change?". The
+    # old code always said "Applied <theme> styling to web session" even
+    # when there was no session at all and nothing was injected.
+    applied = bool(result.get("applied", result.get("status") == "success"))
+    details = result.get("message", "")
+    if applied:
+        message = f"Applied {theme} styling to the active web session."
+    else:
+        message = f"Theme '{theme}' was prepared but NOT applied — {details}"
+
     return json.dumps({
-        "status": result.get("status", "success"),
+        "status": "success" if applied else "partial",
         "theme": theme,
-        "message": f"Reality Hacker: Applied {theme} styling to web session.",
-        "details": result.get("message")
+        "applied": applied,
+        "message": message,
+        "details": details
     }, indent=2)
 
 
 TOOL = {
     "name": "web_customize",
-    "description": "Real-time Web Customization (Reality Hacker): Visually mutate and inject custom CSS/JS into active websites (e.g. inject cyberpunk theme, terminal green, dark mode).",
+    "description": "Real-time Web Customization: Visually mutate and inject custom CSS/JS into active websites (e.g. inject cyberpunk theme, terminal green, dark mode).",
     "parameters": {
         "type": "OBJECT",
         "properties": {

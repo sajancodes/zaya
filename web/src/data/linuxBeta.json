@@ -1,0 +1,56 @@
+{
+  "published": true,
+  "version": "0.5.1",
+  "tag": "linux-0.5.1-beta.1",
+  "date": "2026-10-24",
+  "filename": "Zaya.deb",
+  "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.deb",
+  "sha256": "fac1aa652366249b671fedd1bdc24f864ee09bc2e97e368e61ca38ee1eb773f2",
+  "size": 373070464,
+  "channel": "beta",
+  "platform": "linux",
+  "public_release_verified": false,
+  "packages": [
+    {
+      "format": "deb",
+      "label": "Ubuntu / Mint",
+      "filename": "Zaya.deb",
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.deb",
+      "sha256": "fac1aa652366249b671fedd1bdc24f864ee09bc2e97e368e61ca38ee1eb773f2",
+      "size": 373070464,
+      "commands": [
+        "sudo apt install ./Zaya.deb",
+        "zaya"
+      ],
+      "note": "For Ubuntu, Linux Mint and compatible Debian-based AMD64 desktops. Smoke-tested on Ubuntu 22.04 under WSL2."
+    },
+    {
+      "filename": "Zaya.rpm",
+      "sha256": "85c4f3c6adb4ae66820775f0086d0e9b0c172d42d0a0fe3125182b11a751a54b",
+      "size": 423435288,
+      "format": "rpm",
+      "label": "Fedora",
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya.rpm",
+      "commands": [
+        "sudo dnf install ./Zaya.rpm",
+        "zaya"
+      ],
+      "note": "Fedora 44 container install/startup checked. For conventional dnf-based desktops; other RPM and Atomic editions are not certified."
+    },
+    {
+      "filename": "Zaya-linux-x86_64.tar.gz",
+      "sha256": "a8694a7d442edefc7c9454a4845d5cde73c6f20e57f9221e44dead06ec31c03d",
+      "size": 449185493,
+      "format": "portable",
+      "label": "Other Linux",
+      "url": "https://github.com/sajancodes/zaya-companion-releases/releases/download/linux-0.5.1-beta.1/Zaya-linux-x86_64.tar.gz",
+      "commands": [
+        "tar -xzf Zaya-linux-x86_64.tar.gz",
+        "./Zaya/Zaya"
+      ],
+      "note": "For other modern glibc-based x86-64 distros. Manual runtime dependencies are required; read the included README. Not individually certified on every distro."
+    }
+  ],
+  "minimum_glibc": "2.35",
+  "architecture": "x86_64"
+}

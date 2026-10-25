@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container docs-layout">
+  <!-- Sticky Documentation Sidebar -->
+  <aside class="docs-sidebar">
+    <div class="docs-nav-group">
+      <div class="docs-nav-title">Getting Started</div>
+      <ul class="docs-nav-list">
+        <li><a href="/docs/getting-started" class="{{ 'active' if topic == 'getting-started' else '' }}">Introduction & Setup</a></li>
+        <li><a href="/docs/api-key" class="{{ 'active' if topic == 'api-key' else '' }}">Obtaining an API Key</a></li>
+        <li><a href="/docs/windows-installation" class="{{ 'active' if topic == 'windows-installation' else '' }}">Windows Installation</a></li>
+        <li><a href="/docs/android-installation" class="{{ 'active' if topic == 'android-installation' else '' }}">Android Companion</a></li>
+      </ul>
+    </div>
+
+    <div class="docs-nav-group">
+      <div class="docs-nav-title">Core Systems</div>
+      <ul class="docs-nav-list">
+        <li><a href="/docs/voice" class="{{ 'active' if topic == 'voice' else '' }}">Voice & Audio Control</a></li>
+        <li><a href="/docs/vision" class="{{ 'active' if topic == 'vision' else '' }}">Vision & Screen Perception</a></li>
+        <li><a href="/docs/virtual-keyboard" class="{{ 'active' if topic == 'virtual-keyboard' else '' }}">Virtual Hand Keyboard</a></li>
+        <li><a href="/docs/spatial-workspace" class="{{ 'active' if topic == 'spatial-workspace' else '' }}">Spatial 3D Workspace</a></li>
+        <li><a href="/docs/phone-pairing" class="{{ 'active' if topic == 'phone-pairing' else '' }}">Phone Pairing & Calls</a></li>
+        <li><a href="/docs/whatsapp" class="{{ 'active' if topic == 'whatsapp' else '' }}">WhatsApp Integration</a></li>
+        <li><a href="/docs/automation" class="{{ 'active' if topic == 'automation' else '' }}">Scheduled Automations</a></li>
+      </ul>
+    </div>
+
+    <div class="docs-nav-group">
+      <div class="docs-nav-title">Maintenance & Security</div>
+      <ul class="docs-nav-list">
+        <li><a href="/docs/troubleshooting" class="{{ 'active' if topic == 'troubleshooting' else '' }}">Troubleshooting Guide</a></li>
+        <li><a href="/docs/uninstall" class="{{ 'active' if topic == 'uninstall' else '' }}">Uninstalling Zaya</a></li>
+        <li><a href="/security">Security & Key Vault</a></li>
+        <li><a href="/privacy">Privacy Policy</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- Document Content Area -->
+  <article class="docs-content">
+    {% block doc_body %}
+      {{ doc_html | safe }}
+    {% endblock %}
+  </article>
+</div>
+{% endblock %}

@@ -11,8 +11,9 @@ import sys
 import threading
 
 from core.audit import redact
+from core.runtime_paths import get_log_dir
 
-LOG_PATH = Path(__file__).resolve().parent.parent / 'logs' / 'runtime' / 'zaya.log'
+LOG_PATH = get_log_dir() / 'runtime' / 'zaya.log'
 _lock = threading.RLock()
 _loggers = {}
 _enabled = False

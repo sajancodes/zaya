@@ -1,56 +1,84 @@
-"""
-Interactive Google Calendar & Schedule Management (v1.8.1 / PC Specs)
-Schedule new meetings with Google Meet links, reschedule start/end times,
+"""Interactive Calendar & Schedule Management.
+Created and developed by Sajan Rai for Zaya.
+Schedule meetings with Google Meet links, reschedule start/end times,
 and query upcoming schedule across a 48-hour window.
 """
 from __future__ import annotations
 
 import json
 import random
-import re
 import string
 import sys
 import time
+import os
+import tempfile
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
 from core.execution_policy import require_owner
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-_CALENDAR_STORE = get_base_dir() / "data" / "calendar_events.json"
+
+_EVENT_LOCK = threading.RLock()
+
+_CALENDAR_STORE = get_base_dir() / "memory" / "calendar_events.json"
 
 
 def _load_events() -> List[Dict[str, Any]]:
     try:
         if _CALENDAR_STORE.exists():
-            return json.loads(_CALENDAR_STORE.read_text(encoding="utf-8"))
+            data = json.loads(_CALENDAR_STORE.read_text(encoding="utf-8"))
+            # A hand-edited or half-written store must not take the action
+            # down: _load_events() returned whatever was in the file, and a
+            # JSON object instead of a list made events.append() raise.
+            if isinstance(data, list):
+                return [e for e in data if isinstance(e, dict)]
     except Exception:
         pass
     return []
 
 
 def _save_events(events: List[Dict[str, Any]]) -> bool:
+    temporary = None
     try:
         _CALENDAR_STORE.parent.mkdir(parents=True, exist_ok=True)
-        _CALENDAR_STORE.write_text(json.dumps(events, indent=2), encoding="utf-8")
+        if _CALENDAR_STORE.exists():
+            existing = json.loads(_CALENDAR_STORE.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                return False
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=_CALENDAR_STORE.parent,
+                                         prefix='.calendar-', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(events, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, _CALENDAR_STORE)
         return True
-    except Exception:
+    except (OSError, ValueError):
         return False
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _generate_meet_link() -> str:
-    """Generates a realistic Google Meet format code: xxx-yyyy-zzz."""
-    c1 = "".join(random.choices(string.ascii_lowercase, k=3))
-    c2 = "".join(random.choices(string.ascii_lowercase, k=4))
-    c3 = "".join(random.choices(string.ascii_lowercase, k=3))
-    return f"https://meet.google.com/{c1}-{c2}-{c3}"
+    """No meeting service is authenticated here; never invent a meeting URL."""
+    return ''
 
 
-def add_event(
+def add_event(*args, **kwargs):
+    with _EVENT_LOCK:
+        return _add_event(*args, **kwargs)
+
+
+def _add_event(
     title: str,
     hours_from_now: float = 1.0,
     duration_minutes: int = 30,
@@ -75,8 +103,10 @@ def add_event(
         "description": description,
         "meet_link": meet_url
     }
+    evt["sync_status"] = "local_only"
     events.append(evt)
-    _save_events(events)
+    if not _save_events(events):
+        raise OSError("Calendar event was not saved; existing records were preserved.")
     return evt
 
 
@@ -92,31 +122,60 @@ def list_events(within_hours: float = 48.0) -> List[Dict[str, Any]]:
 
 
 def delete_event(event_id_or_title: str) -> bool:
-    """Deletes an event by ID or matching title."""
-    events = _load_events()
-    initial_len = len(events)
-    target = event_id_or_title.lower().strip()
-    
-    events = [e for e in events if e.get("id") != target and target not in e.get("title", "").lower()]
-    if len(events) < initial_len:
-        _save_events(events)
+    target = str(event_id_or_title or '').strip().casefold()
+    if not target:
+        raise ValueError('Specify an exact event ID or title to delete.')
+    with _EVENT_LOCK:
+        events = _load_events()
+        matched = [e for e in events if str(e.get('id', '')).casefold() == target]
+        if not matched:
+            matched = [e for e in events if str(e.get('title', '')).strip().casefold() == target]
+        if len(matched) > 1:
+            raise ValueError('Several events have that title. Use the exact event ID.')
+        if not matched:
+            return False
+        if not _save_events([e for e in events if e is not matched[0]]):
+            raise OSError('Calendar deletion was not saved; existing records were preserved.')
         return True
-    return False
 
 
-def calendar_schedule(parameters: dict, **_kwargs) -> str:
+def calendar_schedule(parameters: dict, **kwargs) -> str:
+    try:
+        return _calendar_schedule(parameters, **kwargs)
+    except (OSError, ValueError, OverflowError) as error:
+        return json.dumps({'status': 'error', 'message': str(error)})
+
+
+def _calendar_schedule(parameters: dict, **_kwargs) -> str:
     """Calendar & Schedule Management Action."""
     require_owner()
     action = str(parameters.get("action", "list")).lower().strip()
     title = parameters.get("title", "New Meeting")
-    hours = float(parameters.get("hours_from_now", 1.0))
-    duration = int(parameters.get("duration_minutes", 30))
+
+    # The model supplies these as free-form JSON, so a non-numeric value
+    # used to raise ValueError straight out of the handler.
+    try:
+        hours = float(parameters.get("hours_from_now", 1.0))
+    except (TypeError, ValueError):
+        return json.dumps({
+            "status": "error",
+            "message": "hours_from_now must be a number (e.g. 1.5 for ninety minutes from now)."
+        })
+    try:
+        duration = int(parameters.get("duration_minutes", 30))
+    except (TypeError, ValueError):
+        return json.dumps({
+            "status": "error",
+            "message": "duration_minutes must be a whole number of minutes."
+        })
+    if duration <= 0:
+        return json.dumps({"status": "error", "message": "duration_minutes must be greater than zero."})
 
     if action in ("schedule", "add", "create"):
         evt = add_event(title=title, hours_from_now=hours, duration_minutes=duration)
         return json.dumps({
             "status": "success",
-            "message": f"Scheduled '{evt['title']}' for {evt['start']} with Google Meet: {evt['meet_link']}",
+            "message": f"Saved local event '{evt['title']}' for {evt['start']}. Google Calendar and Meet are not connected.",
             "event": evt
         }, indent=2)
 
@@ -141,7 +200,7 @@ def calendar_schedule(parameters: dict, **_kwargs) -> str:
 
 TOOL = {
     "name": "calendar_schedule",
-    "description": "Interactive Google Calendar & Schedule Management: Check upcoming 48-hour schedule, schedule new meetings with Google Meet links, reschedule, or cancel events.",
+    "description": "Local calendar: save events, list the next 48 hours, or delete one exact event ID/title. Google Calendar and Meet are not connected; no external meeting link is created.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

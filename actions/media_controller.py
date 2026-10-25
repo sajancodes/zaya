@@ -1,5 +1,5 @@
-"""
-Global Windows Desktop Media Controls (Chapter 16 / PC Specs)
+"""Global Windows Desktop Media Controls.
+Created and developed by Sajan Rai for Zaya.
 Universal Media Tool executing Win32 keybd_event system-wide for:
 Play/Pause, Next Track, Previous Track, Stop, Mute, and Volume adjustments
 across YouTube, Spotify, VLC, Apple Music, and Windows Media Player without needing window focus.
@@ -11,6 +11,7 @@ import json
 import sys
 import time
 from typing import Dict
+
 from core.execution_policy import require_owner
 
 KEYEVENTF_KEYUP = 0x0002
@@ -57,12 +58,21 @@ def control_media_playback(parameters: dict, **_kwargs) -> str:
     """Universal Desktop Media Playback Control Action."""
     require_owner()
     action = str(parameters.get("action", "toggle")).lower().strip()
-    
+
     # Map common phrases
     if action in ("skip", "next_song"):
         action = "next"
     elif action in ("back", "previous_song"):
         action = "previous"
+
+    if action not in VK_MEDIA:
+        # An unknown action was never dispatched. Saying otherwise told the
+        # owner the command had been sent when nothing happened at all.
+        return json.dumps({
+            "status": "error",
+            "action": action,
+            "message": f"Unknown media action '{action}'. Supported: {', '.join(sorted(set(VK_MEDIA)))}."
+        }, indent=2)
 
     ok = dispatch_media_key(action)
     if ok:
@@ -73,9 +83,13 @@ def control_media_playback(parameters: dict, **_kwargs) -> str:
         }, indent=2)
 
     return json.dumps({
-        "status": "partial",
+        "status": "error",
         "action": action,
-        "message": f"Media key '{action}' dispatched via system handler."
+        "message": (
+            f"Media key '{action}' could not be dispatched. Global media keys are a "
+            "Windows feature — on other systems use the app's own volume and "
+            "playback controls instead."
+        )
     }, indent=2)
 
 
