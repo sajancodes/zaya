@@ -47,8 +47,9 @@ def get_resource_dir() -> Path:
 def get_user_data_dir() -> Path:
     """Return mutable user data root directory.
 
-    In production/frozen builds: %LOCALAPPDATA%\\Zaya.
-    In development builds: repository root by default (or ZAYA_USER_DATA_DIR / ZAYA_FORCE_APPDATA).
+    In production/frozen builds and normal Windows development installs, the app
+    stores user data in %LOCALAPPDATA%\Zaya. The repo root is only used as a
+    last resort when no app-data location is available.
     """
     override = os.environ.get("ZAYA_USER_DATA_DIR")
     if override:
@@ -60,7 +61,11 @@ def get_user_data_dir() -> Path:
             return Path(local_app_data) / "Zaya"
         return Path.home() / ".zaya"
 
-    # Development source checkout
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "Zaya"
+
+    # Fallback for Linux/macOS or nonstandard packaging environments.
     return Path(__file__).resolve().parents[1]
 
 
