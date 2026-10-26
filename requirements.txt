@@ -15,6 +15,7 @@ sounddevice>=0.4,<1
 webrtcvad-wheels>=2.0.14,<3  # local speech detection for background audio ducking
 numpy>=1.24,<3
 google-genai>=2.8.0,<3
+firebase-admin>=6.6,<8
 
 # ── Web search & browser control ──────────────────────────────────────────────
 requests>=2.31,<3

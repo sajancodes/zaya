@@ -191,7 +191,8 @@ def report_heartbeat_event(base_url: Optional[str] = None, force: bool = False) 
     last = int(info.get("last_heartbeat", 0))
 
     if last and _utc_day(now) == _utc_day(last):
-        return True
+        if not force or base_url is None:
+            return True
 
     server = (base_url or DEFAULT_TELEMETRY_BASE_URL).rstrip("/")
     endpoint = f"{server}/api/telemetry/heartbeat"
