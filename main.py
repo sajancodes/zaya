@@ -61,15 +61,17 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import sounddevice as sd
 import numpy as np
 from google import genai
 from google.genai import types
+from google.genai.live import AsyncSession
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
-    save_session_summary, pop_last_session,
+    save_session_summary,
     search_memory, set_trim_notifier,
 )
 
@@ -89,7 +91,7 @@ from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
-    get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_wake_word_enabled, save_wake_word_enabled,    get_input_device,
 )
 from core                     import gemini as _gemini
 from core.gemini_keys import pool as gemini_keys, KeysCooling, quota_failure, error_text
@@ -98,7 +100,7 @@ from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.action_loader        import discover_actions
-from core.echo                 import EchoGuard
+from core.echo                 import BargeInGate, EchoGuard
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
@@ -183,14 +185,6 @@ _TAIL_MARGIN = 0.25
 
 _VIS_WIN = 1024        # ~43 ms analysis window at 24 kHz: enough for formants
 _VIS_HOP = 480         # 20 ms between frames, i.e. 50 shapes a second
-
-# Delay from handing the first bytes of a reply to an already-running output
-# stream to hearing them: one callback period, plus whatever the DAC adds.
-_FIRST_SOUND = CHUNK_SIZE / RECEIVE_SAMPLE_RATE      # ~43 ms
-# How far past the device's own buffer the mouth's timeline may drift before it
-# is re-anchored. The buffer is the hard limit on how much audio can be queued
-# ahead, so anything beyond it plus a margin for clock error is impossible.
-_CURSOR_SLACK = 0.15
 
 # Erring early is the safe direction. A viewer tolerates a mouth that moves
 # slightly before the sound far better than one that moves after it — the
@@ -326,7 +320,10 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
-    return gemini_keys.select('live')
+    key = gemini_keys.select('live')
+    if not isinstance(key, str) or not key:
+        raise ValueError('No usable Gemini API key is available.')
+    return key
 
 
 def _load_system_prompt() -> str:
@@ -425,22 +422,33 @@ class _LocalSession:
         self.host = host
         self._video_warned = False
 
-    async def send_client_content(self, turns=None, turn_complete=True, **kwargs):
+    async def send_client_content(self, turns=None, turn_complete=True, **_kwargs):
+        if not turn_complete:
+            return None
+        _ = _kwargs
         parts = []
         if isinstance(turns, dict):
             parts = turns.get("parts") or []
+        elif isinstance(turns, types.Content):
+            parts = turns.parts or []
         elif isinstance(turns, list):
             for turn in turns:
                 if isinstance(turn, dict):
                     parts.extend(turn.get("parts") or [])
+                elif isinstance(turn, types.Content):
+                    parts.extend(turn.parts or [])
         text_parts = []
         image_parts = []
         for part in parts:
-            if not isinstance(part, dict):
-                continue
-            if isinstance(part.get("text"), str):
-                text_parts.append(part["text"])
-            if part.get("inline_data") or part.get("inlineData"):
+            if isinstance(part, dict):
+                text = part.get("text")
+                inline_data = part.get("inline_data") or part.get("inlineData")
+            else:
+                text = getattr(part, "text", None)
+                inline_data = getattr(part, "inline_data", None)
+            if isinstance(text, str):
+                text_parts.append(text)
+            if inline_data:
                 image_parts.append(part)
         pipeline = getattr(self.host, "_local_pipeline", None)
         if pipeline is None:
@@ -469,7 +477,8 @@ class _LocalSession:
             )
         return None
 
-    async def send_tool_response(self, **kwargs):
+    async def send_tool_response(self, **_kwargs):
+        _ = _kwargs
         return None
 
     async def close(self):
@@ -480,11 +489,11 @@ class JarvisLive:
     def __init__(self, ui: JarvisUI):
         self.ui             = ui
         self._asst_name     = "Zaya"
-        self.session              = None
+        self.session: AsyncSession | _LocalSession | None = None
         self._local_pipeline      = None
         self._local_caption       = ""
-        self.audio_in_queue       = None
-        self.out_queue            = None
+        self.audio_in_queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self.out_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=16)
         self._loop                     = None
         self._is_speaking         = False
         self._companion_audio_active = False
@@ -531,7 +540,9 @@ class JarvisLive:
         self._ptt                  = None    # core.hotkey.PushToTalk
         self._out_level            = 0.0     # level of the audio being played right now
         self._echo                 = EchoGuard()
-        self._barge_audio          = deque(maxlen=12)
+        self._barge_gate           = BargeInGate(SpeechDetector(aggressiveness=2))
+        self._barge_speaking       = False
+        self._barge_input_blocked  = False
         self._voice_health         = {}
         # `stream.write()` returns when the buffer accepts the audio, not when the
         # speaker has finished with it, so sound is still in the room after the
@@ -578,7 +589,7 @@ class JarvisLive:
             self._conversation = None
             previous = False
             self.ui.write_log('SYS: Conversation storage unavailable; this launch cannot restore chat history.')
-        self._turn_done_event: asyncio.Event | None = None
+        self._turn_done_event = asyncio.Event()
         self._dashboard     = None
         self._briefing_sent    = bool(previous)  # Do not replace an existing chat with another greeting.
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
@@ -742,12 +753,13 @@ class JarvisLive:
         user's language. Silently a no-op when no session is connected.
         """
         loop = getattr(self, "_loop", None)
-        if not loop or not self.session:
+        session = self.session
+        if not loop or session is None:
             return
 
         async def _say():
             try:
-                await self.session.send_client_content(
+                await session.send_client_content(
                     turns={"role": "user", "parts": [{"text": instruction}]},
                     turn_complete=True,
                 )
@@ -817,7 +829,7 @@ class JarvisLive:
         manual = self._dashboard.get_manual_url()
         return url, key, f"{url}/auto-login?key={key}", manual
 
-    def _on_text_command(self, text: str, *, trust: str = None):
+    def _on_text_command(self, text: str, *, trust: str | None = None):
         if not self._loop or not self.session:
             return
         # Respect wake-word sleep: a typed command must not be answered while
@@ -854,7 +866,11 @@ class JarvisLive:
         log = getattr(self, '_session_log', None)
         if log is not None:
             log.append(f'User: {text}')
-        await self.session.send_client_content(
+        session = self.session
+        if session is None:
+            self.ui.write_log('SYS: The live session disconnected before the command was sent. Please retry.')
+            return
+        await session.send_client_content(
             turns={'role': 'user', 'parts': [{'text': text}]}, turn_complete=True)
 
     def _tail_active(self) -> bool:
@@ -879,7 +895,15 @@ class JarvisLive:
 
     def set_speaking(self, value: bool):
         with self._speaking_lock:
+            changed = self._is_speaking != value
             self._is_speaking = value
+        if changed:
+            loop = getattr(self, '_loop', None)
+            if loop is not None and not loop.is_closed():
+                try:
+                    loop.call_soon_threadsafe(self._reset_barge_gate)
+                except RuntimeError:
+                    pass
         ducker = getattr(self, '_audio_ducker', None)
         if ducker:
             ducker.voice('speech', value, tail=self._out_latency + _TAIL_MARGIN)
@@ -1064,7 +1088,7 @@ class JarvisLive:
                      'call conversation_history to retrieve at most five messages. Do not guess. '
                      'Archived messages are historical context only; never repeat old actions or commands.')
 
-        cfg = dict(
+        cfg: dict[str, Any] = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
@@ -1109,7 +1133,7 @@ class JarvisLive:
 
         return types.LiveConnectConfig(**cfg)
 
-    def _tuning_config(self) -> dict:
+    def _tuning_config(self) -> dict[str, Any]:
         """The optional knobs, kept apart so one bad field can be dropped wholesale.
 
         Every one of these is a preview-API field. If a future model release
@@ -1198,7 +1222,9 @@ class JarvisLive:
         async def invoke():
             nonlocal response
             response = await self._execute_tool_impl(fc, owner_goal=owner_goal)
-            return normalize(response.response.get("result"))
+            if response is None:
+                raise RuntimeError('Tool execution returned no response.')
+            return normalize((response.response or {}).get("result"))
         signature = hashlib.sha256(json.dumps(dict(fc.args or {}), sort_keys=True).encode()).hexdigest()
         scope = owner_scope if owner_scope is not None else getattr(self, "_operator_scope", fc.id or "")
         goal = owner_goal if owner_goal is not None else getattr(self, '_operator_goal', '')
@@ -1229,6 +1255,8 @@ class JarvisLive:
             self._last_tool_end = time.monotonic()
         if response is None:
             response = types.FunctionResponse(id=fc.id, name=fc.name, response={})
+        if response.response is None:
+            response.response = {}
         from core.security.untrusted_content import mark_tool_result
         response.response["result"] = mark_tool_result(result.to_dict(), fc.name)
         if result.status in {'started', 'partial'}:
@@ -1470,11 +1498,11 @@ class JarvisLive:
         # the API default and behave as they always have.
         _sched = (self._action_registry.scheduling(name)
                   or self._plugin_registry.scheduling(name))
-        _extra = {"scheduling": _sched} if _sched else {}
+        scheduling = types.FunctionResponseScheduling(_sched) if _sched else None
         return types.FunctionResponse(
             id=fc.id, name=name,
             response={"result": __import__("core.tool_result", fromlist=["normalize"]).normalize(result).to_dict()},
-            **_extra
+            scheduling=scheduling,
         )
 
     def companion_reaction(self, text):
@@ -1501,12 +1529,14 @@ class JarvisLive:
             else:
                 self.interrupt()
 
-    def _notifications_busy(self, *, allow_sleep=False):
-        return (getattr(self, '_owner_request_pending', False) or self._is_speaking
-                or getattr(self, '_tools_active', 0) or getattr(self, '_input_turn_active', False)
-                or time.monotonic() - self._last_user_speech < 10
-                or not self.audio_in_queue.empty()
-                or (self._wake_enabled and not self._awake and not allow_sleep))
+    def _notifications_busy(self, *, allow_sleep=False) -> bool:
+        return bool(
+            getattr(self, '_owner_request_pending', False) or self._is_speaking
+            or getattr(self, '_tools_active', 0) or getattr(self, '_input_turn_active', False)
+            or time.monotonic() - self._last_user_speech < 10
+            or not self.audio_in_queue.empty()
+            or (self._wake_enabled and not self._awake and not allow_sleep)
+        )
 
     def _can_announce(self, epoch, *, allow_sleep=False):
         return epoch == getattr(self, '_owner_epoch', 0) and not self._notifications_busy(allow_sleep=allow_sleep)
@@ -1599,8 +1629,12 @@ class JarvisLive:
                 return False
         epoch = getattr(self, '_owner_epoch', 0)
         text = item.get('announcement', item['summary'])
-        kwargs = {'mode': mode} if mode else {'coding': True} if coding else {}
-        audio, transcript = await synthesize_notice(text, **kwargs)
+        if mode:
+            audio, transcript = await synthesize_notice(text, mode=mode)
+        elif coding:
+            audio, transcript = await synthesize_notice(text, coding=True)
+        else:
+            audio, transcript = await synthesize_notice(text)
         # Owner speech wins if it arrived while synthesis ran. The notice is
         # acknowledged by its queue only after it actually reaches playback.
         if not self._can_announce(epoch, allow_sleep=mode == 'reminder'):
@@ -1652,6 +1686,11 @@ class JarvisLive:
             health.update(fields)
 
     async def _send_realtime(self):
+        session = self.session
+        if session is None:
+            raise RuntimeError('Live audio sender started without an active session.')
+        if isinstance(session, _LocalSession):
+            raise RuntimeError('Live audio sender cannot run for the local session.')
         turns = None
         if getattr(self, '_turn_input_enabled', False):
             from core.voice_turns import VoiceTurns
@@ -1668,16 +1707,16 @@ class JarvisLive:
                         # turn. Give it one second of generated quiet, paced
                         # like the microphone, before closing the audio stream.
                         # This contains no captured microphone data.
-                        await self.session.send_realtime_input(audio=types.Blob(
+                        await session.send_realtime_input(audio=types.Blob(
                             data=bytes(SEND_SAMPLE_RATE // 10 * 2),
                             mime_type=f'audio/pcm;rate={SEND_SAMPLE_RATE}'))
                         quiet_blocks += 1
                         self._voice_mark('quiet_padding')
                     else:
                         if turns is not None:
-                            await self.session.send_realtime_input(activity_end=types.ActivityEnd())
+                            await session.send_realtime_input(activity_end=types.ActivityEnd())
                         else:
-                            await self.session.send_realtime_input(audio_stream_end=True)
+                            await session.send_realtime_input(audio_stream_end=True)
                         streamed = False
                         if turns is not None:
                             turns.reset()
@@ -1701,103 +1740,141 @@ class JarvisLive:
                     self._voice_mark('idle_input')
                     continue
                 if not was_active:
-                    await self.session.send_realtime_input(activity_start=types.ActivityStart())
+                    await session.send_realtime_input(activity_start=types.ActivityStart())
                     self._voice_mark('stream_start')
             for chunk in chunks:
-                await self.session.send_realtime_input(audio=types.Blob(data=chunk, mime_type=mime_type))
+                await session.send_realtime_input(audio=types.Blob(data=chunk, mime_type=mime_type))
                 self._voice_mark('sent')
             streamed = True
             quiet_blocks = 0
             if ended:
-                await self.session.send_realtime_input(activity_end=types.ActivityEnd())
+                await session.send_realtime_input(activity_end=types.ActivityEnd())
                 streamed = False
                 self._voice_mark('stream_end')
 
     def _microphone_input(self, indata, loop):
         """Filter echo locally and deliver owner speech, including interruptions.
 
-        Called by PortAudio. Queue and playback mutations belong to the event
-        loop; retain the initial speech blocks until the echo guard agrees.
+        Called by PortAudio. Only copy the block and schedule its analysis;
+        echo/VAD work and queue mutations belong to the event loop.
         """
-        self._voice_mark('microphone', gate='checking', level=round(_pcm_level(indata), 3))
+        self._voice_mark('microphone', gate='checking')
         if self._phone_call_active():
             self._voice_mark('blocked', gate='phone-call')
-            self._barge_audio.clear()
+            self._block_barge_input(loop)
             return  # Do not even feed the laptop wake-word detector during a phone call.
         if self._wake_enabled and not self._awake:
             self._voice_mark('blocked', gate='sleep')
-            self._barge_audio.clear()
+            self._block_barge_input(loop)
             if self._wake_detector is not None:
                 self._wake_detector.feed(indata)
             return
         if self.ui.muted or self._phone_active or (self._ptt_enabled and not self._ptt_held):
             self._voice_mark('blocked', gate='mute/phone/ptt')
-            self._barge_audio.clear()
+            self._block_barge_input(loop)
             return
         if self._companion_audio_active or time.monotonic() < self._companion_tail_until:
             self._voice_mark('blocked', gate='poke')
-            self._barge_audio.clear()
+            self._block_barge_input(loop)
             return
+        self._barge_input_blocked = False
+        queue = self.out_queue
+        try:
+            loop.call_soon_threadsafe(
+                self._process_microphone_block, indata.tobytes(), queue
+            )
+        except RuntimeError:
+            pass  # The session closed while PortAudio was finishing its callback.
+
+    def _block_barge_input(self, loop):
+        if self._barge_input_blocked:
+            return
+        self._barge_input_blocked = True
+        try:
+            loop.call_soon_threadsafe(self._reset_barge_gate)
+        except RuntimeError:
+            pass
+
+    def _reset_barge_gate(self):
+        self._barge_gate.reset()
+        self._barge_speaking = False
+
+    def _process_microphone_block(self, data, callback_queue):
+        """Run echo and speech analysis off the PortAudio callback thread."""
+        if callback_queue is None or callback_queue is not self.out_queue:
+            return  # A callback from a closed session must not feed its replacement.
+        queue = callback_queue
+        level = _pcm_level(np.frombuffer(data, dtype='<i2'))
+        self._voice_mark('microphone_analysis', level=round(level, 3))
+        if self._phone_call_active():
+            self._voice_mark('blocked', gate='phone-call')
+            self._reset_barge_gate()
+            return
+        if self._wake_enabled and not self._awake:
+            self._voice_mark('blocked', gate='sleep')
+            self._reset_barge_gate()
+            return
+        if self.ui.muted or self._phone_active or (self._ptt_enabled and not self._ptt_held):
+            self._voice_mark('blocked', gate='mute/phone/ptt')
+            self._reset_barge_gate()
+            return
+        if self._companion_audio_active or time.monotonic() < self._companion_tail_until:
+            self._voice_mark('blocked', gate='poke')
+            self._reset_barge_gate()
+            return
+
         with self._speaking_lock:
             speaking = self._is_speaking
-        data = indata.tobytes()
         packets = [data]
         barge_in = False
+        if speaking != self._barge_speaking:
+            self._reset_barge_gate()
+            self._barge_speaking = speaking
         if speaking:
-            if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
-                self._voice_mark('blocked', gate='speaking/echo')
-                self._barge_audio.clear()
-                return
-            self._barge_audio.append(data)
-            if len(self._barge_audio) < self._echo.required_blocks:
+            echo_confirmed = self._echo.is_user_speech(data, SEND_SAMPLE_RATE, level)
+            confirmed_audio = self._barge_gate.feed(
+                data, echo_confirmed, self._echo.required_blocks
+            )
+            if confirmed_audio is None:
                 self._voice_mark('blocked', gate='speaking/confirming')
                 return
-            packets = list(self._barge_audio)
-            self._barge_audio.clear()
+            packets = confirmed_audio
             barge_in = True
         else:
-            self._barge_audio.clear()
+            self._reset_barge_gate()
             if self._tail_active():
-                if not self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
+                if not self._echo.is_user_speech(data, SEND_SAMPLE_RATE, level):
                     self._voice_mark('blocked', gate='tail/echo')
                     return
                 self._tail_until = 0.0
             elif self._echo._hist:
                 self._echo.reset()
-        queue = self.out_queue
-
-        def deliver():
-            if queue is not self.out_queue:
-                return  # A callback from a closed session must not feed its replacement.
-            if self.ui.muted or self._phone_active or self._phone_call_active() or (self._wake_enabled and not self._awake):
-                return
-            if self._ptt_enabled and not self._ptt_held:
-                return
-            if barge_in:
-                self.interrupt()
-                self._tail_until = 0.0
-            for packet in packets:
-                # Realtime speech must never accumulate seconds of stale audio.
-                if queue.full():
-                    queue.get_nowait()
-                queue.put_nowait({"data": packet, "mime_type": "audio/pcm"})
-                self._voice_mark('queued', gate='open')
-                self._audio_ducker.microphone(packet)
-                detector = getattr(self, '_owner_detector', None)
-                if detector is not None and detector.feed(packet):
-                    self._owner_activity()
-            self.ui.set_audio_level(_pcm_level(indata))
-
-        try:
-            loop.call_soon_threadsafe(deliver)
-        except RuntimeError:
-            pass  # The session closed while PortAudio was finishing its callback.
+        if self.ui.muted or self._phone_active or self._phone_call_active() or (self._wake_enabled and not self._awake):
+            return
+        if self._ptt_enabled and not self._ptt_held:
+            return
+        if barge_in:
+            self._reset_barge_gate()
+            self.interrupt()
+            self._tail_until = 0.0
+        for packet in packets:
+            # Realtime speech must never accumulate seconds of stale audio.
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait({"data": packet, "mime_type": "audio/pcm"})
+            self._voice_mark('queued', gate='open')
+            self._audio_ducker.microphone(packet)
+            detector = getattr(self, '_owner_detector', None)
+            if detector is not None and detector.feed(packet):
+                self._owner_activity()
+        self.ui.set_audio_level(level)
 
     async def _listen_audio(self):
         print("[Zaya] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
-        def callback(indata, frames, time_info, status):
+        def callback(indata, _frames, _time_info, _status):
+            _ = (_frames, _time_info, _status)
             self._microphone_input(indata, loop)
 
         try:
@@ -1872,13 +1949,12 @@ class JarvisLive:
         Sending it here means the model has the tool result and the image before
         it generates anything, so the user gets one answer, sooner.
         """
-        if not (self._pending_vision and self.session):
+        session = self.session
+        if not self._pending_vision or session is None:
             return False
 
-        import base64 as _b64
         img_b, mime_t, question, angle = self._pending_vision
         self._pending_vision = None
-        b64 = _b64.b64encode(img_b).decode("ascii")
         print(f"[Vision] 📤 {len(img_b):,} bytes (angle={angle}) → main session")
 
         # Label the source. Without it the image arrives carrying nothing but
@@ -1888,11 +1964,11 @@ class JarvisLive:
         src = ("[IMAGE SOURCE: WEBCAM]" if angle == "camera"
                else "[IMAGE SOURCE: SCREEN CAPTURE]")
         try:
-            await self.session.send_client_content(
-                turns={"role": "user", "parts": [
-                    {"inline_data": {"mime_type": mime_t, "data": b64}},
-                    {"text": f"{src}\n\n{question}"},
-                ]},
+            await session.send_client_content(
+                turns=types.Content(role="user", parts=[
+                    types.Part(inline_data=types.Blob(mime_type=mime_t, data=img_b)),
+                    types.Part(text=f"{src}\n\n{question}"),
+                ]),
                 turn_complete=True,
             )
         except BaseException:
@@ -1929,11 +2005,19 @@ class JarvisLive:
         # durable execution evidence; never replay or resend a canceled action.
         responses = [result for result in responses if result.id not in canceled]
         if responses:
-            await self.session.send_tool_response(function_responses=responses)
+            session = self.session
+            if session is None:
+                return
+            await session.send_tool_response(function_responses=responses)
             await self._flush_pending_vision()
 
     async def _receive_messages(self, workers):
         print("[Zaya] 👂 Recv started")
+        session = self.session
+        if session is None:
+            raise RuntimeError('Live message receiver started without an active session.')
+        if isinstance(session, _LocalSession):
+            raise RuntimeError('Live message receiver cannot run for the local session.')
         out_buf, in_buf = [], []
         input_row = None
         input_scope = None
@@ -1941,7 +2025,7 @@ class JarvisLive:
 
         try:
             while True:
-                async for response in self.session.receive():
+                async for response in session.receive():
                     self._voice_mark('received')
 
                     cancellation = getattr(response, 'tool_call_cancellation', None)
@@ -2110,7 +2194,7 @@ class JarvisLive:
                     if response.tool_call:
                         self._owner_turn_pending = True
                         calls = []
-                        for fc in response.tool_call.function_calls:
+                        for fc in response.tool_call.function_calls or []:
                             if fc.id and fc.id in seen_calls:
                                 continue
                             if fc.id:
@@ -2393,7 +2477,10 @@ class JarvisLive:
 
     async def _relay_phone_audio(self) -> None:
         """Forward phone mic PCM chunks from dashboard queue into the Gemini Live session."""
-        q = self._dashboard._phone_audio_queue
+        dashboard = self._dashboard
+        if dashboard is None:
+            return
+        q = dashboard._phone_audio_queue
         while True:
             try:
                 chunk = await asyncio.wait_for(q.get(), timeout=1.0)
@@ -2419,11 +2506,14 @@ class JarvisLive:
     async def _relay_phone_video(self):
         """Opt-in phone camera samples; no recording or laptop webcam access."""
         import queue
+        dashboard = self._dashboard
+        if dashboard is None:
+            return
         next_warning = 0.0
         while True:
             await asyncio.sleep(.2)
             try:
-                mobile = self._dashboard.mobile()
+                mobile = dashboard.mobile()
                 if mobile is None:
                     continue
                 frame = mobile.video_frames.get_nowait()
@@ -2431,8 +2521,9 @@ class JarvisLive:
                 if (call is None or call.state != 'answered' or not call.video_enabled
                         or call.call_id != frame['call_id'] or call.device_id != frame['device_id']):
                     continue
-                if self.session is not None:
-                    await self.session.send_realtime_input(video=types.Blob(data=frame['data'], mime_type='image/jpeg'))
+                session = self.session
+                if session is not None:
+                    await session.send_realtime_input(video=types.Blob(data=frame['data'], mime_type='image/jpeg'))
             except queue.Empty:
                 continue
             except Exception as error:
@@ -2473,7 +2564,8 @@ class JarvisLive:
         event — the owner never has to explain the situation back to her.
         """
         loop = getattr(self, '_loop', None)
-        if not loop or not self.session:
+        session = self.session
+        if not loop or session is None:
             return
         instruction = (
             "[PHONE CALL] The owner has just answered your call from his phone and can hear "
@@ -2500,7 +2592,7 @@ class JarvisLive:
             try:
                 self._phone_active = True
                 self.interrupt()
-                self._barge_audio.clear()
+                self._reset_barge_gate()
                 while not self.out_queue.empty():
                     self.out_queue.get_nowait()
                 if call.source == 'whatsapp':
@@ -2509,7 +2601,7 @@ class JarvisLive:
                     await self._deliver_owner_notice({'summary': 'An urgent WhatsApp message needs you.',
                         'announcement': call.detail or call.reason, 'call_id': call.call_id})
                     return
-                await self.session.send_client_content(
+                await session.send_client_content(
                     turns={'role': 'user', 'parts': [{'text': instruction}]},
                     turn_complete=True,
                 )
@@ -2533,10 +2625,13 @@ class JarvisLive:
         a brand-new command and the audit trail showed the wrong request."""
         from core.execution_policy import TRUST_AUTHENTICATED_REMOTE_OWNER
         from core.remote_commands import get_gate
+        dashboard = self._dashboard
+        if dashboard is None:
+            return
         while True:
             try:
                 item = await asyncio.wait_for(
-                    self._dashboard._command_queue.get(), timeout=0.5
+                    dashboard._command_queue.get(), timeout=0.5
                 )
             except asyncio.TimeoutError:
                 continue
@@ -2584,6 +2679,7 @@ class JarvisLive:
     # ── modular engine ──────────────────────────────────────────────────────
 
     def _local_on_user_text(self, text: str, language: str, source: str) -> None:
+        _ = language
         self._last_user_speech = time.monotonic()
         self._local_caption = ""
         if source == "microphone":
@@ -2730,6 +2826,9 @@ class JarvisLive:
                 self._owner_turn_pending = False
                 self._active_selective_audio = False
                 config = self._build_config()
+                system_prompt = config.system_instruction
+                if not isinstance(system_prompt, str):
+                    raise TypeError('Local engine requires a text system instruction.')
                 pipeline = LocalConversationPipeline(
                     stt=bundle.stt,
                     tts=bundle.tts,
@@ -2740,7 +2839,7 @@ class JarvisLive:
                     audio_queue=self.audio_in_queue,
                     tool_executor=self._execute_pipeline_tool,
                     tool_declarations=self._local_tool_declarations(),
-                    system_prompt=(config.system_instruction or ""),
+                    system_prompt=system_prompt,
                     callbacks=PipelineCallbacks(
                         on_state=self._local_on_state,
                         on_user_text=self._local_on_user_text,
@@ -2932,7 +3031,7 @@ class JarvisLive:
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
-                    self._barge_audio.clear()
+                    self._reset_barge_gate()
                     self._owner_turn_pending = False
                     self._owner_request_pending = False
                     self._input_turn_active = False
@@ -3164,7 +3263,7 @@ def _run_desktop_agent(ui, stopping):
             path = BASE_DIR / 'logs' / 'startup_failure.log'
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open('a', encoding='utf-8') as stream:
-                stream.write(redact(traceback.format_exc()) + '\n')
+                stream.write(str(redact(traceback.format_exc())) + '\n')
         except OSError:
             pass
     finally:

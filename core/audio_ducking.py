@@ -37,16 +37,25 @@ def settings(value=None):
 
 class SpeechDetector:
     """20 ms WebRTC frames, requiring sustained speech instead of peak volume."""
-    def __init__(self, vad=None):
+    def __init__(self, vad=None, aggressiveness=3):
+        self._fallback_bands = None
         if vad is None:
-            import webrtcvad
-            vad = webrtcvad.Vad(3)
+            try:
+                import webrtcvad
+            except ImportError:
+                log.warning(
+                    'WebRTC VAD unavailable; using conservative spectral speech detection'
+                )
+            else:
+                vad = webrtcvad.Vad(aggressiveness)
         self.vad = vad
         self.buffer = bytearray()
         self.recent = deque(maxlen=5)
 
     def feed(self, pcm):
         import numpy as np
+        if len(pcm) % 2:
+            raise ValueError('SpeechDetector requires signed 16-bit PCM.')
         self.buffer.extend(pcm)
         speech = False
         while len(self.buffer) >= 640:  # mono PCM16, 16 kHz, 20 ms
@@ -54,14 +63,46 @@ class SpeechDetector:
             del self.buffer[:640]
             samples = np.frombuffer(frame, dtype='<i2').astype(np.float32)
             audible = float(np.sqrt(np.mean(samples * samples))) >= 260
-            detected = self.vad.is_speech(frame, 16000)
-            self.recent.append(audible and detected)
+            spectrum_changed = self._speech_spectrum_changed(samples)
+            detected = (
+                self.vad.is_speech(frame, 16000)
+                if self.vad is not None else spectrum_changed
+            )
+            self.recent.append(audible and detected and spectrum_changed)
             speech |= sum(self.recent) >= 3 and self.recent[-1]
         return speech
+
+    def _speech_spectrum_changed(self, samples):
+        """Require changing speech-band shape to reject stationary room noise."""
+        import numpy as np
+
+        windowed = samples * np.hanning(samples.size)
+        power = np.abs(np.fft.rfft(windowed)) ** 2
+        frequencies = np.fft.rfftfreq(samples.size, 1 / 16000)
+        edges = (200, 500, 900, 1500, 2500, 3800)
+        bands = np.array([
+            power[(frequencies >= low) & (frequencies < high)].sum()
+            for low, high in zip(edges, edges[1:])
+        ], dtype=np.float64)
+        total = float(power.sum())
+        speech_band = float(bands.sum())
+        if total <= 0 or speech_band / total < 0.55:
+            self._fallback_bands = bands
+            return False
+
+        current = bands / max(speech_band, 1e-12)
+        previous = self._fallback_bands
+        self._fallback_bands = bands
+        if previous is None:
+            return False
+        previous = previous / max(float(previous.sum()), 1e-12)
+        spectral_change = float(np.abs(current - previous).sum()) / 2
+        return spectral_change >= 0.08
 
     def reset(self):
         self.buffer.clear()
         self.recent.clear()
+        self._fallback_bands = None
 
 
 class WindowsSessions:

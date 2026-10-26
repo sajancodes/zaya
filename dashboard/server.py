@@ -17,6 +17,7 @@ import socket
 import string
 import time
 from pathlib import Path
+from typing import Callable
 
 _DEPS_OK = False
 try:
@@ -498,6 +499,7 @@ class DashboardServer:
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # legacy in-memory device tokens
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self.assistant_ready: Callable[[], bool] | None = None
         self._phone_audio_dropped         = 0
         self._uploads_dir                 = UPLOADS_DIR
         self._devices                     = None

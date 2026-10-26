@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import tempfile
+from typing import Callable
 
 from PyQt6.QtCore import QLockFile
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
@@ -16,7 +17,7 @@ class SingleInstance:
         # Qt can still recover a lock whose owning process has exited/crashed.
         self.lock.setStaleLockTime(0)
         self.server = None
-        self.on_activate = None
+        self.on_activate: Callable[[], None] | None = None
         self.owned = False
 
     def acquire(self):

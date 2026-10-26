@@ -49,6 +49,7 @@ agnostic, which matters here: the microphone runs at 16 kHz and playback at
 
 from __future__ import annotations
 
+from collections import deque
 import time
 
 import numpy as np
@@ -288,3 +289,60 @@ class EchoGuard:
             return False
         except Exception:
             return False      # any doubt: do not interrupt
+
+
+class BargeInGate:
+    """Combine echo evidence and an independent speech detector for interruptions."""
+
+    _PAUSE_GRACE = 0.25
+
+    def __init__(self, speech_detector) -> None:
+        self.speech_detector = speech_detector
+        self._audio: deque[bytes] = deque(maxlen=12)
+        self._last_echo: float | None = None
+        self._last_speech: float | None = None
+        self._rejected_since: float | None = None
+        self._speech_started = False
+
+    def feed(self, pcm, echo_confirmed: bool, required_blocks: int,
+             when: float | None = None) -> list[bytes] | None:
+        """Return buffered audio only after both detectors confirm speech."""
+        now = time.monotonic() if when is None else when
+        if self._last_echo is not None and now - self._last_echo > self._PAUSE_GRACE:
+            self.reset()
+
+        speech = self.speech_detector.feed(pcm)
+        if speech:
+            if not self._speech_started:
+                self._audio = deque(list(self._audio)[-2:], maxlen=12)
+                self._speech_started = True
+            self._last_speech = now
+
+        if not echo_confirmed:
+            if self._rejected_since is None:
+                self._rejected_since = now
+            elif now - self._rejected_since > self._PAUSE_GRACE:
+                self.reset()
+                self._rejected_since = now
+            return None
+
+        self._rejected_since = None
+        self._last_echo = now
+        self._audio.append(bytes(pcm))
+        if (
+            len(self._audio) >= required_blocks
+            and self._last_speech is not None
+            and now - self._last_speech <= self._PAUSE_GRACE
+        ):
+            packets = list(self._audio)
+            self.reset()
+            return packets
+        return None
+
+    def reset(self) -> None:
+        self.speech_detector.reset()
+        self._audio.clear()
+        self._last_echo = None
+        self._last_speech = None
+        self._rejected_since = None
+        self._speech_started = False

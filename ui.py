@@ -11,6 +11,7 @@ import threading
 import time
 import warnings
 from pathlib import Path
+from typing import Callable
 
 warnings.filterwarnings("ignore", category=FutureWarning, message=r".*pynvml.*deprecated.*")
 
@@ -3580,8 +3581,13 @@ class MainWindow(QMainWindow):
 
         sc_mute = QShortcut(QKeySequence("F4"), self)
         sc_mute.activated.connect(self._toggle_mute)
+
+        sc_mute_ctrl_m = QShortcut(QKeySequence("Ctrl+M"), self)
+        sc_mute_ctrl_m.activated.connect(self._toggle_mute)
+
         sc_full = QShortcut(QKeySequence("F11"), self)
         sc_full.activated.connect(self._toggle_fullscreen)
+
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
 
@@ -6245,10 +6251,13 @@ class JarvisUI:
         self._win.hand_settings_requested.connect(show_hand_settings)
         self.root = _RootShim(self._app)
         self._bar = None
-        self.on_companion_reaction = None
-        self.on_companion_audio_activity = None
-        self.on_shutdown = None
-        self.on_restart = None
+        self.on_companion_reaction: Callable[[str], None] | None = None
+        self.on_companion_audio_activity: Callable[[bool], None] | None = None
+        self.on_shutdown: Callable[[], None] | None = None
+        self.on_restart: Callable[[], None] | None = None
+        self.request_say: Callable[[str], None] | None = None
+        self.wake_is_ready: Callable[[], bool] | None = None
+        self.on_wake_install: Callable[[], tuple[bool, str]] | None = None
         self._win.restart_requested.connect(self._handle_restart)
         self._app.aboutToQuit.connect(self._shutdown_audio)
         try:
