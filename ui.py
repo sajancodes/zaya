@@ -80,7 +80,8 @@ API_FILE   = CONFIG_DIR / "api_keys.json"
 def _read_full_config() -> dict:
     """Read api_keys.json config dict. Returns {} on any error."""
     try:
-        return json.loads(API_FILE.read_text(encoding="utf-8"))
+        target = API_FILE if API_FILE.is_file() else (BASE_DIR / "config" / "api_keys.json")
+        return json.loads(target.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -6147,9 +6148,10 @@ class MainWindow(QMainWindow):
             pass
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
+        target = API_FILE if API_FILE.is_file() else (BASE_DIR / "config" / "api_keys.json")
+        if not target.is_file(): return False
         try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
+            d = json.loads(target.read_text(encoding="utf-8"))
             from core.ai.settings import engine_mode
             if engine_mode() == "local_pipeline":
                 provider = str(d.get("local_llm_provider") or "ollama").strip().lower()
