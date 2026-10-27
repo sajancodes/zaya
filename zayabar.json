@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "show_main_window_on_start": false,
+  "show_main_window_on_start": true,
   "width": 240,
   "height": 240,
   "seat_fraction": 0.6,
