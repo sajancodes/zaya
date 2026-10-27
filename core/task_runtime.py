@@ -33,6 +33,7 @@ class Task:
     side_effects: list[dict] = field(default_factory=list)
     error: str | None = None
     parent_id: str | None = None
+    plan: dict | None = None
 
 
 class TaskRuntime:
@@ -109,7 +110,7 @@ class TaskRuntime:
             if state not in STATES or (task.state in TERMINAL and state != task.state):
                 raise ValueError(f'Invalid task transition: {task.state} -> {state}')
             for key, value in updates.items():
-                if key not in {'active_step', 'error', 'evidence', 'side_effects'}:
+                if key not in {'active_step', 'error', 'evidence', 'side_effects', 'plan'}:
                     raise ValueError(f'Unsupported task field: {key}')
                 setattr(task, key, value)
             task.state = state

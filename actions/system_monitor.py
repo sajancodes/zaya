@@ -5,6 +5,9 @@ Zero subprocess calls on all platforms — uses ctypes/pynvml/psutil/wmi only.
 import ctypes
 import platform
 import time
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning, message=r".*pynvml.*deprecated.*")
 
 import psutil
 

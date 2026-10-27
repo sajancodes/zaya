@@ -178,6 +178,11 @@ def _recursive_update(target: dict, updates: dict, category: str = "") -> bool:
         else:
             cat_name = category or str(value.get("category", "") if isinstance(value, dict) else "")
             new_val  = _truncate_value(str(value["value"] if isinstance(value, dict) else value), cat_name)
+            from core.personal_memory import SensitiveDataGuard
+            is_sens, _ = SensitiveDataGuard.inspect(f"{key} {new_val}")
+            if is_sens:
+                print(f"[Memory] ⚠️ Blocked storing sensitive credential: {key}")
+                continue
             existing = target.get(key, {})
             previous = existing if isinstance(existing, dict) else {}
             metadata = value if isinstance(value, dict) else {}
@@ -493,11 +498,18 @@ def remember(key: str, value: str, category: str = "notes") -> str:
     valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
     if category not in valid:
         category = "notes"
+    from core.personal_memory import SensitiveDataGuard, get_memory_brain
+    is_sens, reason = SensitiveDataGuard.inspect(f"{key} {value}")
+    if is_sens:
+        return f"Blocked: {reason}"
+    get_memory_brain().remember(key, value, category=category, explicit_consent=True)
     update_memory({category: {key: {"value": value}}})
     return f"Remembered: {category}/{key} = {value}"
 
 
 def forget(key: str, category: str = "notes") -> str:
+    from core.personal_memory import get_memory_brain
+    get_memory_brain().forget_memory(key)
     with _lock:
         memory = load_memory(strict=True)
         cat = memory.get(category, {})

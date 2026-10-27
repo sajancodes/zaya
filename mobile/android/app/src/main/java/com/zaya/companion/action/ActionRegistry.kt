@@ -57,8 +57,7 @@ class ActionRegistry(private val context: Context) {
     fun discoverCapabilities(): List<ActionCapability> {
         val list = mutableListOf<ActionCapability>()
 
-        list.add(ActionCapability("set_volume", "Set phone media volume percent", listOf("percent"),
-            ActionRisk.LOW, false, true, true, true))
+
         // 1. Launch App
         list.add(
             ActionCapability(
@@ -347,7 +346,8 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 12. Screen Gestures (Scroll/Tap) - requires AccessibilityService
+        // 12. Screen Gestures & Interaction - requires ZayaInteractionService
+        val hasAccessibility = com.zaya.companion.service.ZayaInteractionService.isServiceEnabled()
         list.add(
             ActionCapability(
                 actionId = "scroll_screen",
@@ -356,20 +356,403 @@ class ActionRegistry(private val context: Context) {
                 risk = ActionRisk.MEDIUM,
                 requiresConfirmation = false,
                 isSupportedOnOs = true,
-                isPermissionGranted = false,
-                isAvailable = false,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
             )
         )
         list.add(
             ActionCapability(
                 actionId = "tap_screen",
-                purpose = "Direct screen coordinate touch gesture (Requires Accessibility Service)",
-                requiredArguments = listOf("x", "y"),
+                purpose = "Direct screen coordinate or semantic label touch gesture (Requires Accessibility Service)",
+                requiredArguments = emptyList(),
                 risk = ActionRisk.MEDIUM,
                 requiresConfirmation = false,
                 isSupportedOnOs = true,
-                isPermissionGranted = false,
-                isAvailable = false,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_back",
+                purpose = "System back button navigation gesture",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_home",
+                purpose = "Navigate to device home screen launcher",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "close_overlay",
+                purpose = "Dismiss active floating Zaya overlay",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "navigate_reel",
+                purpose = "Navigate short video or reel (next/previous/pause)",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = hasAccessibility,
+                isAvailable = hasAccessibility,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "run_task",
+                purpose = "Execute bounded sequence of validated assistant actions (max 5 steps)",
+                requiredArguments = listOf("task_id"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "cancel_task",
+                purpose = "Cancel an active running interaction or scrolling task",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "plan_and_execute_task",
+                purpose = "Decompose natural language request into validated steps and execute safely",
+                requiredArguments = listOf("prompt"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "remember_memory",
+                purpose = "Save a non-sensitive user preference, style, routine, or app alias to local memory",
+                requiredArguments = listOf("key", "value"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "forget_memory",
+                purpose = "Delete a stored preference or memory item from local device storage",
+                requiredArguments = listOf("key"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "query_memory",
+                purpose = "Retrieve stored preferences or details matching a query from local device storage",
+                requiredArguments = listOf("query"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // ── Expanded PC & OpenJarvis Functions ──────────────────────────────
+        // 13. Evaluate Math (PC terminal_exec & OpenJarvis Math Tool)
+        list.add(
+            ActionCapability(
+                actionId = "evaluate_math",
+                purpose = "Evaluate mathematical and arithmetic calculations (arithmetic, percentages, square roots, trigonometry)",
+                requiredArguments = listOf("expression"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 14. Device Diagnostics (PC system_monitor & OpenJarvis Hardware)
+        list.add(
+            ActionCapability(
+                actionId = "get_device_diagnostics",
+                purpose = "Inspect phone hardware health: battery level, temperature, RAM usage, storage stats, and network state",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 15. Web Search (PC web_search & OpenJarvis Web Search)
+        list.add(
+            ActionCapability(
+                actionId = "web_search",
+                purpose = "Execute web search query with optional browser deep linking",
+                requiredArguments = listOf("query"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 16. Weather Report (PC weather_report & OpenJarvis Weather)
+        list.add(
+            ActionCapability(
+                actionId = "get_weather",
+                purpose = "Fetch current weather conditions, temperature, humidity, and forecast",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 17. Daily Briefing (PC doc_generator & OpenJarvis Morning Briefing)
+        list.add(
+            ActionCapability(
+                actionId = "get_daily_briefing",
+                purpose = "Synthesize an executive spoken morning briefing with date, battery, weather, tasks, and notifications",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 18. Set Timer (PC reminder & OpenJarvis Scheduled Monitors)
+        list.add(
+            ActionCapability(
+                actionId = "set_timer",
+                purpose = "Set countdown timer via Android AlarmClock service",
+                requiredArguments = listOf("seconds"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 19. Set Alarm (PC reminder & OpenJarvis Alarms)
+        list.add(
+            ActionCapability(
+                actionId = "set_alarm",
+                purpose = "Set wake-up or scheduled alarm clock with label",
+                requiredArguments = listOf("hour", "minutes"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 20. Clipboard Operations (PC computer_control & OpenJarvis Clipboard)
+        list.add(
+            ActionCapability(
+                actionId = "get_clipboard",
+                purpose = "Read active text from Android system clipboard",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "set_clipboard",
+                purpose = "Copy text into Android system clipboard",
+                requiredArguments = listOf("text"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 21. WhatsApp Direct Messaging (PC whatsapp & OpenJarvis Messaging)
+        list.add(
+            ActionCapability(
+                actionId = "send_whatsapp_message",
+                purpose = "Compose direct WhatsApp message to phone number or contact",
+                requiredArguments = listOf("recipient", "message"),
+                risk = ActionRisk.HIGH,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 22. Inspect Storage (PC file_controller & OpenJarvis File I/O)
+        list.add(
+            ActionCapability(
+                actionId = "inspect_storage",
+                purpose = "Inspect device storage capacity and list files in Downloads or Documents directory",
+                requiredArguments = emptyList(),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 23. Audio Stream Volume & Ringer Controls
+        list.add(
+            ActionCapability(
+                actionId = "set_volume",
+                purpose = "Set audio volume level percentage for media, ring, or alarm streams",
+                requiredArguments = listOf("level"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+        list.add(
+            ActionCapability(
+                actionId = "set_ringer_mode",
+                purpose = "Set phone ringer mode to normal, vibrate, or silent",
+                requiredArguments = listOf("mode"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 24. PC Telekinesis Command Bridge
+        list.add(
+            ActionCapability(
+                actionId = "execute_pc_command",
+                purpose = "Dispatch remote PC telekinesis command to connected laptop runtime",
+                requiredArguments = listOf("command"),
+                risk = ActionRisk.HIGH,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 25. OpenJarvis FX Macro Currency Converter
+        list.add(
+            ActionCapability(
+                actionId = "convert_currency",
+                purpose = "Convert monetary amounts between global currencies using standard exchange rates",
+                requiredArguments = listOf("amount", "from", "to"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 26. OpenJarvis File Reader
+        list.add(
+            ActionCapability(
+                actionId = "read_file",
+                purpose = "Read content from a specified local text file",
+                requiredArguments = listOf("path"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 27. OpenJarvis File Writer
+        list.add(
+            ActionCapability(
+                actionId = "write_file",
+                purpose = "Write or append text content to a local file",
+                requiredArguments = listOf("path", "content"),
+                risk = ActionRisk.MEDIUM,
+                requiresConfirmation = true,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 28. OpenJarvis Think Scratchpad
+        list.add(
+            ActionCapability(
+                actionId = "think",
+                purpose = "Internal reasoning scratchpad allowing the agent to formulate plans without speaking aloud",
+                requiredArguments = listOf("thought"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
+            )
+        )
+
+        // 29. OpenJarvis Knowledge Tools
+        list.add(
+            ActionCapability(
+                actionId = "lookup_knowledge",
+                purpose = "Lookup entity facts and relational knowledge from local store",
+                requiredArguments = listOf("topic"),
+                risk = ActionRisk.LOW,
+                requiresConfirmation = false,
+                isSupportedOnOs = true,
+                isPermissionGranted = true,
+                isAvailable = true,
             )
         )
 

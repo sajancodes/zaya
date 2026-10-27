@@ -234,6 +234,49 @@ class ZayaApi(
         return json?.optBoolean("ok") == true
     }
 
+    // ── PC ecosystem methods ──────────────────────────────────────────────────
+
+    suspend fun pcStatus(): JSONObject? = getJson("$base/api/mobile/pc/status")
+
+    suspend fun pcAllowedCommands(): JSONObject? = getJson("$base/api/mobile/pc/allowed-commands")
+
+    suspend fun executePcCommand(
+        command: String,
+        parameters: Map<String, Any?> = emptyMap(),
+        confirmed: Boolean = false,
+        approvalId: String? = null,
+    ): JSONObject? {
+        val body = JSONObject().apply {
+            put("command", command)
+            put("parameters", JSONObject(parameters))
+            put("confirmed", confirmed)
+            if (!approvalId.isNullOrBlank()) {
+                put("approval_id", approvalId)
+            }
+        }
+        return postJson("$base/api/mobile/pc/command", body)
+    }
+
+    suspend fun approvePcCommand(approvalId: String): JSONObject? {
+        val body = JSONObject().put("approval_id", approvalId)
+        return postJson("$base/api/mobile/pc/approve", body)
+    }
+
+    suspend fun rejectPcCommand(approvalId: String): JSONObject? {
+        val body = JSONObject().put("approval_id", approvalId)
+        return postJson("$base/api/mobile/pc/reject", body)
+    }
+
+    suspend fun pendingPcApprovals(): JSONArray? {
+        val json = getJson("$base/api/mobile/pc/pending-approvals")
+        return json?.optJSONArray("approvals")
+    }
+
+    suspend fun pcAuditLog(limit: Int = 50): JSONArray? {
+        val json = getJson("$base/api/mobile/pc/audit-log?limit=$limit")
+        return json?.optJSONArray("entries")
+    }
+
     // ── plumbing ─────────────────────────────────────────────────────────────
 
     private suspend fun getJson(url: String): JSONObject? = withContext(Dispatchers.IO) {

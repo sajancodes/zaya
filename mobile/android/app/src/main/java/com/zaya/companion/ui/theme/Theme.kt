@@ -36,6 +36,7 @@ object ZayaAccent {
     val green = Color(0xFF22C55E)
     val amber = Color(0xFFF59E0B)
     val red = Color(0xFFEF4444)
+    val blue = Color(0xFF3B82F6)
     val muted = Color(0xFFBAA2B1)
     val quiet = Color(0xFF4C3B47)
 }

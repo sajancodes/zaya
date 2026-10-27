@@ -89,6 +89,9 @@ config/hermes_connection.tmp
 docs/generated/
 docs/research/
 dashboard/widgets/
+data/
+.jdk/
+.gradle_home/
 memory/calendar_events.json
 memory/spatial_cache/
 spatial_renderer/node_modules/

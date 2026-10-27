@@ -106,8 +106,11 @@ class ZayaRuntime(
 
     @Volatile
     internal var control: ZayaSocket? = null
+<<<<<<< HEAD
+=======
 
     fun sendControl(message: String): Boolean = control?.send(message) == true
+>>>>>>> origin/main
 
     @Volatile
     private var voice: ZayaSocket? = null
@@ -155,8 +158,14 @@ class ZayaRuntime(
             screenCaptureManager = screenCaptureManager,
         )
     }
+<<<<<<< HEAD
+    val actionRegistry by lazy { actionExecutor.registry }
+    val voiceInput by lazy { com.zaya.companion.audio.VoiceInputManager(context) }
+    val voiceOutput by lazy { com.zaya.companion.audio.VoiceOutputManager(context) }
+=======
     private var phoneActionsInitialized = false
     val actionRegistry by lazy { actionExecutor.registry }
+>>>>>>> origin/main
     private val _speakerphone = MutableStateFlow(false)
     val speakerphone: StateFlow<Boolean> = _speakerphone.asStateFlow()
     private val _videoEnabled = MutableStateFlow(false)
@@ -269,6 +278,8 @@ class ZayaRuntime(
         supervisor = null
         updateChecks?.cancel()
         updateChecks = null
+        taskCoordinator.cancelAll()
+        actionExecutor.screenCaptureManager.stopCapture()
         teardownSession()
         if (phoneActionsInitialized) cellularCallManager.shutdown()
         model.connectionLost("Disconnected")
@@ -587,28 +598,210 @@ class ZayaRuntime(
         socket.open()
     }
 
+    val taskCoordinator: com.zaya.companion.action.TaskCoordinator get() = actionExecutor.taskCoordinator
+    val memoryStore: com.zaya.companion.memory.PersonalMemoryStore get() = actionExecutor.memoryStore
+
     // ── commands ─────────────────────────────────────────────────────────────
 
     /** Offline sends fail visibly; reconnect never executes queued text. */
     suspend fun send(text: String): Boolean {
-        val started = model.beginCommand(text)
+        val clean = text.trim()
+        val lower = clean.lowercase()
+
+        // 0. Conversational Follow-Up Resolution & Audio Loop Prevention
+        val isTaskRunning = taskCoordinator.activeTask.value?.isRunning == true
+        val pendingConsequential = taskCoordinator.activeTask.value?.steps?.any { it.status == com.zaya.companion.action.StepStatus.PENDING && it.isConsequential } == true
+        val intent = com.zaya.companion.runtime.ConversationalResolver.resolve(
+            rawInput = clean,
+            chatHistory = model.chat.value,
+            isTaskActive = isTaskRunning,
+            pendingActionIsConsequential = pendingConsequential
+        )
+
+        when (intent) {
+            is com.zaya.companion.runtime.ConversationalIntent.StopSpeech -> {
+                voiceOutput.stop()
+                model.notice("Speech silenced.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.CancelTask -> {
+                val active = taskCoordinator.activeTask.value
+                if (active != null) {
+                    taskCoordinator.cancelTask(active.taskId, intent.reason)
+                    model.notice("Task stopped by user.")
+                    return true
+                }
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Repeat -> {
+                return send("Could you explain that again? Previous response: ${intent.previousAnswer}")
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Summarize -> {
+                return send("Give me a concise 1-2 sentence summary of: ${intent.previousAnswer}")
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.SelectOption -> {
+                if (intent.requiresConfirmation) {
+                    model.beginCommand(clean)
+                    model.notice("Please explicitly confirm '${intent.optionText}' before I proceed with permanent changes.")
+                    return true
+                }
+                return send(intent.optionText)
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Continue -> {
+                if (intent.requiresConfirmation) {
+                    model.beginCommand(clean)
+                    model.notice("Please explicitly confirm the pending action before continuing.")
+                    return true
+                }
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Remember -> {
+                val res = memoryStore.remember(
+                    key = intent.content.take(60),
+                    value = intent.content,
+                    category = com.zaya.companion.memory.MemoryCategory.PREFERENCE,
+                    explicitConsent = true
+                )
+                model.beginCommand(clean)
+                when (res) {
+                    is com.zaya.companion.memory.MemorySaveResult.Saved -> model.notice(res.message)
+                    is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> model.notice("Blocked: ${res.reason}")
+                    is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> model.notice(res.prompt)
+                    is com.zaya.companion.memory.MemorySaveResult.Invalid -> model.notice(res.reason)
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.QueryMemory -> {
+                val found = memoryStore.getRelevantMemories(intent.query.ifBlank { "preference" })
+                model.beginCommand(clean)
+                if (found.isEmpty()) {
+                    model.notice("I don't have anything stored about that yet.")
+                } else {
+                    val summary = found.joinToString("\n") { "• [${it.category.displayName}] ${it.key}: ${it.value}" }
+                    model.notice("Here is what I remember:\n$summary")
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.ForgetMemory -> {
+                model.beginCommand(clean)
+                model.notice("Understood, I will not store this information.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.StopUsingMemory -> {
+                val stopped = memoryStore.deactivateMemory(intent.target)
+                model.beginCommand(clean)
+                if (stopped) {
+                    model.notice("Understood. I have stopped using '${intent.target}' in future conversations.")
+                } else {
+                    model.notice("I didn't find active memories for '${intent.target}', but I will avoid using it.")
+                }
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.ClearMemories -> {
+                model.beginCommand(clean)
+                model.notice("Are you sure you want to clear all saved memories? This will delete all stored preferences. Say 'confirm clear memories' to proceed.")
+                return true
+            }
+            is com.zaya.companion.runtime.ConversationalIntent.Normal -> { /* Normal execution */ }
+        }
+
+        // 1. Task Cancellation Gate
+        if (taskCoordinator.activeTask.value?.isRunning == true) {
+            if (lower in setOf("cancel", "stop", "abort", "cancel task", "stop task", "never mind")) {
+                val active = taskCoordinator.activeTask.value
+                if (active != null) {
+                    taskCoordinator.cancelTask(active.taskId, "Cancelled by user request")
+                    model.notice("Task stopped by user.")
+                    return true
+                }
+            }
+        }
+
+        // 2. Direct Local Personal Memory Commands
+        if (lower.startsWith("remember ") || lower.startsWith("forget ") || lower.contains("what do you remember")) {
+            val memoryNotice = handleLocalMemoryCommand(clean)
+            if (memoryNotice != null) {
+                model.beginCommand(clean)
+                model.notice(memoryNotice)
+                return true
+            }
+        }
+
+        val started = model.beginCommand(clean)
         if (started == null) return false
         val (requestId, _) = started
         val socket = control
+<<<<<<< HEAD
+        if (socket == null || !socket.isOpen) {
+            park(requestId, clean)
+=======
         if (socket == null || !socket.isOpen || serverInstance.isEmpty()) {
             model.markCommandFailedLocally(requestId, "Not connected. Send again once Zaya is online.")
+>>>>>>> origin/main
             return false
         }
         val message = JSONObject()
             .put("type", Protocol.Control.COMMAND)
-            .put("text", text)
+            .put("text", clean)
             .put("request_id", requestId)
             .put("server_instance", serverInstance)
         val sent = socket.send(message.toString())
+<<<<<<< HEAD
+        if (!sent) park(requestId, clean)
+        return sent
+    }
+
+    private fun handleLocalMemoryCommand(text: String): String? {
+        val lower = text.lowercase().trim()
+        if (lower.startsWith("remember ")) {
+            val raw = text.substring(9).trim()
+            val parts = when {
+                raw.contains(" is ") -> raw.split(" is ", limit = 2)
+                raw.contains(" = ") -> raw.split(" = ", limit = 2)
+                raw.contains(":") -> raw.split(":", limit = 2)
+                else -> listOf(raw, "true")
+            }
+            val key = parts[0].removePrefix("that ").trim()
+            val value = if (parts.size > 1) parts[1].trim() else "true"
+            return when (val res = memoryStore.saveMemory(key, value, confirmed = true)) {
+                is com.zaya.companion.memory.MemorySaveResult.Saved -> res.message
+                is com.zaya.companion.memory.MemorySaveResult.SensitiveDataBlocked -> "For your privacy, I cannot store sensitive information such as passwords or payment details."
+                is com.zaya.companion.memory.MemorySaveResult.RequiresConfirmation -> res.prompt
+                is com.zaya.companion.memory.MemorySaveResult.Invalid -> res.reason
+            }
+        } else if (lower.startsWith("forget ")) {
+            val key = text.substring(7).trim()
+            val removed = memoryStore.forgetMemory(key)
+            return if (removed) "I have forgotten '$key' and removed it from your saved preferences."
+            else "I couldn't find any saved preference matching '$key'."
+        } else if (lower.contains("what do you remember")) {
+            val query = lower.substringAfter("about", "").trim()
+            val list = if (query.isNotBlank()) memoryStore.getRelevantMemories(query) else memoryStore.memories.value
+            return if (list.isEmpty()) {
+                if (query.isNotBlank()) "I don't have anything remembered about '$query'."
+                else "You have no saved personal preferences yet."
+            } else {
+                val lines = list.take(5).map { "• ${it.key}: ${it.value} (${it.category.displayName})" }
+                "Saved preferences:\n" + lines.joinToString("\n")
+            }
+        }
+        return null
+    }
+
+    private fun park(requestId: String, text: String) {
+        model.markCommandQueued(requestId)
+        synchronized(outbox) {
+            if (outbox.none { it.first == requestId }) {
+                if (outbox.size >= MAX_OUTBOX) outbox.removeFirst()
+                outbox.addLast(requestId to text)
+            }
+        }
+    }
+
+=======
         if (!sent) model.markCommandFailedLocally(requestId, "Message was not delivered. Send again when connected.")
         return sent
     }
 
+>>>>>>> origin/main
     private fun flushOutbox(socket: ZayaSocket) {
         synchronized(outbox) { outbox.clear() }
         val ids = model.tracker.inFlight().map { it.first }
@@ -991,6 +1184,8 @@ class ZayaRuntime(
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private fun teardownSession() {
+        taskCoordinator.cancelAll()
+        actionExecutor.screenCaptureManager.stopCapture()
         control?.close(1000, "closed")
         control = null
         serverInstance = ""
@@ -1105,7 +1300,10 @@ class ZayaRuntime(
     }
 
     fun sendCapabilitiesReport(socket: ZayaSocket? = control) {
+<<<<<<< HEAD
+=======
         phoneActionsInitialized = true
+>>>>>>> origin/main
         val caps = actionRegistry.discoverCapabilities()
         val arr = org.json.JSONArray()
         caps.forEach { arr.put(it.toJsonObject()) }
@@ -1116,6 +1314,9 @@ class ZayaRuntime(
         socket?.send(msg.toString())
     }
 
+<<<<<<< HEAD
+    private fun handleActionInvoke(payload: JSONObject) {
+=======
     data class PhoneApproval(val requestId: String, val message: String, val permission: String?)
     private val _phoneApproval = MutableStateFlow<PhoneApproval?>(null)
     val phoneApproval = _phoneApproval.asStateFlow()
@@ -1167,7 +1368,6 @@ class ZayaRuntime(
         val args = payload.optJSONObject("arguments") ?: JSONObject()
         val action: com.zaya.companion.action.AndroidAction = when (actionId) {
             "set_flashlight" -> com.zaya.companion.action.AndroidAction.SetFlashlight(args.optBoolean("enabled", true))
-            "set_volume" -> com.zaya.companion.action.AndroidAction.SetVolume(args.optInt("percent", 50))
             "get_flashlight_state" -> com.zaya.companion.action.AndroidAction.GetFlashlightState
             "open_settings" -> com.zaya.companion.action.AndroidAction.OpenSystemSettings(
                 setting = args.optString("setting", "settings"),
@@ -1179,7 +1379,8 @@ class ZayaRuntime(
             "lookup_contact" -> com.zaya.companion.action.AndroidAction.LookUpContact(args.optString("query", ""))
             "browse_media" -> com.zaya.companion.action.AndroidAction.BrowseMedia(
                 args.optString("kind", "photos"), args.optString("query", ""),
-                args.optInt("limit", 10), args.optString("uri", ""))
+                args.optInt("limit", 10), args.optString("uri", "")
+            )
             "initiate_call" -> com.zaya.companion.action.AndroidAction.InitiateCall(
                 queryOrNumber = args.optString("query", args.optString("phone_number", "")),
                 directCall = args.optBoolean("direct_call", false),
@@ -1238,6 +1439,90 @@ class ZayaRuntime(
             )
             "run_task" -> com.zaya.companion.action.AndroidAction.RunTask(args.optString("task_id", ""))
             "cancel_task" -> com.zaya.companion.action.AndroidAction.CancelTask(args.optString("task_id", ""))
+            "plan_and_execute_task" -> com.zaya.companion.action.AndroidAction.PlanAndExecuteTask(
+                prompt = args.optString("prompt", ""),
+                taskId = args.optString("task_id", "")
+            )
+            "remember_memory" -> com.zaya.companion.action.AndroidAction.RememberMemory(
+                key = args.optString("key", ""),
+                value = args.optString("value", ""),
+                category = args.optString("category", "PREFERENCE"),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "forget_memory" -> com.zaya.companion.action.AndroidAction.ForgetMemory(
+                key = args.optString("key", ""),
+                category = args.optString("category", "").ifBlank { null }
+            )
+            "query_memory" -> com.zaya.companion.action.AndroidAction.QueryMemory(
+                query = args.optString("query", "")
+            )
+            "evaluate_math" -> com.zaya.companion.action.AndroidAction.EvaluateMath(
+                expression = args.optString("expression", "")
+            )
+            "get_device_diagnostics" -> com.zaya.companion.action.AndroidAction.GetDeviceDiagnostics
+            "web_search" -> com.zaya.companion.action.AndroidAction.WebSearch(
+                query = args.optString("query", ""),
+                openInBrowser = args.optBoolean("open_in_browser", false)
+            )
+            "get_weather" -> com.zaya.companion.action.AndroidAction.GetWeather(
+                location = args.optString("location", "").ifBlank { null }
+            )
+            "get_daily_briefing" -> com.zaya.companion.action.AndroidAction.GetDailyBriefing
+            "set_timer" -> com.zaya.companion.action.AndroidAction.SetTimer(
+                seconds = args.optInt("seconds", 60),
+                label = args.optString("label", "Timer")
+            )
+            "set_alarm" -> com.zaya.companion.action.AndroidAction.SetAlarm(
+                hour = args.optInt("hour", 8),
+                minutes = args.optInt("minutes", 0),
+                label = args.optString("label", "Alarm"),
+                skipUi = args.optBoolean("skip_ui", true)
+            )
+            "get_clipboard" -> com.zaya.companion.action.AndroidAction.GetClipboard
+            "set_clipboard" -> com.zaya.companion.action.AndroidAction.SetClipboard(
+                text = args.optString("text", "")
+            )
+            "send_whatsapp_message" -> com.zaya.companion.action.AndroidAction.SendWhatsAppMessage(
+                recipient = args.optString("recipient", ""),
+                message = args.optString("message", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "inspect_storage" -> com.zaya.companion.action.AndroidAction.InspectStorage(
+                path = args.optString("path", "").ifBlank { null }
+            )
+            "set_volume" -> com.zaya.companion.action.AndroidAction.SetVolume(
+                level = args.optInt("level", args.optInt("percent", 50)),
+                percent = args.optInt("percent", args.optInt("level", 50)),
+                streamType = args.optString("stream_type", "media")
+            )
+            "set_ringer_mode" -> com.zaya.companion.action.AndroidAction.SetRingerMode(
+                mode = args.optString("mode", "normal")
+            )
+            "execute_pc_command" -> com.zaya.companion.action.AndroidAction.ExecutePcCommand(
+                command = args.optString("command", ""),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "convert_currency" -> com.zaya.companion.action.AndroidAction.ConvertCurrency(
+                amount = args.optDouble("amount", 1.0),
+                from = args.optString("from", "USD"),
+                to = args.optString("to", "EUR")
+            )
+            "read_file" -> com.zaya.companion.action.AndroidAction.ReadFile(
+                path = args.optString("path", ""),
+                maxLines = args.optInt("max_lines", 100)
+            )
+            "write_file" -> com.zaya.companion.action.AndroidAction.WriteFile(
+                path = args.optString("path", ""),
+                content = args.optString("content", ""),
+                append = args.optBoolean("append", false),
+                confirmed = args.optBoolean("confirmed", false)
+            )
+            "think" -> com.zaya.companion.action.AndroidAction.Think(
+                thought = args.optString("thought", "")
+            )
+            "lookup_knowledge" -> com.zaya.companion.action.AndroidAction.LookupKnowledge(
+                topic = args.optString("topic", "")
+            )
             else -> {
                 val errResult = com.zaya.companion.action.ActionResult.unsupported("Action '$actionId' is not supported.")
                 val report = JSONObject()
@@ -1274,6 +1559,13 @@ class ZayaRuntime(
                         currentAction = confirmed
                         actionExecutor.execute(confirmed)
                     } else com.zaya.companion.action.ActionResult.cancelled("Phone action was declined or expired.")
+                }
+                if (action is com.zaya.companion.action.AndroidAction.ExecutePcCommand && result.status == com.zaya.companion.action.ActionResultStatus.SUCCESS) {
+                    val pcCmdMsg = JSONObject()
+                        .put("type", "pc.command")
+                        .put("payload", JSONObject().put("command", action.command).put("parameters", JSONObject(action.parameters)))
+                        .put("timestamp", System.currentTimeMillis() / 1000.0)
+                    socket.send(pcCmdMsg.toString())
                 }
                 if (System.currentTimeMillis() < expires * 1000 && control === socket) {
                     val report = JSONObject().put("type", Protocol.Control.ACTION_RESULT)
