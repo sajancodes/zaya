@@ -1,7 +1,7 @@
 """Late-bound UI safety shims.
 
-The desktop UI predates the thin JarvisUI facade.  Most runtime code logs through
-JarvisUI.write_log(), while a couple of MainWindow media callbacks still call
+The desktop UI predates the thin ZayaUI facade.  Most runtime code logs through
+ZayaUI.write_log(), while a couple of MainWindow media callbacks still call
 self.write_log().  That method never existed on MainWindow, so a recoverable
 QMediaPlayer error could raise AttributeError inside the error handler itself and
 leave media state half-open.  Action discovery imports this helper after ui.py is

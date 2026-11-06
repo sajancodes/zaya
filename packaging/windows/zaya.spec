@@ -76,7 +76,7 @@ if sys.platform != 'win32':
 
 datas = [
     # Never bundle the owner's provider keys, pairing credentials or settings.
-    (str(REPO_ROOT / 'config' / 'jarvis.ico'), 'config'),
+    (str(REPO_ROOT / 'config' / 'zaya.ico'), 'config'),
     (str(REPO_ROOT / 'core' / 'prompt.txt'), 'core'),
     (str(REPO_ROOT / 'LICENSE'), '.'),
     (str(REPO_ROOT / 'CREDITS.md'), '.'),
@@ -99,7 +99,7 @@ version_json = REPO_ROOT / 'version.json'
 if version_json.is_file():
     datas.append((str(version_json), '.'))
 
-icon_path = str(REPO_ROOT / 'config' / 'jarvis.ico')
+icon_path = str(REPO_ROOT / 'config' / 'zaya.ico')
 if not os.path.isfile(icon_path):
     icon_path = None
 

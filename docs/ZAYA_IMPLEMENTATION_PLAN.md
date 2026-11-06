@@ -12,7 +12,7 @@
 
 This document is the implementation contract for the agent that will upgrade the existing Zaya repository.
 
-The goal is not to bolt more commands onto the current assistant. The goal is to turn the existing Mark-LV/JARVIS-style application into **Zaya: Sajan Rai's persistent, state-aware, tool-using personal computer operator**.
+The goal is not to bolt more commands onto the current assistant. The goal is to turn the existing desktop assistant application into **Zaya: Sajan Rai's persistent, state-aware, tool-using personal computer operator**.
 
 Zaya must feel closer to a real JARVIS-like operator because it:
 
@@ -877,7 +877,7 @@ verify_push
 Given a user phrase such as:
 
 ```text
-push changes from Mark-Lv on my Desktop
+push changes from Zaya on my Desktop
 ```
 
 Zaya should:
@@ -1487,7 +1487,7 @@ P4 debug/noise
 Good:
 
 ```text
-Sir, the Mark-Lv push failed because origin rejected the branch. Your files are unchanged.
+Sir, the Zaya push failed because origin rejected the branch. Your files are unchanged.
 ```
 
 ```text
@@ -1681,7 +1681,7 @@ languages
 notes
 ```
 
-When Sajan says `Mark-Lv`, resolve aliases before asking him to repeat a path.
+When Sajan says `Zaya`, resolve aliases before asking him to repeat a path.
 
 ## 16.3 Memory write rules
 
@@ -1726,7 +1726,7 @@ ERROR
 Show concise state:
 
 ```text
-Pushing Mark-Lv · verifying remote
+Pushing Zaya · verifying remote
 ```
 
 or:
@@ -1896,7 +1896,7 @@ Only after automated tests pass:
 User:
 
 ```text
-Push the changes in Mark-Lv to GitHub.
+Push the changes in Zaya to GitHub.
 ```
 
 Expected:
@@ -2449,7 +2449,7 @@ Zaya qualifies when the following experience is real:
 Sajan:
 
 ```text
-Push Mark-Lv to GitHub.
+Push Zaya to GitHub.
 ```
 
 Zaya:
@@ -2463,7 +2463,7 @@ Zaya inspects status/diff, commits, pushes, verifies remote.
 Then:
 
 ```text
-Done. Mark-Lv is on origin/main at 9f2c...; local and remote HEAD match.
+Done. Zaya is on origin/main at 9f2c...; local and remote HEAD match.
 ```
 
 No fake Command Prompt narration.

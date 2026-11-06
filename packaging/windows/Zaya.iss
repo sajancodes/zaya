@@ -39,7 +39,7 @@ AppUpdatesURL=https://github.com/sajancodes/zaya-companion-releases
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\..\dist\windows
-SetupIconFile=..\..\config\jarvis.ico
+SetupIconFile=..\..\config\zaya.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -60,8 +60,8 @@ Name: "codingskill"; Description: "Install Zaya Coding Skill (internet required)
 Source: "{#SourceAppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\config\jarvis.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\config\jarvis.ico"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\config\zaya.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\config\zaya.ico"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--install-coding-skill"; Tasks: codingskill; StatusMsg: "Installing optional Coding Skill…"; Flags: waituntilterminated

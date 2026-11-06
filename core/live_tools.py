@@ -54,8 +54,8 @@ INLINE_TOOL_DECLARATIONS = [
         "parameters": {"type": "OBJECT", "properties": {}},
     },
     {
-        "name": "shutdown_jarvis",
-        "description": "Shuts down the assistant completely when user asks to end conversation, close, or stop.",
+        "name": "shutdown_zaya",
+        "description": "Shuts down Zaya completely when user asks to end conversation, close, or stop.",
         "parameters": {"type": "OBJECT", "properties": {}},
     },
     {

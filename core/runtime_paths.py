@@ -122,7 +122,7 @@ def ensure_user_directories() -> None:
         target_config = get_config_dir()
         if bundled_config.is_dir():
             for item in bundled_config.iterdir():
-                if item.name == 'jarvis.ico' and item.is_file() and not (target_config / item.name).exists():
+                if item.name == 'zaya.ico' and item.is_file() and not (target_config / item.name).exists():
                     try:
                         shutil.copy2(item, target_config / item.name)
                     except Exception:

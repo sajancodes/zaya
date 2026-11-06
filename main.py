@@ -69,7 +69,7 @@ import numpy as np
 from google import genai
 from google.genai import types
 from google.genai.live import AsyncSession
-from ui import JarvisUI
+from ui import ZayaUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary,
@@ -419,7 +419,7 @@ class _LocalSession:
     because the live model is replaced by local STT -> LLM -> TTS.
     """
 
-    def __init__(self, host: "JarvisLive"):
+    def __init__(self, host: "ZayaLive"):
         self.host = host
         self._video_warned = False
 
@@ -486,8 +486,8 @@ class _LocalSession:
         return None
 
 
-class JarvisLive:
-    def __init__(self, ui: JarvisUI):
+class ZayaLive:
+    def __init__(self, ui: ZayaUI):
         self.ui             = ui
         self._asst_name     = "Zaya"
         self.session: AsyncSession | _LocalSession | None = None
@@ -1400,7 +1400,9 @@ class JarvisLive:
                     'Restart requested. The current Zaya will close before the replacement starts.',
                     {'restart_requested': True}, side_effect=True)
 
-            elif name == "shutdown_jarvis":
+            elif name in ("shutdown_zaya", "shutdown_jarvis"):
+                from core.execution_policy import require_owner
+                require_owner()
                 self.ui.write_log("SYS: Shutdown requested.")
                 async def _do_shutdown():
                     await self._save_session_summary()
@@ -3244,7 +3246,7 @@ def _run_desktop_agent(ui, stopping):
         if engine_mode() != "local_pipeline":
             if not ui.wait_for_api_key(stopping):
                 return
-        agent = JarvisLive(ui)
+        agent = ZayaLive(ui)
         if not stopping.is_set():
             asyncio.run(agent.run())
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -3286,7 +3288,7 @@ def main():
         record_desktop()
         from core.runtime_logging import install_runtime_logging
         install_runtime_logging()
-        ui = JarvisUI("face.png")
+        ui = ZayaUI("face.png")
         instance.on_activate = ui.activate_existing
         restart_pending = False
         def restart_desktop():
@@ -3337,6 +3339,9 @@ def main():
     finally:
         # Keep the lock until UI shutdown has restored audio and hidden Zaya.
         instance.close()
+
+# Compatibility import for existing plugins; new code uses ZayaLive.
+JarvisLive = ZayaLive
 
 if __name__ == "__main__":
     main()
