@@ -4820,6 +4820,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self._input)
 
         send = QPushButton("▸")
+        send.setAutoDefault(False)
+        send.setDefault(False)
         send.setFixedSize(30, 30)
         send.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
         send.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -6041,13 +6043,14 @@ class MainWindow(QMainWindow):
         txt = self._input.text().strip()
         if not txt: return
         self._input.clear()
-        self._log.append_log(f"You: {txt}")
         if self.on_text_command:
             from core.execution_policy import with_trust, TRUST_LOCAL_OWNER
             def _run():
                 with with_trust(TRUST_LOCAL_OWNER):
                     self.on_text_command(txt)
             threading.Thread(target=_run, daemon=True).start()
+        else:
+            self._log.append_log(f"You: {txt}")
 
     def _apply_state(self, state: str):
         self.hud.state    = state

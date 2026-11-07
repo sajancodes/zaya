@@ -898,6 +898,8 @@ class ZayaLive:
         with self._speaking_lock:
             changed = self._is_speaking != value
             self._is_speaking = value
+        if not changed:
+            return
         if changed:
             loop = getattr(self, '_loop', None)
             if loop is not None and not loop.is_closed():
@@ -990,6 +992,7 @@ class ZayaLive:
             if drained:
                 print(f"[Zaya] ✋ Interrupted — {drained} audio chunks discarded")
         self.set_speaking(False)
+        self._tail_until = 0.0
         # The words we were about to mouth are never going to be spoken now.
         self._visemes.reset()
         self._play_cursor = 0.0     # next batch starts a fresh timeline

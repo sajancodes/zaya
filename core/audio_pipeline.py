@@ -99,6 +99,7 @@ class AudioPlaybackPipeline:
             return
 
         last_audio = time.monotonic()
+        is_speaking = False
         try:
             _pcm_visemes = self.pcm_visemes
             _pcm_level = self.pcm_level
@@ -117,14 +118,19 @@ class AudioPlaybackPipeline:
                         timeout=0.1,
                     )
                 except asyncio.TimeoutError:
-                    if time.monotonic() - last_audio >= 0.35:
+                    if is_speaking and time.monotonic() - last_audio >= 0.35:
+                        is_speaking = False
                         self.set_speaking(False)
                     if self.turn_done_event and self.turn_done_event.is_set():
-                        self.set_speaking(False)
+                        if is_speaking:
+                            is_speaking = False
+                            self.set_speaking(False)
                         self.turn_done_event.clear()
                     continue
 
-                self.set_speaking(True)
+                if not is_speaking:
+                    is_speaking = True
+                    self.set_speaking(True)
 
                 batch = bytearray(chunk)
                 while len(batch) < 9600:
@@ -170,7 +176,9 @@ class AudioPlaybackPipeline:
                 except asyncio.CancelledError:
                     raise
         finally:
-            self.set_speaking(False)
+            if is_speaking:
+                is_speaking = False
+                self.set_speaking(False)
             try:
                 stream.stop()
                 stream.close()
