@@ -2013,20 +2013,36 @@ class ZayaLive:
             _mic_dev  = audio_devices.resolve(_mic_name, "input")
             if _mic_dev is not None:
                 print(f"[Zaya] 🎤 Input device: {_mic_name}")
+
+            candidates = []
+            if _mic_dev is not None:
+                candidates.append((_mic_dev, _mic_name))
+            candidates.append((None, "system default"))
             try:
-                _mic_stream = _open_mic(_mic_dev)
-            except Exception as _e:
-                # A device the picker listed but the driver will not open right
-                # now — exclusive mode, a webcam already in use, a virtual mic
-                # whose source went away. Chosen hardware failing must never
-                # mean the assistant cannot hear at all.
-                if _mic_dev is None:
-                    raise
-                print(f"[Zaya] ⚠️  Mic '{_mic_name}' failed: {_e} — using default")
-                self.ui.write_log(
-                    f"SYS: Microphone '{_mic_name}' unavailable — using system default."
-                )
-                _mic_stream = _open_mic(None)
+                for d_name in audio_devices.list_devices("input"):
+                    idx = audio_devices.resolve(d_name, "input")
+                    if idx is not None and not any(c[0] == idx for c in candidates):
+                        candidates.append((idx, d_name))
+            except Exception:
+                pass
+
+            _mic_stream = None
+            last_err = None
+            for dev_idx, label in candidates:
+                try:
+                    _mic_stream = _open_mic(dev_idx)
+                    if dev_idx != _mic_dev and _mic_dev is not None:
+                        print(f"[Zaya] 🎤 Mic fallback: using '{label}'")
+                    break
+                except Exception as _e:
+                    last_err = _e
+                    print(f"[Zaya] ⚠️  Mic '{label}' failed: {_e}")
+
+            if _mic_stream is None:
+                print(f"[Zaya] ⚠️  All microphones unavailable ({last_err}) — keeping session alive without audio input")
+                self.ui.write_log("SYS: Microphone input unavailable; voice input paused.")
+                while True:
+                    await asyncio.sleep(1.0)
 
             with _mic_stream:
                 print("[Zaya] 🎤 Mic stream open")

@@ -63,6 +63,8 @@ def retry_delay(error):
         return 0.0
     if re.search(r'\b1008\b|denied access|PERMISSION_DENIED', str(error), re.I):
         return 3600.0
+    if re.search(r'\b1011\b|quota|exceeded.*quota', str(error), re.I):
+        return 60.0
     match = re.search(r"(?:retry\s+in|retry[_\s]?delay[\s'\":=]+)\s*(\d+(?:\.\d+)?)\s*s?", str(error), re.I)
     if match:
         return max(1.0, float(match.group(1)))
@@ -77,10 +79,9 @@ def quota_failure(error):
     err_msg = str(error).lower()
     if 'inactivity' in err_msg or 'client inactivity' in err_msg:
         return None
-    if re.search(r'\b429\b|RESOURCE_EXHAUSTED|\b1008\b|denied access|PERMISSION_DENIED', str(error), re.I):
+    if re.search(r'\b429\b|RESOURCE_EXHAUSTED|\b1008\b|\b1011\b|quota|exceeded.*quota|denied access|PERMISSION_DENIED', str(error), re.I):
         return error
     return None
-
 
 def error_text(error):
     children = getattr(error, 'exceptions', ())
