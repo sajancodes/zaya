@@ -84,14 +84,14 @@ class TestDoubleClapDetector(unittest.TestCase):
         detector.process_chunk(speech)
         self.assertEqual(self.detected_calls, 0, "Sustained tone/speech should not trigger")
 
-    @patch("core.double_clap._load_config")
-    @patch("core.double_clap._save_config")
+    @patch("memory.config_manager.get_double_clap_enabled")
+    @patch("memory.config_manager.save_double_clap_enabled")
     def test_toggle_persistence(self, mock_save, mock_load):
-        mock_load.return_value = {"double_clap_enabled": False}
+        mock_load.return_value = False
         self.assertFalse(is_double_clap_enabled())
         
         set_double_clap_enabled(True)
-        mock_save.assert_called_with({"double_clap_enabled": True})
+        mock_save.assert_called_with(True)
 
 if __name__ == "__main__":
     unittest.main()

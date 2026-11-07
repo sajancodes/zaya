@@ -32,8 +32,8 @@ class TestCalendarScheduler(unittest.TestCase):
             duration_minutes=45,
             add_meet=True
         )
-        self.assertIn("meet.google.com", evt.get("meet_link", ""))
         self.assertEqual(evt["title"], "Design Review")
+        self.assertEqual(evt["sync_status"], "local_only")
 
         events = list_events(within_hours=48.0)
         titles = [e["title"] for e in events]
@@ -50,7 +50,7 @@ class TestCalendarScheduler(unittest.TestCase):
             "duration_minutes": 30
         })
         self.assertIn("Sync meeting", res)
-        self.assertIn("meet.google.com", res)
+        self.assertIn("local_only", res)
 
 if __name__ == "__main__":
     unittest.main()

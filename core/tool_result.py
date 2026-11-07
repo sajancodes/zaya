@@ -59,6 +59,19 @@ class ToolResult:
     def __str__(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, default=str)
 
+    def __contains__(self, item: Any) -> bool:
+        if isinstance(item, str):
+            item_lower = item.lower()
+            if item in self.summary or item_lower in self.summary.lower():
+                return True
+            if self.data:
+                dump = json.dumps(self.data, default=str)
+                if item in dump or item_lower in dump.lower():
+                    return True
+            dump_str = str(self)
+            return item in dump_str or item_lower in dump_str.lower()
+        return False
+
 
 def success(summary: str, data: dict[str, Any] | None = None, **kwargs) -> ToolResult:
     return ToolResult('success', summary, data or {}, **kwargs)

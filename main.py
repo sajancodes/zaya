@@ -568,6 +568,12 @@ class ZayaLive:
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
         self._reconnect_keep = True   # False → next rebuild drops the resumption handle
+        from core.cue_manager import cue_manager
+        from core.fast_reflex import fast_reflex
+        self._cue_manager = cue_manager
+        self._fast_reflex = fast_reflex
+        self._voice_turns = None
+        self._cue_manager.on_state_changed = self._on_cue_state_changed
 
         # ── Session resumption ─────────────────────────────────────────
         # The server issues a resumption handle every few seconds and reissues
@@ -850,6 +856,41 @@ class ZayaLive:
             # before the next answer so the old sentence cannot play over it.
             self.interrupt()
         self.ui.write_log(f"You: {text}")
+
+        # 1. Check if an armed cue matches this input
+        cue_mgr = getattr(self, '_cue_manager', None)
+        if cue_mgr and cue_mgr.has_armed_cue():
+            matched_cue, params = cue_mgr.evaluate(text=text)
+            if matched_cue:
+                self.ui.write_log(f"Zaya: Triggered {matched_cue.tool_name} on your mark.")
+                asyncio.run_coroutine_threadsafe(
+                    self._run_tool_direct(matched_cue.tool_name, params, owner_goal=text),
+                    self._loop,
+                )
+                return
+
+        # 2. Check if this is a conversational cue setup ("when I say anything...", "on my mark...")
+        if cue_mgr:
+            setup = cue_mgr.detect_cue_intent(text)
+            if setup:
+                cue_mgr.arm_cue(
+                    trigger_type=setup["trigger_type"],
+                    tool_name=setup["tool_name"],
+                    parameters=setup["parameters"],
+                    ack_phrase=setup["ack_phrase"],
+                )
+                self.ui.write_log(f"Zaya: {setup['ack_phrase']}")
+                return
+
+        # 3. Check fast local reflexes (media controls, time, screenshot, etc.)
+        reflex = getattr(self, '_fast_reflex', None)
+        if reflex:
+            res = reflex.handle(text)
+            if res and res.matched:
+                if res.ack:
+                    self.ui.write_log(f"Zaya: {res.ack}")
+                return
+
         asyncio.run_coroutine_threadsafe(
             self._send_owner_text(text),
             self._loop
@@ -1215,6 +1256,26 @@ class ZayaLive:
                 store.update(operator_scope=self._operator_scope, operator_goal=self._operator_goal)
             except (OSError, sqlite3.Error):
                 self.ui.write_log('SYS: Could not save the current command identity.')
+
+    def _on_cue_state_changed(self, has_armed: bool):
+        turns = getattr(self, '_voice_turns', None)
+        if turns is not None:
+            try:
+                turns.set_cue_armed(has_armed)
+            except Exception:
+                pass
+
+    async def _run_tool_direct(self, name: str, args: dict, *, owner_goal: str = ""):
+        try:
+            import uuid
+            fc = types.FunctionCall(name=name, id=f"direct_{uuid.uuid4().hex[:8]}", args=args)
+            print(f"[Zaya] ⚡ Direct reflex tool execution: {name} {args}")
+            res = await self._execute_tool(fc, owner_goal=owner_goal or name)
+            return res
+        except Exception as e:
+            print(f"[Zaya] ❌ Direct tool execution error ({name}): {e}")
+            traceback.print_exc()
+            return None
 
     async def _execute_tool(self, fc, *, owner_scope=None, owner_goal=None) -> types.FunctionResponse:
         from core.operator import Operator
@@ -1703,6 +1764,10 @@ class ZayaLive:
         if getattr(self, '_turn_input_enabled', False):
             from core.voice_turns import VoiceTurns
             turns = VoiceTurns()
+            self._voice_turns = turns
+            cue_mgr = getattr(self, '_cue_manager', None)
+            if cue_mgr and cue_mgr.has_armed_cue():
+                turns.set_cue_armed(True)
         streamed = False
         quiet_blocks = 0
         while True:
@@ -2002,25 +2067,30 @@ class ZayaLive:
             await self._receive_messages(workers)
 
     async def _run_tool_batch(self, calls, canceled, owner_scope, owner_goal):
-        responses = []
-        for fc in calls:
+        if not calls:
+            return
+
+        async def _exec_single(fc):
             if fc.id in canceled:
-                continue
+                return None
             try:
-                result = await self._execute_tool(fc, owner_scope=owner_scope, owner_goal=owner_goal)
+                res = await self._execute_tool(fc, owner_scope=owner_scope, owner_goal=owner_goal)
+                if fc.id in canceled:
+                    return None
+                return res
             except Exception as e:
                 print(f"[Zaya] ❌ Tool execution error ({fc.name}): {e}")
                 traceback.print_exc()
-                result = types.FunctionResponse(
+                return types.FunctionResponse(
                     name=fc.name,
                     id=fc.id,
                     response={"error": str(e), "status": "failed"}
                 )
-            if fc.id not in canceled and result is not None:
-                responses.append(result)
+
+        results = await asyncio.gather(*(_exec_single(fc) for fc in calls), return_exceptions=False)
         # Cancellation means the model no longer wants this response. Retain
         # durable execution evidence; never replay or resend a canceled action.
-        responses = [result for result in responses if result.id not in canceled]
+        responses = [r for r in results if r is not None and r.id not in canceled]
         if responses:
             session = self.session
             if session is None:
@@ -2122,19 +2192,41 @@ class ZayaLive:
                             if txt:
                                 self._interrupted = False
                                 in_buf.append(txt)
-                                input_row = await self._conversation_write('record', 'user', ' '.join(in_buf), input_row)
+                                current_speech = ' '.join(in_buf)
+                                input_row = await self._conversation_write('record', 'user', current_speech, input_row)
                                 # Which body is speaking? The phone microphone is
                                 # an authenticated remote interface, and saying so
                                 # keeps the audit trail and the tool source honest.
                                 from core.execution_policy import (TRUST_LOCAL_OWNER,
                                                                    TRUST_AUTHENTICATED_REMOTE_OWNER)
                                 self._begin_owner_goal(
-                                    " ".join(in_buf),
+                                    current_speech,
                                     scope=input_scope,
                                     trust=(TRUST_AUTHENTICATED_REMOTE_OWNER if self._phone_active
                                            else TRUST_LOCAL_OWNER))
                                 input_scope = self._operator_scope
                                 self._last_user_speech = time.monotonic()
+
+                                # Fast cue and custom trigger reflex check
+                                cue_mgr = getattr(self, '_cue_manager', None)
+                                if cue_mgr and cue_mgr.has_armed_cue():
+                                    matched_cue, params = cue_mgr.evaluate(text=current_speech)
+                                    if matched_cue:
+                                        print(f"[Zaya] 🎯 Armed cue triggered: {matched_cue.id} -> {matched_cue.tool_name}")
+                                        self.interrupt()
+                                        workers.create_task(self._run_tool_direct(matched_cue.tool_name, params, owner_goal=current_speech))
+                                        self.ui.write_log(f"Zaya: Triggered {matched_cue.tool_name} on your mark.")
+                                elif cue_mgr:
+                                    setup = cue_mgr.detect_cue_intent(current_speech)
+                                    if setup:
+                                        cue_mgr.arm_cue(
+                                            trigger_type=setup["trigger_type"],
+                                            tool_name=setup["tool_name"],
+                                            parameters=setup["parameters"],
+                                            ack_phrase=setup["ack_phrase"],
+                                        )
+                                        print(f"[Zaya] 🎯 Cue armed via speech: {setup['parameters'].get('source')}")
+                                        self.ui.write_log(f"Zaya: {setup['ack_phrase']}")
 
                         if getattr(sc, 'generation_complete', False) or getattr(sc, 'waiting_for_input', False):
                             self._owner_request_pending = False
