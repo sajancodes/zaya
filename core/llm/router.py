@@ -77,13 +77,14 @@ class LLMRouter:
         max_tokens: int = 1024,
         timeout_sec: Optional[float] = None,
         allow_failover: bool = True,
+        candidate_providers: Optional[List[ProviderConfig]] = None,
         **kwargs
     ) -> LLMResponse:
         """Routes chat request through candidate providers with intelligent failover."""
         request_id = str(uuid.uuid4())[:8]
         require_multimodal = self.has_multimodal_content(messages)
 
-        candidates = self.routing_policy.get_candidate_providers(
+        candidates = list(candidate_providers) if candidate_providers else self.routing_policy.get_candidate_providers(
             task=task,
             preferred_provider=preferred_provider,
             require_multimodal=require_multimodal,

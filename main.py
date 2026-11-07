@@ -1248,7 +1248,8 @@ class ZayaLive:
         elif trust in owner_levels:
             effective = trust
         else:
-            effective = current
+            effective = (TRUST_AUTHENTICATED_REMOTE_OWNER if getattr(self, '_phone_active', False)
+                         else TRUST_LOCAL_OWNER)
         try:
             with with_trust(effective):
                 result = await Operator(get_runtime()).execute(fc.name, invoke, request_id=request_id,
@@ -2005,8 +2006,17 @@ class ZayaLive:
         for fc in calls:
             if fc.id in canceled:
                 continue
-            result = await self._execute_tool(fc, owner_scope=owner_scope, owner_goal=owner_goal)
-            if fc.id not in canceled:
+            try:
+                result = await self._execute_tool(fc, owner_scope=owner_scope, owner_goal=owner_goal)
+            except Exception as e:
+                print(f"[Zaya] ❌ Tool execution error ({fc.name}): {e}")
+                traceback.print_exc()
+                result = types.FunctionResponse(
+                    name=fc.name,
+                    id=fc.id,
+                    response={"error": str(e), "status": "failed"}
+                )
+            if fc.id not in canceled and result is not None:
                 responses.append(result)
         # Cancellation means the model no longer wants this response. Retain
         # durable execution evidence; never replay or resend a canceled action.
@@ -3139,6 +3149,12 @@ class ZayaLive:
                     self.ui.write_log("SYS: Provider checkpoint expired — starting fresh. Local History is preserved.")
                     self._resume_handle = None
                     await self._conversation_write('clear_handle')
+                    self._conn_backoff = 0
+                    continue
+
+                if "client inactivity" in str(e).lower() or "inactivity" in str(e).lower():
+                    print("[Zaya] 💤 Session closed due to client inactivity — reconnecting cleanly")
+                    self.ui.write_log("SYS: Session closed due to inactivity — reconnecting.")
                     self._conn_backoff = 0
                     continue
 

@@ -1002,7 +1002,10 @@ class DashboardServer:
             ssl_keyfile=str(ssl_key), ssl_certfile=str(ssl_cert),
         )
         print(f"[Dashboard] Manual entry:  {self._ip}:{PORT + 1}  (type in browser, accept cert once)")
-        await uvicorn.Server(cfg).serve()
+        try:
+            await uvicorn.Server(cfg).serve()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
 
     async def serve(self) -> None:
         if not _DEPS_OK:

@@ -90,10 +90,11 @@ class OpenAIBaseAdapter(BaseAdapter):
     def format_tools(self, tools: List[ToolDefinition]) -> List[Dict[str, Any]]:
         formatted = []
         for t in tools:
-            params = t.parameters or {"type": "object", "properties": {}}
+            params = dict(t.parameters or {"type": "object", "properties": {}})
             # Ensure type: "object"
-            if isinstance(params, dict) and "type" not in params:
-                params = {"type": "object", **params}
+            if isinstance(params, dict):
+                t_type = params.get("type", "object")
+                params["type"] = str(t_type).lower() if str(t_type).lower() == "object" else "object" 
             formatted.append({
                 "type": "function",
                 "function": {

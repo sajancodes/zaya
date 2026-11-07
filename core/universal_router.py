@@ -18,8 +18,27 @@ from core.llm.types import (
     ToolDefinition,
 )
 
-# Re-export ProviderConfig for backward compatibility
-ProviderConfig = CoreProviderConfig
+def ProviderConfig(
+    name: str = "",
+    provider: str = "",
+    provider_type: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    api_keys: Optional[List[str]] = None,
+    model: str = "",
+    **kwargs
+) -> CoreProviderConfig:
+    actual_name = name or provider or "custom"
+    actual_type = provider_type or provider or actual_name
+    keys = api_keys or ([api_key] if api_key else [])
+    return CoreProviderConfig(
+        name=actual_name,
+        provider_type=actual_type,
+        base_url=base_url,
+        api_keys=keys,
+        model=model,
+        **kwargs
+    )
 
 
 def _tool_field(tool: Dict[str, Any], key: str, default: Any = "") -> Any:
@@ -76,6 +95,20 @@ def normalize_tools_for_openai(tools: List[Dict[str, Any]]) -> List[Dict[str, An
             ))
     adapter = OpenAIBaseAdapter(CoreProviderConfig(name="dummy"))
     return adapter.format_tools(tool_defs)
+
+
+def parse_tool_calls_from_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Parses tool calls from an OpenAI-compatible response object or dict."""
+    choices = response.get("choices") or []
+    if not choices:
+        return []
+    message = choices[0].get("message") or {}
+    adapter = OpenAIBaseAdapter(CoreProviderConfig(name="dummy"))
+    tool_calls = adapter.parse_tool_calls(message)
+    return [
+        {"name": tc.name, "arguments": tc.arguments, "id": tc.id}
+        for tc in tool_calls
+    ]
 
 
 class UniversalLLMRouter:
@@ -146,6 +179,7 @@ class UniversalLLMRouter:
             messages=llm_messages,
             tools=tool_defs,
             task=task,
+            candidate_providers=chain,
             **kwargs
         )
 

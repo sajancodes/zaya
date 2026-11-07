@@ -1,6 +1,7 @@
 import time
+import asyncio
 import threading
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 import pytest
 
 
@@ -95,3 +96,52 @@ def test_ui_send_does_not_double_log():
     win._log.append_log.assert_not_called()
     time.sleep(0.05)
     assert received == ["hello world"]
+
+
+def test_quota_failure_ignores_client_inactivity():
+    from core.gemini_keys import quota_failure, retry_delay
+
+    inactivity_err = Exception("received 1008 (policy violation) Session closed due to client inactivity.")
+    assert quota_failure(inactivity_err) is None
+    assert retry_delay(inactivity_err) == 0.0
+
+    real_quota_err = Exception("received 1008 (policy violation) User has exceeded their quota.")
+    assert quota_failure(real_quota_err) is not None
+    assert retry_delay(real_quota_err) == 3600.0
+
+
+def test_run_tool_batch_catches_tool_exceptions():
+    from main import ZayaLive
+    from google.genai import types
+
+    inst = object.__new__(ZayaLive)
+    inst._flush_pending_vision = AsyncMock()
+    inst.session = MagicMock()
+    inst.session.send_tool_response = AsyncMock()
+
+    # Simulate tool raising an exception
+    async def bad_tool(fc, **kwargs):
+        raise RuntimeError("Something went wrong in the tool")
+
+    inst._execute_tool = bad_tool
+
+    fc = MagicMock()
+    fc.id = "call_abc"
+    fc.name = "failing_tool"
+
+    calls = [fc]
+    canceled = set()
+
+    async def _runner():
+        await inst._run_tool_batch(calls, canceled, "scope_1", "goal_1")
+
+    # Must NOT raise exception
+    asyncio.run(_runner())
+
+    # Should have sent a failed response rather than crashing
+    inst.session.send_tool_response.assert_called_once()
+    sent_responses = inst.session.send_tool_response.call_args.kwargs["function_responses"]
+    assert len(sent_responses) == 1
+    assert sent_responses[0].name == "failing_tool"
+    assert sent_responses[0].response["status"] == "failed"
+    assert "Something went wrong" in sent_responses[0].response["error"]
