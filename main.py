@@ -929,6 +929,11 @@ class ZayaLive:
         from actions.port_tunnel import stop_all_tunnels
         stop_all_tunnels()
         self._audio_ducker.close()
+        try:
+            from core.passive_screen_watcher import passive_screen_watcher
+            passive_screen_watcher.stop()
+        except Exception:
+            pass
         task = getattr(self, '_run_task', None)
         if task and self._loop and not self._loop.is_closed():
             try:
@@ -1128,6 +1133,13 @@ class ZayaLive:
                      '\n'.join(f'{emotion}: {tone}' for emotion, tone in emotion_tones().items()))
         if mem_str:
             parts.append(mem_str)
+        try:
+            from core.passive_screen_watcher import passive_screen_watcher
+            screen_ctx = passive_screen_watcher.get_screen_context_prompt()
+            if screen_ctx:
+                parts.append(screen_ctx)
+        except Exception:
+            pass
         parts.append(sys_prompt)
         parts.append('[SAVED CHAT SAFETY]\nPrevious conversation is stored locally in History and is not preloaded. '
                      'When the owner asks what we were doing, what happened earlier, or about the last conversation, '
@@ -1250,6 +1262,14 @@ class ZayaLive:
         self._operator_goal = str(redact(text))
         self._operator_trust = trust or TRUST_LOCAL_OWNER
         set_trust(self._operator_trust)
+        try:
+            from memory.knowledge_store import get_knowledge_store
+            facts = get_knowledge_store().search_hybrid(str(text), limit=3)
+            if facts:
+                fact_summary = '; '.join(f"{f.get('key')}={f.get('value')}" for f in facts)
+                self._operator_goal += f' [Context: {fact_summary}]'
+        except Exception:
+            pass
         store = getattr(self, '_conversation', None)
         if store is not None:
             try:
@@ -1361,6 +1381,11 @@ class ZayaLive:
             value    = args.get("value", "")
             if key and value:
                 update_memory({category: {key: {"value": value}}})
+                try:
+                    from memory.knowledge_store import get_knowledge_store
+                    get_knowledge_store().put_fact(category, key, value)
+                except Exception as e:
+                    print(f"[KnowledgeStore] Fact sync error: {e}")
                 print(f"[Memory] Fact saved in category: {category}")
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
@@ -1374,11 +1399,16 @@ class ZayaLive:
 
         try:
             if name == "recall_memory":
-                # Local file search: no network, no second model. Kept out of
-                # the executor deliberately — it is a dictionary scan over a few
-                # hundred short strings, and a thread hop would cost more than
-                # the work itself.
-                result = search_memory(args.get("query", ""), limit=8)
+                query_str = args.get("query", "")
+                result = search_memory(query_str, limit=8)
+                try:
+                    from memory.knowledge_store import get_knowledge_store
+                    hybrid = get_knowledge_store().search_hybrid(query_str, limit=6)
+                    if hybrid:
+                        extra = [f"[{h.get('category')}]: {h.get('key')} = {h.get('value')}" for h in hybrid]
+                        result = (str(result) + "\n\nKnowledge Graph Facts:\n" + "\n".join(extra)).strip()
+                except Exception as e:
+                    print(f"[KnowledgeStore] Hybrid search error: {e}")
 
             elif name == "undo":
                 if str(args.get("action", "")).lower().strip() == "list":
@@ -3049,6 +3079,12 @@ class ZayaLive:
         audio_devices.prefetch()
 
         asyncio.create_task(self._operator_notifications())
+
+        try:
+            from core.passive_screen_watcher import passive_screen_watcher
+            passive_screen_watcher.start(self._loop)
+        except Exception as e:
+            print(f"[PassiveScreenWatcher] Startup error: {e}")
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:

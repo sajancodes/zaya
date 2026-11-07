@@ -599,6 +599,128 @@ def _build_project(
     return f"{msg}\n\nLast error:\n{last_output[:600]}"
 
 
+def _heal_codebase(
+    project_path: str = "",
+    check_command: str = "",
+    max_attempts: int = 5,
+    speak=None,
+    player=None,
+) -> str:
+    def log(msg: str):
+        print(f"[DevAgent-Healer] {msg}")
+        if player:
+            try:
+                player.write_log(f"[DevAgent] {msg}")
+            except Exception:
+                pass
+
+    target_dir = Path(project_path).resolve() if project_path else Path.cwd()
+    if not target_dir.exists() or not target_dir.is_dir():
+        msg = f"Project directory does not exist: {target_dir}"
+        if speak: speak(msg)
+        return msg
+
+    cmd = check_command.strip()
+    if not cmd:
+        if (target_dir / "pytest.ini").exists() or (target_dir / "tests").exists():
+            cmd = "python -m pytest"
+        elif (target_dir / "package.json").exists():
+            cmd = "npm test"
+        elif (target_dir / "Cargo.toml").exists():
+            cmd = "cargo check"
+        else:
+            cmd = "python -m py_compile main.py"
+
+    log(f"Starting autonomous healing on {target_dir.name} using: {cmd}")
+    history_fixes = []
+    last_out = ""
+
+    for attempt in range(1, max_attempts + 1):
+        log(f"Run verification check (attempt {attempt}/{max_attempts})...")
+        last_out = _run_project(cmd, target_dir, timeout=60)
+
+        if not _has_error(last_out, cmd) and "FAILED" not in last_out and "Traceback" not in last_out:
+            msg = f"All checks passed cleanly for '{target_dir.name}' on attempt {attempt}, sir."
+            if history_fixes:
+                joined = ", ".join(sorted(set(history_fixes)))
+                msg += f" Successfully healed: {joined}."
+            if speak: speak(msg)
+            return f"{msg}\n\nVerification Output:\n{last_out[:400]}"
+
+        log("Errors detected in verification check. Classifying...")
+        err_type = _classify_error(last_out)
+
+        if err_type == "dependency_error":
+            if _try_auto_install(last_out, target_dir):
+                log("Missing dependency auto-installed. Re-verifying...")
+                time.sleep(1)
+                continue
+
+        all_py_files = [str(p.relative_to(target_dir)).replace("\\", "/") for p in target_dir.rglob("*.py") if not any(x in p.parts for x in {".venv", "venv", "__pycache__", ".git"})]
+        err_file, err_line = _parse_traceback(last_out, all_py_files)
+
+        if not err_file:
+            m = re.search(r'File "([^"]+\.py)"', last_out)
+            if m:
+                cand = Path(m.group(1))
+                if cand.is_absolute():
+                    try:
+                        err_file = str(cand.relative_to(target_dir)).replace("\\", "/")
+                    except ValueError:
+                        err_file = cand.name
+                else:
+                    err_file = str(cand).replace("\\", "/")
+            elif all_py_files:
+                err_file = all_py_files[0]
+
+        if not err_file:
+            msg = f"Could not isolate failing source file from output: {last_out[:300]}"
+            if speak: speak(msg)
+            return msg
+
+        full_err_file = target_dir / err_file
+        if not full_err_file.exists():
+            msg = f"Target file does not exist: {full_err_file}"
+            if speak: speak(msg)
+            return msg
+
+        current_code = full_err_file.read_text(encoding="utf-8", errors="replace")
+        log(f"Applying surgical fix to {err_file} (near line {err_line or 'unknown'})...")
+
+        prompt = f"""You are an expert debugger. Fix the broken file below.
+File: {err_file} (line {err_line or 'detected in traceback'})
+Error Output:
+{last_out[:3000]}
+
+Current Code:
+{current_code}
+
+Rules:
+- Output ONLY the complete fixed code. No explanation, no markdown, no backticks.
+- Preserve all existing functionality and correct logic.
+- Directly resolve the root cause of the error.
+
+Fixed code:"""
+
+        try:
+            model = _get_model(MODEL_PLANNER)
+            resp = model.generate_content(prompt)
+            fixed_code = _strip_fences(resp.text)
+            if fixed_code and len(fixed_code) > 20:
+                full_err_file.write_text(fixed_code, encoding="utf-8")
+                history_fixes.append(err_file)
+                log(f"Updated {err_file}. Re-verifying...")
+            time.sleep(1)
+        except Exception as e:
+            log(f"Fix failed for {err_file}: {e}")
+            if attempt == max_attempts:
+                break
+
+    msg = f"Could not fully heal '{target_dir.name}' after {max_attempts} attempts. Check latest error:\n{last_out[:500]}"
+    if speak: speak(msg)
+    return msg
+
+
 def dev_agent(
     parameters: dict,
     response=None,
@@ -607,6 +729,16 @@ def dev_agent(
     speak=None,
 ) -> str:
     p            = parameters or {}
+    action       = str(p.get("action", "build")).lower().strip()
+    if action == "heal" or p.get("heal"):
+        return _heal_codebase(
+            project_path=str(p.get("project_path", "")),
+            check_command=str(p.get("check_command", "")),
+            max_attempts=int(p.get("max_attempts", 5)),
+            speak=speak,
+            player=player,
+        )
+
     description  = p.get("description", "").strip()
     language     = p.get("language", "python").strip()
     project_name = p.get("project_name", "").strip()
@@ -628,13 +760,26 @@ def dev_agent(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "dev_agent",
-    "description": "Builds complete multi-file projects from scratch: plans, writes files, installs deps, opens VSCode, runs and fixes errors.",
+    "description": "Autonomous Software Engineer: builds complete multi-file projects from scratch, or runs iterative self-healing loops to test and fix existing codebases.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
+            "action": {
+                "type": "STRING",
+                "enum": ["build", "heal"],
+                "description": "'build' (default) to create new project, 'heal' to autonomously run tests and fix errors in existing code."
+            },
             "description": {
                 "type": "STRING",
-                "description": "What the project should do"
+                "description": "What the project should do (for action='build')"
+            },
+            "project_path": {
+                "type": "STRING",
+                "description": "Path to existing codebase to heal (for action='heal')"
+            },
+            "check_command": {
+                "type": "STRING",
+                "description": "Test/check command to run (e.g. 'pytest', 'npm test') (for action='heal')"
             },
             "language": {
                 "type": "STRING",
@@ -649,9 +794,7 @@ TOOL = {
                 "description": "Run timeout in seconds (default: 30)"
             }
         },
-        "required": [
-            "description"
-        ]
+        "required": []
     },
     "handler": dev_agent,
 }
