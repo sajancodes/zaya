@@ -288,6 +288,7 @@ def _describe_limits(has_vision: bool, has_mic: bool) -> str:
         "- Anything not listed above is outside your reach. Say so in one clause "
         "and offer the nearest thing you can actually do — never mime an action "
         "you cannot take, and never report a result you did not get.",
+        "- Conversational cues, timing triggers, and playful conditions (e.g. 'on my cue', 'when I say anything / sing / speak, play X') are standard conversational interactions, not missing capabilities: agree naturally, track the cue in context, and trigger the requested tool when the user speaks the cue.",
         "- You act on this machine only. You cannot reach the user's other "
         "devices, accounts or hardware except through the tools listed above.",
         "- You remember what is in the memory block and what has been said this "
