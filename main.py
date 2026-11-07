@@ -934,6 +934,11 @@ class ZayaLive:
             passive_screen_watcher.stop()
         except Exception:
             pass
+        try:
+            from core.background_sentinel import get_sentinel
+            get_sentinel().stop()
+        except Exception:
+            pass
         task = getattr(self, '_run_task', None)
         if task and self._loop and not self._loop.is_closed():
             try:
@@ -1696,13 +1701,22 @@ class ZayaLive:
                 if not item and not busy:
                     item = get_jobs().next_notice()
                     coding = item is not None
+                sentinel_notice = False
+                if not item and not busy:
+                    from core.background_sentinel import get_sentinel
+                    item = get_sentinel().next_alert()
+                    sentinel_notice = item is not None
                 if item:
                     try:
+                        delivery_mode = 'reminder' if reminder_notice else ('sentinel' if sentinel_notice else '')
                         if not await self._deliver_owner_notice(item, coding=coding,
-                                                               mode='reminder' if reminder_notice else ''):
+                                                               mode=delivery_mode):
                             continue
                         if reminder_notice:
                             reminders.voice_queued(item)
+                        elif sentinel_notice:
+                            from core.background_sentinel import get_sentinel
+                            get_sentinel().delivered(item)
                         else:
                             (get_jobs() if coding else manager).delivered(item)
                     except Exception as error:
@@ -3085,6 +3099,12 @@ class ZayaLive:
             passive_screen_watcher.start(self._loop)
         except Exception as e:
             print(f"[PassiveScreenWatcher] Startup error: {e}")
+
+        try:
+            from core.background_sentinel import get_sentinel
+            get_sentinel().start(self._loop)
+        except Exception as e:
+            print(f"[BackgroundSentinel] Startup error: {e}")
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:

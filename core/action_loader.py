@@ -95,6 +95,59 @@ class ActionRegistry:
     def names(self) -> set[str]:
         return set(self._actions.keys())
 
+    def register_action(self, rec: ActionRecord) -> bool:
+        if rec.valid:
+            self._actions[rec.name] = rec
+            self._all_records.append(rec)
+            return True
+        return False
+
+    def unregister_action(self, name: str) -> bool:
+        rec = self._actions.pop(name, None)
+        if rec:
+            module_name = f"actions.{Path(rec.file).stem}"
+            sys.modules.pop(module_name, None)
+            return True
+        return False
+
+    def load_action_file(self, path: Path, reserved_names: set[str] | None = None) -> list[ActionRecord]:
+        path = Path(path)
+        module_name = f"actions.{path.stem}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not build import spec for {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+
+        module_tools = []
+        if getattr(module, "TOOLS", None) is not None and isinstance(module.TOOLS, list):
+            module_tools = module.TOOLS
+        elif getattr(module, "TOOL", None) is not None:
+            module_tools = [module.TOOL]
+        else:
+            return []
+
+        loaded = []
+        reserved = reserved_names or set()
+        for t_dict in module_tools:
+            rec = _validate(t_dict, path.name)
+            if rec.valid and rec.name in reserved:
+                rec = ActionRecord(name=rec.name, file=path.name,
+                                   error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
+            self._all_records.append(rec)
+            if rec.valid:
+                self._actions[rec.name] = rec
+                loaded.append(rec)
+                self._logger(f"Action hot-loaded: {rec.name} ({path.name})")
+            else:
+                self._logger(f"Action rejected: {path.name} — {rec.error}")
+        return loaded
+
     # -- called by main.py from _execute_tool --
     def run(self, name: str, parameters: dict, ctx: dict | None = None) -> str:
         from core.execution_policy import require_owner
