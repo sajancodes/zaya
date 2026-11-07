@@ -131,6 +131,9 @@ TOOL = {
             },
             "steps": {
                 "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT"
+                },
                 "description": "Sequence of workflow step objects (each with 'action', coordinates, etc.) for automated execution."
             }
         }

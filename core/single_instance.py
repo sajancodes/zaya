@@ -26,8 +26,12 @@ class SingleInstance:
         if not self.lock.tryLock(0):
             if self.lock.error() != QLockFile.LockError.LockFailedError:
                 raise RuntimeError('Zaya could not acquire its startup lock.')
-            self.activate_existing()
-            return False
+            if not self.activate_existing():
+                self.lock.removeStaleLockFile()
+                if not self.lock.tryLock(0):
+                    return False
+            else:
+                return False
         self.owned = True
         self.server = QLocalServer()
         self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
