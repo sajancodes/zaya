@@ -96,3 +96,27 @@ def test_tool_declaration():
     assert TOOL["name"] == "market_analytics"
     assert "market analytics" in TOOL["description"].lower()
     assert callable(TOOL["handler"])
+
+
+def test_symbol_extraction_multiword_and_phrases():
+    from actions.market_analytics import _extract_symbols
+
+    # 1. Compare NVIDIA and Microsoft.
+    assert _extract_symbols("Compare NVIDIA and Microsoft.") == ["NVDA", "MSFT"]
+
+    # 2. Compare Taiwan Semiconductor and Apple.
+    assert _extract_symbols("Compare Taiwan Semiconductor and Apple.") == ["TSM", "AAPL"]
+
+    # 3. What's the price of Bitcoin?
+    assert _extract_symbols("What's the price of Bitcoin?") == ["BTC-USD"]
+
+    # 4. How is AAPL doing today?
+    assert _extract_symbols("How is AAPL doing today?") == ["AAPL"]
+
+    # 5. Compare NVDA, MSFT and TSM.
+    assert _extract_symbols("Compare NVDA, MSFT and TSM.") == ["NVDA", "MSFT", "TSM"]
+
+    # 6. Standalone multiword name
+    assert _extract_symbols("Taiwan Semiconductor") == ["TSM"]
+    assert _extract_symbols("S&P 500") == ["^GSPC"]
+

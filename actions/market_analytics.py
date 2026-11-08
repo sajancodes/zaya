@@ -104,18 +104,66 @@ def _fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+_STOPWORDS = {
+    "compare", "versus", "vs", "and", "with", "between", "the", "price",
+    "of", "today", "how", "is", "doing", "what", "whats", "what's", "in",
+    "for", "stock", "stocks", "crypto", "quote", "quotes", "market", "to"
+}
+
+
+def _extract_symbols(input_val: Any) -> List[str]:
+    """Extract stock and crypto symbols, correctly handling multiword company names and natural language questions."""
+    if isinstance(input_val, list):
+        symbols = []
+        for item in input_val:
+            symbols.extend(_extract_symbols(str(item)))
+        return list(dict.fromkeys(symbols))
+
+    text = str(input_val or "").strip()
+    if not text:
+        return []
+
+    # Strip contractions and conversational punctuation
+    clean_text = re.sub(r"['’]s\b", "", text)
+    clean_text = re.sub(r"[?!.,;:\"'’`]+", " ", clean_text).strip()
+    low_text = clean_text.lower()
+
+    found_matches: List[tuple[int, str]] = []
+    mask = [False] * len(low_text)
+
+    # 1. Match multiword and known company aliases first (longest aliases first)
+    sorted_aliases = sorted(_COMMON_ALIASES.items(), key=lambda x: len(x[0]), reverse=True)
+    for alias, ticker in sorted_aliases:
+        pattern = r"\b" + re.escape(alias) + r"\b"
+        for m in re.finditer(pattern, low_text):
+            start, end = m.span()
+            if not any(mask[start:end]):
+                for i in range(start, end):
+                    mask[i] = True
+                found_matches.append((start, ticker))
+
+    # 2. Tokenize remaining words, discard stopwords, and normalize
+    for m in re.finditer(r"\b[A-Za-z0-9\.\-\^]+\b", low_text):
+        start, end = m.span()
+        if not any(mask[start:end]):
+            word = m.group(0).lower()
+            if word in _STOPWORDS:
+                continue
+            normalized = _normalize_symbol(word)
+            if re.match(r"^[A-Z0-9\.\-\^]{1,10}$", normalized):
+                found_matches.append((start, normalized))
+
+    # Sort strictly by position in sentence, then deduplicate
+    found_matches.sort(key=lambda x: x[0])
+    return list(dict.fromkeys(m[1] for m in found_matches))
+
+
 def market_analytics(parameters: dict, **_kwargs) -> str:
     """Executes market quote queries or comparisons."""
     action = str(parameters.get("action") or "quote").lower().strip()
     symbols_input = parameters.get("symbols") or parameters.get("symbol") or parameters.get("query") or ""
 
-    if isinstance(symbols_input, str):
-        # Extract comma, space, or vs separated tickers
-        raw_symbols = [s.strip() for s in re.split(r"[,;\s]+|\bvs\b", symbols_input, flags=re.IGNORECASE) if s.strip()]
-    elif isinstance(symbols_input, list):
-        raw_symbols = [str(s).strip() for s in symbols_input if str(s).strip()]
-    else:
-        raw_symbols = []
+    raw_symbols = _extract_symbols(symbols_input)
 
     if not raw_symbols:
         return json.dumps({
