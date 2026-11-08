@@ -227,3 +227,22 @@ def test_tts_failure_keeps_the_text_answer():
         assert "SPEAKING" not in events["states"]
         await pipeline.speech.stop()
     asyncio.run(scenario())
+
+
+def test_language_fallback_chain():
+    pipeline, _ = _pipeline(FakeRouter([]))
+    pipeline.settings.stt_language = "es"
+
+    # 1. Detected takes precedence
+    assert pipeline.resolve_language(detected="fr", utterance_language="de") == "fr"
+
+    # 2. Utterance language is next fallback if detected is empty
+    assert pipeline.resolve_language(detected="", utterance_language="de") == "de"
+
+    # 3. Settings STT language is used if detected and utterance are empty
+    assert pipeline.resolve_language(detected="", utterance_language="") == "es"
+
+    # 4. Empty string fallback if settings also empty
+    pipeline.settings.stt_language = ""
+    assert pipeline.resolve_language(detected="", utterance_language="") == ""
+

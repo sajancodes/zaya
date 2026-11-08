@@ -118,3 +118,6 @@ web/data/
 .venv-local-release/
 .venv-local-hands/
 updates/
+
+memory/sentinel_alerts.json
+memory/sentinel_alerts.tmp

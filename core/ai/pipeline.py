@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -29,6 +30,8 @@ from core.speech.text import speakable_text
 from core.tool_result import ToolResult
 from core.tools.loop_guard import LoopGuard
 from core.tools.routing import ToolRouter, normalize_declaration
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -370,10 +373,28 @@ class LocalConversationPipeline:
 
     # ── turn ─────────────────────────────────────────────────────────────────
 
+    def resolve_language(self, detected: str = "", utterance_language: str = "") -> str:
+        """Resolve spoken/transcribed language using documented fallback chain:
+        detected -> utterance.language -> settings.stt_language -> "" (let model infer).
+        """
+        chain = [
+            ("detected", detected),
+            ("utterance", utterance_language),
+            ("settings", getattr(self.settings, "stt_language", "")),
+            ("fallback", ""),
+        ]
+        for source, val in chain:
+            clean = str(val or "").strip()
+            if clean:
+                logger.debug("Language resolved to '%s' from %s", clean, source)
+                return clean
+        logger.debug("Language resolved to empty string (fallback to model inference)")
+        return ""
+
     async def _handle_utterance(self, utterance: Utterance) -> None:
         turn_started = time.monotonic()
         self._set_state("THINKING")
-        language = utterance.language or self.settings.stt_language
+        initial_hint = self.resolve_language("", utterance.language)
         text = utterance.text.strip()
         if not text and utterance.pcm:
             self._set_state("LISTENING")
@@ -382,7 +403,7 @@ class LocalConversationPipeline:
                 async with self._stt_lock:
                     result = await asyncio.to_thread(
                         self.stt.transcribe, utterance.pcm,
-                        sample_rate=16000, language=language or None)
+                        sample_rate=16000, language=initial_hint or None)
             except SpeechError as error:
                 self._error(str(error))
                 self._set_state("LISTENING")
@@ -393,12 +414,14 @@ class LocalConversationPipeline:
                 return
             stt_ms = (time.monotonic() - stt_started) * 1000.0
             text = result.text.strip()
-            language = result.language or language
+            detected = getattr(result, "language", "")
+            language = self.resolve_language(detected, utterance.language)
             if not text:
                 self._set_state("LISTENING")
                 return
             self._last_timing = {"stt_ms": round(stt_ms, 1), "language": language}
         else:
+            language = self.resolve_language("", utterance.language)
             self._last_timing = {"stt_ms": 0.0, "language": language}
         if self.callbacks.on_user_text:
             try:

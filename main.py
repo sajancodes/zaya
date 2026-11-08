@@ -517,6 +517,7 @@ class ZayaLive:
         self._input_turn_active = False
         self._owner_epoch = 0
         self._notification_active = False
+        self._notification_interrupted = False
         self.ui.on_shutdown = self.shutdown
         import uuid
         self._operator_scope = uuid.uuid4().hex
@@ -1022,13 +1023,18 @@ class ZayaLive:
         except Exception:
             pass
 
-    def interrupt(self) -> None:
+    def interrupt(self, reason: str = "user_speech") -> None:
         """Stop Zaya mid-speech: drain queued audio and open mic immediately."""
         # Local inbox speech has no matching response in the main connection.
         # Waiting for a server interruption acknowledgement would drop the
         # owner's next response even though the server was never speaking.
-        self._interrupted = not getattr(self, '_notification_active', False)
+        notification_active = bool(getattr(self, '_notification_active', False))
+        if notification_active:
+            self._notification_interrupted = True
+        self._interrupted = not notification_active
         self._notification_active = False
+        q_depth = self.audio_in_queue.qsize() if getattr(self, 'audio_in_queue', None) else 0
+        print(f"[Zaya:Interrupt] reason='{reason}', notification_active={notification_active}, notification_interrupted={getattr(self, '_notification_interrupted', False)}, queue_depth={q_depth}, timestamp={time.time()}")
         local = getattr(self, '_local_pipeline', None)
         if local is not None:
             local.interrupt()
@@ -1709,8 +1715,16 @@ class ZayaLive:
                 if item:
                     try:
                         delivery_mode = 'reminder' if reminder_notice else ('sentinel' if sentinel_notice else '')
+                        self._notification_interrupted = False
+                        q_depth = self.audio_in_queue.qsize() if getattr(self, 'audio_in_queue', None) else 0
+                        print(f"[Zaya:Notification] Attempting delivery: item_id='{item.get('id', '')}', mode='{delivery_mode}', queue_depth={q_depth}, timestamp={time.time()}")
                         if not await self._deliver_owner_notice(item, coding=coding,
                                                                mode=delivery_mode):
+                            print(f"[Zaya:Notification] Notice delivery rejected/deferred: item_id='{item.get('id', '')}', timestamp={time.time()}")
+                            continue
+                        if getattr(self, '_notification_interrupted', False):
+                            print(f"[Zaya:Notification] Notice delivery was interrupted mid-speech; re-queuing: item_id='{item.get('id', '')}', timestamp={time.time()}")
+                            self._notification_interrupted = False
                             continue
                         if reminder_notice:
                             reminders.voice_queued(item)
@@ -1719,6 +1733,8 @@ class ZayaLive:
                             get_sentinel().delivered(item)
                         else:
                             (get_jobs() if coding else manager).delivered(item)
+                        self._notification_interrupted = False
+                        print(f"[Zaya:Notification] Notice successfully delivered and acknowledged: item_id='{item.get('id', '')}', timestamp={time.time()}")
                     except Exception as error:
                         if reminder_notice:
                             reminders.voice_failed(item, error)
@@ -3311,6 +3327,16 @@ class ZayaLive:
                 ):
                     print("[Zaya] 🔗 Provider checkpoint rejected — starting fresh")
                     self.ui.write_log("SYS: Provider checkpoint expired — starting fresh. Local History is preserved.")
+                    try:
+                        from core.project_awareness import get_project_awareness
+                        snap = get_project_awareness().rehydrate()
+                        proj = snap.get("active_project", "")
+                        if proj:
+                            self.ui.write_log(f"SYS: Project context rehydrated: '{proj}'.")
+                        else:
+                            self.ui.write_log("SYS: Project context rehydrated.")
+                    except Exception as rehydrate_err:
+                        print(f"[Zaya] Project awareness rehydration note: {rehydrate_err}")
                     self._resume_handle = None
                     await self._conversation_write('clear_handle')
                     self._conn_backoff = 0
