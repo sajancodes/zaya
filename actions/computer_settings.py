@@ -23,6 +23,7 @@ except ImportError:
 
 from core import confirm
 from core.undo import push_undo
+from core.execution_policy import require_owner
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -599,7 +600,163 @@ def shutdown_computer():
     else:
         subprocess.run(["systemctl", "poweroff"], capture_output=True)
 
+def get_power_mode() -> str:
+    """Returns the name and GUID of the currently active power scheme."""
+    if _OS == "Windows":
+        try:
+            res = subprocess.run(["powercfg", "/getactivescheme"],
+                                 capture_output=True, text=True, timeout=5, **_WIN_HIDE)
+            out = res.stdout.strip()
+            m = re.search(r"GUID:\s*([a-f0-9\-]+)\s*\((.+?)\)", out, re.I)
+            if m:
+                return f"{m.group(2).strip()} ({m.group(1).strip()})"
+            return out or "Unknown"
+        except Exception as e:
+            return f"Error querying power scheme: {e}"
+    elif _OS == "Darwin":
+        try:
+            res = subprocess.run(["pmset", "-g"], capture_output=True, text=True, timeout=5)
+            for line in res.stdout.splitlines():
+                if "lowpowermode" in line.lower():
+                    val = line.split()[-1]
+                    return "Low Power Mode (On)" if val == "1" else "Normal / High Performance (Low Power Mode Off)"
+            return "Standard"
+        except Exception as e:
+            return f"Error querying power scheme: {e}"
+    else:
+        try:
+            res = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True, timeout=5)
+            return res.stdout.strip() or "Standard"
+        except Exception:
+            return "Standard"
+
+
+def list_power_schemes() -> list[tuple[str, str, bool]]:
+    """Lists available power schemes: [(guid, name, is_active), ...]."""
+    if _OS != "Windows":
+        return []
+    schemes = []
+    try:
+        res = subprocess.run(["powercfg", "/list"], capture_output=True, text=True, timeout=5, **_WIN_HIDE)
+        for line in res.stdout.splitlines():
+            m = re.search(r"GUID:\s*([a-f0-9\-]+)\s*\((.+?)\)(\s*\*?)", line, re.I)
+            if m:
+                guid = m.group(1).strip()
+                name = m.group(2).strip()
+                is_active = "*" in m.group(3)
+                schemes.append((guid, name, is_active))
+    except Exception as e:
+        print(f"[Settings] list_power_schemes failed: {e}")
+    return schemes
+
+
+def set_power_mode(mode: str) -> str:
+    """Switches the operating system power scheme / performance mode.
+
+    Supported modes:
+      'performance' / 'ultimate' / 'high_performance'
+      'balanced' / 'balanced_mode'
+      'battery_saver' / 'power_saver' / 'saver'
+    """
+    mode_norm = (mode or "").lower().strip().replace("-", "_").replace(" ", "_")
+    if _OS == "Windows":
+        schemes = list_power_schemes()
+        target_guid = None
+        target_name = ""
+
+        if any(k in mode_norm for k in ("perf", "ultimate", "high", "gaming", "max")):
+            # Prefer an explicit ultimate scheme, then high performance
+            for guid, name, _ in schemes:
+                n_low = name.lower()
+                if "ultimate" in n_low or "high perf" in n_low or "performance" in n_low:
+                    target_guid = guid
+                    target_name = name
+                    break
+            if not target_guid:
+                target_guid = "SCHEME_MIN"
+                target_name = "High performance"
+
+        elif any(k in mode_norm for k in ("saver", "battery", "eco", "low", "efficient")):
+            for guid, name, _ in schemes:
+                n_low = name.lower()
+                if "saver" in n_low or "battery" in n_low or "eco" in n_low:
+                    target_guid = guid
+                    target_name = name
+                    break
+            if not target_guid:
+                target_guid = "SCHEME_MAX"
+                target_name = "Power saver"
+
+        else: # Default or balanced
+            for guid, name, _ in schemes:
+                if "balanced" in name.lower():
+                    target_guid = guid
+                    target_name = name
+                    break
+            if not target_guid:
+                target_guid = "SCHEME_BALANCED"
+                target_name = "Balanced"
+
+        # Apply using powercfg
+        try:
+            res = subprocess.run(["powercfg", "/setactive", target_guid],
+                                 capture_output=True, text=True, timeout=5, **_WIN_HIDE)
+            if res.returncode != 0:
+                # If target was SCHEME_MIN / SCHEME_MAX and failed, attempt duplicatescheme
+                if target_guid in ("SCHEME_MIN", "SCHEME_MAX"):
+                    dup = subprocess.run(["powercfg", "-duplicatescheme", target_guid],
+                                         capture_output=True, text=True, timeout=5, **_WIN_HIDE)
+                    m = re.search(r"GUID:\s*([a-f0-9\-]+)", dup.stdout, re.I)
+                    if m:
+                        new_guid = m.group(1).strip()
+                        subprocess.run(["powercfg", "/setactive", new_guid],
+                                       capture_output=True, timeout=5, **_WIN_HIDE)
+
+            active = get_power_mode()
+            return f"Switched power mode to {target_name}. Active scheme: {active}."
+        except Exception as e:
+            return f"Failed to set power mode ({mode}): {e}"
+
+    elif _OS == "Darwin":
+        try:
+            if any(k in mode_norm for k in ("saver", "battery", "eco", "low")):
+                subprocess.run(["pmset", "-a", "lowpowermode", "1"], capture_output=True, timeout=5)
+                return "Switched to Low Power Mode."
+            else:
+                subprocess.run(["pmset", "-a", "lowpowermode", "0"], capture_output=True, timeout=5)
+                return "Switched to Standard/High Performance Mode."
+        except Exception as e:
+            return f"Failed to set power mode on macOS: {e}"
+
+    else: # Linux
+        try:
+            profile = "performance" if "perf" in mode_norm else ("power-saver" if "saver" in mode_norm else "balanced")
+            subprocess.run(["powerprofilesctl", "set", profile], capture_output=True, timeout=5)
+            return f"Switched power profile to {profile}."
+        except Exception as e:
+            return f"Failed to set power profile on Linux: {e}"
+
+
+def performance_mode() -> str:
+    return set_power_mode("performance")
+
+
+def balanced_mode() -> str:
+    return set_power_mode("balanced")
+
+
+def battery_saver() -> str:
+    return set_power_mode("battery_saver")
+
 ACTION_MAP: dict[str, callable] = {
+    "performance_mode":    performance_mode,
+    "high_performance":   performance_mode,
+    "ultimate_performance": performance_mode,
+    "balanced_mode":       balanced_mode,
+    "battery_saver":       battery_saver,
+    "power_saver":         battery_saver,
+    "power_mode":          get_power_mode,
+    "get_power_mode":      get_power_mode,
     "volume_up":           volume_up,
     "volume_down":         volume_down,
     "mute":                volume_mute,
@@ -707,6 +864,10 @@ _DANGEROUS_ACTIONS = set(_IRREVERSIBLE)
 # out in full. What is left is spelling tolerance, and difflib does that in
 # microseconds instead of ~600 ms and a quota unit.
 _ALIASES = {
+    "performance_mode":   ("performance mode", "high performance", "ultimate performance", "boost performance", "max performance", "gaming mode"),
+    "balanced_mode":      ("balanced mode", "normal power mode", "standard performance", "balance power"),
+    "battery_saver":      ("battery saver", "power saver", "power saving", "eco mode", "energy saver", "low power mode"),
+    "power_mode":         ("power scheme", "current power mode", "check power mode", "get power mode"),
     "volume_up":       ("louder", "raise volume", "turn it up", "increase volume"),
     "volume_down":     ("quieter", "lower volume", "turn it down", "decrease volume"),
     "mute":            ("silence", "sound off", "no sound"),
@@ -794,6 +955,7 @@ def computer_settings(
     player=None,
     session_memory=None,
 ) -> str:
+    require_owner()
     if not _PYAUTOGUI:
         return "pyautogui is not installed. Run: pip install pyautogui"
 
@@ -834,6 +996,31 @@ def computer_settings(
             key=action, title=title, detail=detail,
             run=lambda f=func, a=action: (f(), f"{a} done.")[1],
         )
+
+    if action in ("power_mode", "get_power_mode", "current_power_mode"):
+        if value:
+            return set_power_mode(str(value))
+        return f"Current power scheme: {get_power_mode()}."
+
+    if action in ("performance_mode", "ultimate_performance", "high_performance",
+                  "balanced_mode", "battery_saver", "power_saver", "set_power_mode"):
+        before_guid = None
+        if _OS == "Windows":
+            try:
+                out = subprocess.check_output(["powercfg", "/getactivescheme"],
+                                             text=True, timeout=3, **_WIN_HIDE)
+                m = re.search(r"GUID:\s*([a-f0-9\-]+)", out, re.I)
+                if m:
+                    before_guid = m.group(1).strip()
+            except Exception:
+                pass
+
+        mode = value or action
+        result_msg = set_power_mode(mode)
+        if before_guid:
+            push_undo(f"power mode ({action})",
+                      lambda g=before_guid: (subprocess.run(["powercfg", "/setactive", g], **_WIN_HIDE), f"Restored power scheme {g}.")[1])
+        return result_msg
 
     if action == "volume_set":
         try:
@@ -918,7 +1105,7 @@ def computer_settings(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_settings",
-    "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness and dark mode can be reversed with the `undo` tool.",
+    "description": "Controls the computer: volume, brightness, power modes (performance/balanced/battery saver), window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness, dark mode, and power mode can be reversed with the `undo` tool.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -938,6 +1125,7 @@ TOOL = {
                     "The exact action. Prefer this over `description` — pick one of: "
                     "volume_up | volume_down | volume_set | mute | "
                     "brightness_up | brightness_down | sleep_display | "
+                    "performance_mode | ultimate_performance | balanced_mode | battery_saver | power_mode | "
                     "pause_video | close_app | close_window | full_screen | "
                     "minimize | maximize | snap_left | snap_right | "
                     "switch_window | show_desktop | task_manager | focus_search | "
