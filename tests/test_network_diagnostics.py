@@ -199,3 +199,88 @@ def test_dns_timeout_and_tcp_handshake_classification():
             assert "TCP handshake to 1.1.1.1: 18.5ms" in res["summary"]
             assert "packet loss not applicable" in res["summary"]
 
+
+def test_genuine_dns_deadlines_and_hanging_workers():
+    # 1. Normal resolution
+    def fast_resolver(domain):
+        return "93.184.216.34"
+
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=fast_resolver):
+        t0 = time.perf_counter()
+        res_normal = _benchmark_dns(timeout=0.5)
+        elapsed_normal = time.perf_counter() - t0
+        assert elapsed_normal < 0.3
+        for d, r in res_normal.items():
+            assert r["ip"] == "93.184.216.34"
+            assert r["status"] == "ok"
+            assert r["latency_ms"] is not None
+
+    # 2. One DNS request hangs (2.0s hang), others succeed fast
+    def one_hang_resolver(domain):
+        if "google" in domain:
+            time.sleep(2.0)
+            return "8.8.8.8"
+        return "1.1.1.1"
+
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=one_hang_resolver):
+        t0 = time.perf_counter()
+        res_one_hang = _benchmark_dns(timeout=0.08)
+        elapsed_one_hang = time.perf_counter() - t0
+        # Strictly bounded: must finish within ~0.25s, NEVER waiting 2.0s!
+        assert elapsed_one_hang < 0.25
+        assert "timeout" in res_one_hang["google.com"]["status"]
+        assert res_one_hang["google.com"]["ip"] is None
+        # Other domains that finished before deadline are preserved
+        assert res_one_hang["cloudflare.com"]["ip"] == "1.1.1.1"
+        assert res_one_hang["cloudflare.com"]["status"] == "ok"
+
+    # 3. Multiple DNS requests hang
+    def multi_hang_resolver(domain):
+        if "google" in domain or "microsoft" in domain:
+            time.sleep(2.0)
+            return "8.8.8.8"
+        return "1.1.1.1"
+
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=multi_hang_resolver):
+        t0 = time.perf_counter()
+        res_multi_hang = _benchmark_dns(timeout=0.08)
+        elapsed_multi_hang = time.perf_counter() - t0
+        assert elapsed_multi_hang < 0.25
+        assert "timeout" in res_multi_hang["google.com"]["status"]
+        assert "timeout" in res_multi_hang["microsoft.com"]["status"]
+        assert res_multi_hang["cloudflare.com"]["ip"] == "1.1.1.1"
+
+    # 4. One domain fails while others succeed
+    def one_fail_resolver(domain):
+        if "github" in domain:
+            raise RuntimeError("NXDOMAIN: domain not found")
+        return "1.1.1.1"
+
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=one_fail_resolver):
+        res_fail = _benchmark_dns(timeout=0.5)
+        assert "failed" in res_fail["github.com"]["status"]
+        assert res_fail["github.com"]["ip"] is None
+        assert res_fail["cloudflare.com"]["ip"] == "1.1.1.1"
+        assert res_fail["cloudflare.com"]["status"] == "ok"
+
+    # 5. All DNS requests fail
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=RuntimeError("DNS offline")):
+        res_all_fail = _benchmark_dns(timeout=0.5)
+        for d, r in res_all_fail.items():
+            assert "failed" in r["status"]
+            assert r["ip"] is None
+
+    # 6 & 7. Overall deadline enforced and subsequent operation is not delayed
+    t_start = time.perf_counter()
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=lambda _: time.sleep(3.0)):
+        _benchmark_dns(timeout=0.06)
+    elapsed_hang = time.perf_counter() - t_start
+    assert elapsed_hang < 0.20
+
+    # Subsequent operation executes immediately without block
+    t_sub = time.perf_counter()
+    sub_res = _get_local_ip()
+    assert (time.perf_counter() - t_sub) < 0.05
+    assert isinstance(sub_res, str)
+
+

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 
 from actions.recycle_bin_sentinel import (
@@ -188,3 +188,88 @@ def test_fast_reflex_recycle_bin():
         res_empty = router.execute_intent(empty_intent)
         assert res_empty.matched is True
         assert "Recycle Bin emptied" in res_empty.ack
+
+    # Fast reflex partial success and unverified handling
+    with patch("actions.recycle_bin_sentinel.empty_recycle_bin", return_value={"status": "partial_success", "freed_mb": 4.0, "freed_items": 2, "remaining_items": 1}):
+        res_part = router.execute_intent(empty_intent)
+        assert res_part.matched is True
+        assert "partially emptied" in res_part.ack
+
+    with patch("actions.recycle_bin_sentinel.empty_recycle_bin", return_value={"status": "unverified"}):
+        res_unv = router.execute_intent(empty_intent)
+        assert res_unv.matched is True
+        assert "could not be verified" in res_unv.ack
+
+
+def test_recycle_bin_post_verification_and_telemetry():
+    initial_stats = {
+        "status": "success",
+        "items_count": 10,
+        "size_bytes": 20971520,
+        "size_mb": 20.0,
+        "size_gb": 0.02,
+        "drive": "All Drives",
+        "is_empty": False,
+    }
+    empty_stats = {
+        "status": "success",
+        "items_count": 0,
+        "size_bytes": 0,
+        "size_mb": 0.0,
+        "size_gb": 0.0,
+        "drive": "All Drives",
+        "is_empty": True,
+    }
+    partial_stats = {
+        "status": "success",
+        "items_count": 3,
+        "size_bytes": 6291456,
+        "size_mb": 6.0,
+        "size_gb": 0.006,
+        "drive": "All Drives",
+        "is_empty": False,
+    }
+    failed_post_stats = {
+        "status": "error",
+        "message": "Access denied querying shell stats",
+        "items_count": 0,
+        "size_bytes": 0,
+        "is_empty": False,
+    }
+
+    # 1. Successful API call and successful post-verification
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", side_effect=[initial_stats, empty_stats]), \
+         patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0):
+        res_full = empty_recycle_bin(confirm=True)
+        assert res_full["status"] == "success"
+        assert res_full["freed_items"] == 10
+        assert res_full["freed_bytes"] == 20971520
+        assert res_full["freed_mb"] == 20.0
+        assert res_full["remaining_items"] == 0
+
+    # 2. Successful API call but failed post-verification (returns unverified, NOT zero remaining)
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", side_effect=[initial_stats, failed_post_stats]), \
+         patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0):
+        res_unverified = empty_recycle_bin(confirm=True)
+        assert res_unverified["status"] == "unverified"
+        assert res_unverified["freed_items"] is None
+        assert "post-operation verification failed" in res_unverified["message"]
+
+    # 3. Partial deletion: 10 items initially, 3 remaining
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", side_effect=[initial_stats, partial_stats]), \
+         patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0):
+        res_partial = empty_recycle_bin(confirm=True)
+        assert res_partial["status"] == "partial_success"
+        assert res_partial["freed_items"] == 7  # 10 - 3
+        assert res_partial["freed_bytes"] == 14680064  # 20971520 - 6291456
+        assert res_partial["freed_mb"] == 14.0  # actual difference, not 20.0!
+        assert res_partial["remaining_items"] == 3
+        assert res_partial["remaining_bytes"] == 6291456
+
+    # 4. No items initially
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", return_value=empty_stats):
+        res_empty = empty_recycle_bin(confirm=True)
+        assert res_empty["status"] == "success"
+        assert res_empty["freed_items"] == 0
+        assert "already empty" in res_empty["message"]
+

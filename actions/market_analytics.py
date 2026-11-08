@@ -106,7 +106,7 @@ def _fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
             }
             _QUOTE_CACHE[sym] = (now, quote_info)
             return quote_info
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -154,7 +154,6 @@ def _extract_symbols(input_val: Any) -> List[str]:
     clean_text = re.sub(r"['’]s\b", "", raw_text)
     clean_text = re.sub(r"[?!.,;:\"'’`]+", " ", clean_text).strip()
     low_text = clean_text.lower()
-    raw_tokens = raw_text.split()
     low_tokens = low_text.split()
 
     is_conversational = (

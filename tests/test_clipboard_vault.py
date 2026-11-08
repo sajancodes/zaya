@@ -215,3 +215,90 @@ def test_clipboard_redaction_and_exact_match(temp_clipboard_db):
             assert res["data"]["label"] == "code"
             mock_write.assert_called_with("Exact code match")
 
+
+def test_clipboard_native_api_write_verification_and_cleanup():
+    # 1. Normal pyperclip fallback
+    with patch("pyperclip.copy", return_value=None):
+        assert _write_system_clipboard("pyperclip test") is True
+
+    # Force fallback to native Windows ctypes by making pyperclip fail
+    pyperclip_fail = patch("pyperclip.copy", side_effect=Exception("pyperclip error"))
+
+    # 2. Successful clipboard write with native ctypes
+    with pyperclip_fail, \
+         patch("ctypes.memmove"), \
+         patch("ctypes.windll.kernel32.GlobalAlloc", return_value=0x1234), \
+         patch("ctypes.windll.kernel32.GlobalLock", return_value=0x5678), \
+         patch("ctypes.windll.kernel32.GlobalUnlock", return_value=0), \
+         patch("ctypes.windll.user32.OpenClipboard", return_value=1), \
+         patch("ctypes.windll.user32.EmptyClipboard", return_value=1), \
+         patch("ctypes.windll.user32.SetClipboardData", return_value=0x1234), \
+         patch("ctypes.windll.user32.CloseClipboard", return_value=1), \
+         patch("ctypes.windll.kernel32.GlobalFree") as mock_free:
+        ok = _write_system_clipboard("Hello world")
+        assert ok is True
+        # Since SetClipboardData succeeded, Windows owns h_mem; GlobalFree must NOT be called
+        mock_free.assert_not_called()
+
+    # 3. OpenClipboard failure (after all 5 retries fail) -> memory must be freed!
+    with pyperclip_fail, \
+         patch("ctypes.memmove"), \
+         patch("ctypes.windll.kernel32.GlobalAlloc", return_value=0x1234), \
+         patch("ctypes.windll.kernel32.GlobalLock", return_value=0x5678), \
+         patch("ctypes.windll.kernel32.GlobalUnlock", return_value=0), \
+         patch("ctypes.windll.user32.OpenClipboard", return_value=0), \
+         patch("ctypes.windll.kernel32.GlobalFree") as mock_free:
+        ok = _write_system_clipboard("Contention fail")
+        assert ok is False
+        mock_free.assert_called_once_with(0x1234)
+
+    # 4. SetClipboardData failure -> Windows did NOT take ownership, GlobalFree MUST be called!
+    with pyperclip_fail, \
+         patch("ctypes.memmove"), \
+         patch("ctypes.windll.kernel32.GlobalAlloc", return_value=0x1234), \
+         patch("ctypes.windll.kernel32.GlobalLock", return_value=0x5678), \
+         patch("ctypes.windll.kernel32.GlobalUnlock", return_value=0), \
+         patch("ctypes.windll.user32.OpenClipboard", return_value=1), \
+         patch("ctypes.windll.user32.EmptyClipboard", return_value=1), \
+         patch("ctypes.windll.user32.SetClipboardData", return_value=0), \
+         patch("ctypes.windll.user32.CloseClipboard", return_value=1), \
+         patch("ctypes.windll.kernel32.GlobalFree") as mock_free:
+        ok = _write_system_clipboard("SetClipboardData rejected")
+        assert ok is False
+        mock_free.assert_called_once_with(0x1234)
+
+    # 5. Memory allocation failure -> returns False cleanly without crashing
+    with pyperclip_fail, \
+         patch("ctypes.windll.kernel32.GlobalAlloc", return_value=0):
+        ok = _write_system_clipboard("Alloc fail")
+        assert ok is False
+
+    # 6. Clipboard contention: fails first 2 times, succeeds on 3rd attempt
+    open_attempts = [0, 0, 1]
+    with pyperclip_fail, \
+         patch("ctypes.memmove"), \
+         patch("ctypes.windll.kernel32.GlobalAlloc", return_value=0x1234), \
+         patch("ctypes.windll.kernel32.GlobalLock", return_value=0x5678), \
+         patch("ctypes.windll.kernel32.GlobalUnlock", return_value=0), \
+         patch("ctypes.windll.user32.OpenClipboard", side_effect=open_attempts), \
+         patch("ctypes.windll.user32.EmptyClipboard", return_value=1), \
+         patch("ctypes.windll.user32.SetClipboardData", return_value=0x1234), \
+         patch("ctypes.windll.user32.CloseClipboard", return_value=1), \
+         patch("ctypes.windll.kernel32.GlobalFree") as mock_free:
+        ok = _write_system_clipboard("Retry success")
+        assert ok is True
+        mock_free.assert_not_called()
+
+    # 7. Unicode clipboard contents
+    with patch("pyperclip.copy", return_value=None) as mock_pyper:
+        ok_uni = _write_system_clipboard("こんにちは世界 🚀 Special characters: €$£")
+        assert ok_uni is True
+        mock_pyper.assert_called_with("こんにちは世界 🚀 Special characters: €$£")
+
+    # 8. Empty clipboard content
+    with patch("pyperclip.copy", return_value=None) as mock_pyper:
+        ok_empty = _write_system_clipboard("")
+        assert ok_empty is True
+        mock_pyper.assert_called_with("")
+
+

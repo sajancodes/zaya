@@ -120,3 +120,17 @@ def test_symbol_extraction_multiword_and_phrases():
     assert _extract_symbols("Taiwan Semiconductor") == ["TSM"]
     assert _extract_symbols("S&P 500") == ["^GSPC"]
 
+    # 7. Specific prompt regression requirements
+    assert _extract_symbols("Meta Platforms") == ["META"]
+    assert _extract_symbols("Compare Meta Platforms and Microsoft.") == ["META", "MSFT"]
+    assert _extract_symbols("What's the price of Apple today?") == ["AAPL"]
+    assert _extract_symbols("Compare NVIDIA, Microsoft and Taiwan Semiconductor.") == ["NVDA", "MSFT", "TSM"]
+    assert _extract_symbols("How is AAPL performing?") == ["AAPL"]
+    assert _extract_symbols("Compare NVDA vs AMD.") == ["NVDA", "AMD"]
+    assert _extract_symbols("What's happening in the technology market?") == []
+    assert _extract_symbols("Tell me about the stock market.") == []
+
+    # 8. Natural language words must never become accidental ticker symbols
+    assert _extract_symbols("Can you check the financial trends in the market?") == []
+    assert _extract_symbols("Please show me the overall sector performance.") == []
+

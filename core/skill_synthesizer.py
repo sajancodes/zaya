@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.action_loader import get_action_registry
 from core.runtime_paths import get_resource_dir
-from core.tool_result import ToolResult
 from memory.knowledge_store import KnowledgeStore
 
 _VALID_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
