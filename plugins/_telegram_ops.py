@@ -435,7 +435,7 @@ _monitor = None
 def away_alert() -> str | None:
     """One line about a machine in trouble, or None.
 
-    main.py runs this same monitor, but it only speaks an alert while JARVIS is
+    main.py runs this same monitor, but it only speaks an alert while Zaya is
     AWAKE and somebody is there to hear it — which is exactly the wrong half of
     the day for this. A machine that overheats while you are out says nothing at
     all today. A separate instance is not a duplicate: it has its own cooldown

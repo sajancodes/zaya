@@ -1,8 +1,8 @@
 """
-JARVIS plugin — Calorie Counter (webcam vision).
+Zaya plugin — Calorie Counter (webcam vision).
 
 Hold food up to the camera and ask "how many calories is this?" —
-JARVIS switches the HUD to the live camera with an animated scan bar,
+Zaya switches the HUD to the live camera with an animated scan bar,
 photographs the food, analyzes it with Gemini, speaks a short summary
 in your language and shows the full nutrition breakdown in the
 content panel.
@@ -49,7 +49,7 @@ _MODEL             = "gemini-2.5-flash"
 _LIVE_SCAN_SECONDS = 1.8     # live preview before the photo is taken
 _FPS               = 25
 _ANIM_MAX_SECONDS  = 25      # animator safety stop
-_SCAN_COLOR        = (255, 190, 40)    # JARVIS cyan-blue (BGR)
+_SCAN_COLOR        = (255, 190, 40)    # Zaya cyan-blue (BGR)
 _SCAN_CORE         = (255, 235, 130)   # bright core line (BGR)
 
 
@@ -236,7 +236,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         if animator:
             animator.join(timeout=1)
         if view_open:
-            stream_sig.emit(False)  # back to the JARVIS HUD
+            stream_sig.emit(False)  # back to the Zaya HUD
 
     spoken = (data.get("spoken_summary") or "").strip()
 

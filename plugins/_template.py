@@ -1,8 +1,8 @@
 """
-Drop-in JARVIS plugin template.
+Drop-in Zaya plugin template.
 
 Copy this file, rename it (no leading underscore), fill in PLUGIN and run().
-No other file needs to change — JARVIS discovers this automatically at startup.
+No other file needs to change — Zaya discovers this automatically at startup.
 """
 
 PLUGIN = {

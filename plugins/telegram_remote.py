@@ -1,5 +1,5 @@
 """
-telegram_remote.py — drive JARVIS from anywhere, over Telegram.
+telegram_remote.py — drive Zaya from anywhere, over Telegram.
 
 WHY THIS EXISTS
     The Remote Dashboard already relays typed commands into the Live session
@@ -55,7 +55,7 @@ IT ONLY LISTENS WHEN YOU SAY SO
     that should open because a file was in a folder. "Start the Telegram remote"
     starts it, the same way water_reminder and whatsapp_guard start their loops.
 
-    There is a switch that changes this — START LISTENING WHEN JARVIS LAUNCHES —
+    There is a switch that changes this — START LISTENING WHEN Zaya LAUNCHES —
     and it is OFF until somebody at the computer turns it on. That distinction
     is the whole of it: the default is still that downloading this file gives
     nobody a listening bot, and turning it on is a deliberate act performed at
@@ -631,7 +631,7 @@ PLUGIN_SETTINGS = {
          "label": "Allow /screen — send screenshots to approved phones",
          "type": "toggle", "default": False},
         # main.py's own monitor speaks its alerts out loud, and only while
-        # JARVIS is awake — so a machine in trouble while the house is empty
+        # Zaya is awake — so a machine in trouble while the house is empty
         # says nothing at all. This is the half that was missing, and it is
         # off by default because an unasked-for push notification is somebody
         # else's phone buzzing at three in the morning.
@@ -801,7 +801,7 @@ def _send_job(sess, token: str, job: dict, stop: threading.Event) -> None:
 
     Telegram answers a chat that is being written to too quickly with 429 and a
     `retry_after`. Ignoring it does not slow anything down — it loses the
-    message, which for a relayed answer means JARVIS looks like it said nothing.
+    message, which for a relayed answer means Zaya looks like it said nothing.
     """
     kind = job.get("kind")
     for attempt in range(3):
@@ -845,7 +845,7 @@ def _send_job(sess, token: str, job: dict, stop: threading.Event) -> None:
             else:
                 payload = {"chat_id": job["chat"], "text": job.get("text") or "",
                            "disable_web_page_preview": True}
-                # No parse_mode on purpose: JARVIS's answers are arbitrary text
+                # No parse_mode on purpose: Zaya's answers are arbitrary text
                 # and Markdown parsing would reject or mangle them.
                 if job.get("markup"):
                     payload["reply_markup"] = job["markup"]
@@ -897,7 +897,7 @@ def _sender_loop(token: str, stop: threading.Event) -> None:
             pass
 
 
-# ── reply relay: mirror JARVIS's answers back, bound to the turn that asked ──
+# ── reply relay: mirror Zaya's answers back, bound to the turn that asked ──
 
 _name_cache: list = ["", 0.0]
 
@@ -1073,11 +1073,11 @@ def _remove_relay(player) -> None:
 
 def _drop_backlog(sess, token: str):
     """Return an offset past everything already queued, so nothing sent while
-    JARVIS was off is executed on start.
+    Zaya was off is executed on start.
 
     The webhook is deleted first. A bot that ever had one set answers getUpdates
     with 409 for ever, which reads as "another poller is running" and sends the
-    reader looking for a second copy of JARVIS that does not exist — and
+    reader looking for a second copy of Zaya that does not exist — and
     drop_pending_updates throws the queue away at the server, which is a better
     place to throw it away than here.
 
@@ -1109,7 +1109,7 @@ def _deliver(player, text: str) -> bool:
     # A remote command is deliberate control and there is no WAKE button within
     # reach — so wake first if asleep, the same reasoning main.py applies to a
     # dashboard command. State is checked before toggling, because on_wake_manual
-    # is a toggle and would otherwise put an awake JARVIS to sleep.
+    # is a toggle and would otherwise put an awake Zaya to sleep.
     try:
         get_state = getattr(player, "wake_get_state", None)
         wake_now  = getattr(player, "on_wake_manual", None)

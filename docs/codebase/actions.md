@@ -166,7 +166,7 @@ Automation internals:
 - `_BrowserSession` (`448-925`) launches a persistent context against the
   browser's **real** profile when possible; if that fails (browser already
   open, profile locked, newer Chrome blocks automation profiles) it falls back
-  to `~/.jarvis_profiles/<browser>` (`actions/browser_control.py:646-668`), where
+  to `~/.zaya_profiles/<browser>` (`actions/browser_control.py:646-668`), where
   sign-ins persist across sessions but are *not* the owner's regular ones.
 - `_get_page` recovers from closed-page errors twice before any click/type can
   fire (`671-687`).
@@ -387,8 +387,8 @@ session for the same site (`flight_finder.py:139-143`). The two calls can end
 up in different browser profiles/instances.
 
 **Legacy identifiers.** Ghosts of the pre-Zaya name survive: the sandbox code
-is compiled as `"<jarvis_desktop>"` (`desktop.py:97`), automation profiles live
-under `~/.jarvis_profiles` (`browser_control.py:114, 658`), and
+is compiled as `"<zaya_desktop>"` (`desktop.py:97`), automation profiles live
+under `~/.zaya_profiles` (`browser_control.py:114, 658`), and
 `computer_settings` keeps `_DANGEROUS_ACTIONS` as a compatibility alias
 (`computer_settings.py:685-686`).
 
@@ -453,7 +453,7 @@ under `~/.jarvis_profiles` (`browser_control.py:114, 658`), and
 9. **Native browser opens are unverifiable by design, and automation may use a
    different profile.** Native results are `partial` with `verified: False`
    (`browser_control.py:1085-1090`); automation falls back to
-   `~/.jarvis_profiles/<browser>` when the real profile cannot be locked
+   `~/.zaya_profiles/<browser>` when the real profile cannot be locked
    (`654-668`). The declaration warns the model not to claim shared sign-ins
    (`1162`), but a user asking "did it open?" cannot be answered from evidence.
 

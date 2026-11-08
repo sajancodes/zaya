@@ -676,11 +676,11 @@ All claims below are grounded in the cited lines; nothing here is inferred behav
     "Ollama request timed out after 120 s." (`:322`) whatever `timeout` the caller passed.
 17. **Upstream persona names survive in comments.** `stt.py:2`, `tts.py:2` and `installer.py:2` say
     "MARK XL"; `avatar.py:17,19,75,210,271`, `audio_devices.py:2,9`, `llm_client.py:137` and
-    `wake_word.py:2,16,27,28,149,190,192` say "JARVIS". These are upstream-template leftovers that
+    `wake_word.py:2,16,27,28,149,190,192` say "Zaya". These are upstream-template leftovers that
     conflict with the owner's branding instruction (Zaya is the visible name; upstream license
     attribution must stay, but these strings are not license text). All but one are comments or
     docstrings (`wake_word.py:149` is a log line), and the functional identifiers `hey_jarvis`
-    (`wake_word.py:28`) and the `shutdown_jarvis` tool (`main.py:423`, `prompt.txt:120`) must stay
+    (`wake_word.py:28`) and the `shutdown_zaya` tool (`main.py:423`, `prompt.txt:120`) must stay
     as they are; `session_activity.py:51-53` uses "Sajan" deliberately, narrating the owner's real
     current activity.
 18. **Prompt rendering is silently forgiving.** `_render_prompt` is a token replace with no check

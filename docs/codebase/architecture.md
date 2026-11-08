@@ -14,8 +14,8 @@ pulls in.
 
 | Path | Role |
 |---|---|
-| `main.py` | Entry point, `JarvisLive` (Live session, audio loops, mic gates, tool dispatch, reconnect ladder) |
-| `ui.py` | `JarvisUI` façade + `MainWindow`, HUD `HudCanvas`, overlays, cameras/video, drawers |
+| `main.py` | Entry point, `ZayaLive` (Live session, audio loops, mic gates, tool dispatch, reconnect ladder) |
+| `ui.py` | `ZayaUI` façade + `MainWindow`, HUD `HudCanvas`, overlays, cameras/video, drawers |
 | `actions/*.py` | Built-in tools that self-describe with a module-level `TOOL` dict; discovered at startup |
 | `plugins/*.py` | Drop-in tools with a module-level `PLUGIN` dict + `run()`; discovered at startup, toggleable |
 | `core/` | Shared runtime: loaders, event bus, echo guard, VAD, memory/config, keys, task runtime, operator, confirm gate |
@@ -55,7 +55,7 @@ Before any other import:
    second process exits.
 4. The lock owner starts a `QLocalServer` with `UserAccessOption`, removes any socket left by a crashed run (`:34`), and
    calls `on_activate` on each new connection (`:51-57`).
-5. `JarvisUI("face.png")` is constructed, and `instance.on_activate = ui.activate_existing` (`main.py:2787`).
+5. `ZayaUI("face.png")` is constructed, and `instance.on_activate = ui.activate_existing` (`main.py:2787`).
 6. `stopping = threading.Event()`; `worker = threading.Thread(target=_run_desktop_agent, args=(ui, stopping), daemon=True)`;
    `ui.root.mainloop()` blocks the main thread.
 7. On exit: `stopping.set()`, `ui._shutdown_audio()`, `worker.join(timeout=2)`, then `instance.close()` in the outer
@@ -64,7 +64,7 @@ Before any other import:
 
 ### 2.3 QApplication and the UI (immediately above, plus `ui.py:5823-5852`)
 
-`JarvisUI.__init__` creates/uses the `QApplication`, sets the Fusion style (`ui.py:5826`), constructs
+`ZayaUI.__init__` creates/uses the `QApplication`, sets the Fusion style (`ui.py:5826`), constructs
 `MainWindow(face_path)` and immediately calls `configure_desktop_interface()` (`ui.py:5828`), which switches the window into
 the "Settings & Controls" layout (see §7). It then optionally builds the taskbar companion `ZayaBar` when `zayabar.json` has
 `enabled: true` (`ui.py:5836-5847`, default in the shipped file), wires the companion signals, and shows the main window
@@ -72,23 +72,23 @@ only if there is no bar, if `show_main_window_on_start` is set, or if no API key
 
 `_RootShim` (`ui.py:5814-5820`) exposes `mainloop()` → `QApplication.exec()`, plus a no-op `protocol()`.
 
-### 2.4 Agent thread → `JarvisLive`
+### 2.4 Agent thread → `ZayaLive`
 
 `_run_desktop_agent` (`main.py:2750-2775`) runs entirely on the worker thread:
 
 1. `ui.wait_for_api_key(stopping)` (`ui.py:6042-6049`) polls `MainWindow._ready` every 100 ms until the setup overlay has
    been completed or `stopping` is set.
-2. `JarvisLive(ui)` — construction happens here, on the agent thread, not the Qt thread.
+2. `ZayaLive(ui)` — construction happens here, on the agent thread, not the Qt thread.
 3. `asyncio.run(agent.run())` (`main.py:2757`) creates the event loop the whole session lives on.
 4. Failures are caught, redacted (`core/audit.redact`), logged to the activity log and appended to
    `logs/startup_failure.log`; `finally` closes the AudioDucker (`main.py:2774-2775`).
 
 ### 2.5 Tool and plugin discovery (`main.py:668-697`)
 
-Still inside `JarvisLive.__init__`:
+Still inside `ZayaLive.__init__`:
 
 - Inline tools (`TOOL_DECLARATIONS`, `main.py:350-517`) are the ones whose handling is woven into live-session state:
-  `system_status`, `screen_process`, `close_camera`, `manage_monitor`, `shutdown_jarvis`, `save_memory`, `recall_memory`,
+  `system_status`, `screen_process`, `close_camera`, `manage_monitor`, `shutdown_zaya`, `save_memory`, `recall_memory`,
   `undo`.
 - `discover_actions(actions_dir=BASE_DIR/"actions", reserved_names=_inline_names, …)` (`main.py:674-678`,
   `core/action_loader.py:159-223`) imports every `actions/*.py` that is not `_`-prefixed, validates its `TOOL` dict and
@@ -99,7 +99,7 @@ Still inside `JarvisLive.__init__`:
 - Registries are published to `core.diagnostics.registries` (`main.py:691-692`) and to the UI as callables:
   `ui.get_plugins`, `ui.get_plugin_settings` (`main.py:693-694`).
 
-### 2.6 Interface wiring in `JarvisLive.__init__`
+### 2.6 Interface wiring in `ZayaLive.__init__`
 
 Owner/UI callbacks assigned before the loop exists (`main.py:585-628`):
 
@@ -125,7 +125,7 @@ state (`:700-705`) including the PTT restore (`:710-714`).
 | Thread | Created at | Owns |
 |---|---|---|
 | Qt main thread | `main.py:2793` (`ui.root.mainloop()`) | All widgets; every widget touch happens here, marshalled by `pyqtSignal` |
-| Agent thread (daemon) | `main.py:2790` | `JarvisLive.__init__` and the asyncio loop created by `asyncio.run` (`main.py:2757`, `:2454-2497`) |
+| Agent thread (daemon) | `main.py:2790` | `ZayaLive.__init__` and the asyncio loop created by `asyncio.run` (`main.py:2757`, `:2454-2497`) |
 | PortAudio input callback | `main.py:1687-1699` | Reads mic blocks; never touches queues directly |
 | PortAudio output (via executor) | `main.py:2122` | `stream.write` is off-loaded with `asyncio.to_thread` |
 | asyncio default executor | implicit | Vision capture (`:1328`, `:1334`), `system_status` (`:1355`), action/plugin handlers (`:1394`, `:1407`), conversation DB writes (`:915`), playback writes (`:2122`) |
@@ -143,7 +143,7 @@ state (`:700-705`) including the PTT restore (`:710-714`).
 
 Cross-thread rules in practice:
 
-- **Qt is never touched from a non-Qt thread directly.** `JarvisUI` is a thin façade over `MainWindow`, and every method
+- **Qt is never touched from a non-Qt thread directly.** `ZayaUI` is a thin façade over `MainWindow`, and every method
   with a non-Qt caller emits a signal instead: `set_state`→`_state_sig`, `write_log`→`_log_sig`,
   `show_content`→`_content_sig`, `show_confirm`→`_confirm_sig` (`ui.py:5936-5939`), `show_camera_frame`→`_camera_sig`, video
   and quiz/review equivalents (`ui.py:2963-2986`, connected at `:3251-3277`). `set_audio_level` and `push_visemes` store
@@ -242,10 +242,10 @@ process when enabled and awake (`:2593-2595`, §6.6).
 
 Shutdown paths:
 
-- **Close Zaya / `aboutToQuit`** → `JarvisLive.shutdown()` cancels `_run_task` via the loop (`main.py:928-938`);
+- **Close Zaya / `aboutToQuit`** → `ZayaLive.shutdown()` cancels `_run_task` via the loop (`main.py:928-938`);
   `asyncio.CancelledError` is re-raised out of the retry loop (`:2597-2598`), so `asyncio.run` tears down and the agent
   thread ends.
-- **`shutdown_jarvis` tool** → saves the session summary, asks the model for a one-line goodbye, waits 1.5 s, then
+- **`shutdown_zaya` tool** → saves the session summary, asks the model for a one-line goodbye, waits 1.5 s, then
   `os._exit(0)` (`main.py:1371-1386`). This deliberately skips `finally` blocks.
 - **Per-iteration cleanup**: `finally` clears `self.session` and the loop sleeps the backoff (`:2735-2748`). Local turns are
   already archived; no bulk session summary is sent on every reconnect (`:2737-2738`).
@@ -282,7 +282,7 @@ Shutdown paths:
    - Inline branches: `save_memory` (returns immediately with `silent: True`, `:1280-1292`); `recall_memory` (file search,
      no thread hop, `:1298-1303`); `undo` (`:1305-1312`); `screen_process` (4 s cooldown + busy guard, capture on the
      executor, stores `_pending_vision`, returns a "[VISION_ACTIVE] …do not answer yet" string, `:1314-1348`);
-     `close_camera` (`:1350-1352`); `system_status` (`:1354-1356`); `manage_monitor` (`:1358-1369`); `shutdown_jarvis`
+     `close_camera` (`:1350-1352`); `system_status` (`:1354-1356`); `manage_monitor` (`:1358-1369`); `shutdown_zaya`
      (`:1371-1386`).
    - Action registry: `asyncio.to_thread(self._action_registry.run, name, args, ctx)` with `ctx = {"player": ui, "speak":
      self.speak, "response": None, "session_memory": None}` (`:1388-1394`); `web_search` results are mirrored to the content
@@ -407,7 +407,7 @@ delivered when that succeeded.
 
 ### 7.2 Desktop mode — `configure_desktop_interface` (`ui.py:3300-3360`)
 
-Called unconditionally from `JarvisUI.__init__`. The legacy central widget (containing header, HUD, panels) is taken off the
+Called unconditionally from `ZayaUI.__init__`. The legacy central widget (containing header, HUD, panels) is taken off the
 window and hidden (`:3304-3307`); the window becomes "Zaya — Settings & Controls". It then:
 
 - re-uses the two drawers as the main settings UI (`:3317-3322`), adds mute / stop-speaking / conversation-history /
@@ -456,9 +456,9 @@ inherit `_HudOverlay` (`:1965-1984`) which repaints the region it covered on hid
 timer, `:57-60`). Wiring:
 
 - `_applied_state_sig` → `bar.state_changed` → `ZayaBar.set_state` (`ui.py:5842`, `services/zayabar.py:46`);
-- `bar.reaction_requested` → `_bar_reaction` → `JarvisLive.companion_reaction`, which writes the line into the activity log
+- `bar.reaction_requested` → `_bar_reaction` → `ZayaLive.companion_reaction`, which writes the line into the activity log
   (`main.py:1437-1438`);
-- `bar.reaction_audio_active` → `_bar_audio_activity` → `JarvisLive.companion_audio_activity`, which ducks other sessions
+- `bar.reaction_audio_active` → `_bar_audio_activity` → `ZayaLive.companion_audio_activity`, which ducks other sessions
   under the poke voice and holds a 0.5 s tail (`main.py:1440-1446`);
 - `_win._log_sig` → `bar.observe_log` so the bar sees the same log stream;
 - `aboutToQuit` → `bar.shutdown` (`ui.py:5846`);
@@ -501,7 +501,7 @@ timer, `:57-60`). Wiring:
 | `main.py:108-119` | `_connect_live`, 20 s connect bound |
 | `main.py:350-517` | Inline `TOOL_DECLARATIONS` |
 | `main.py:519-554` | `_ReconnectSignal` + group unwrapping |
-| `main.py:557-720` | `JarvisLive.__init__`: services, UI wiring, discovery, wake/PTT state |
+| `main.py:557-720` | `ZayaLive.__init__`: services, UI wiring, discovery, wake/PTT state |
 | `main.py:1048-1219` | `_build_config` / `_tuning_config` |
 | `main.py:1235-1435` | Tool pipeline: `_execute_tool` → `_execute_tool_impl` |
 | `main.py:1545-1605` | `_send_realtime`: pacing, quiet padding, turn markers |
@@ -513,7 +513,7 @@ timer, `:57-60`). Wiring:
 | `ui.py:406-943` | `HudCanvas` (avatar, waveform, viseme schedule) |
 | `ui.py:2962-3360` | `MainWindow.__init__`; `configure_desktop_interface` |
 | `ui.py:5588-5704` | Overlay placement, confirm banner, clipboard, plugin overlays |
-| `ui.py:5823-6136` | `JarvisUI` façade, companion bar, thread-safe emit points |
+| `ui.py:5823-6136` | `ZayaUI` façade, companion bar, thread-safe emit points |
 | `core/action_loader.py:42-123` | Action behaviour/scheduling, `ActionRegistry` dispatch |
 | `core/plugin_loader.py:51-154` | `PluginRegistry` declarations/run/settings/UI list |
 | `core/operator.py:20-54` | Bounded execution, dedup, audit, bus events |
@@ -528,7 +528,7 @@ timer, `:57-60`). Wiring:
 Each item is grounded in the code as written; none of these are hypotheses about intent.
 
 1. **`interrupt()` is reachable from the Qt thread but mutates loop-owned state.** `ui.on_interrupt` is
-   `JarvisLive.interrupt` (`main.py:625`), called directly by the Esc shortcut and the stop button (`ui.py:5708-5710`,
+   `ZayaLive.interrupt` (`main.py:625`), called directly by the Esc shortcut and the stop button (`ui.py:5708-5710`,
    `:3325-3327`). It drains `audio_in_queue` with `get_nowait()` and clears `_turn_done_event` (`main.py:1013-1029`) —
    asyncio primitives touched from outside their loop. The mic path documents the opposite rule and routes through
    `call_soon_threadsafe` (`main.py:1609-1612`); the interrupt path does not.
@@ -546,14 +546,14 @@ Each item is grounded in the code as written; none of these are hypotheses about
    `scope:name:args-hash` with cached successes returned without re-execution (`main.py:1245-1252`,
    `core/operator.py:22-24`, `:45-46`), an identical side-effecting call from the phone within the same scope can be
    answered from cache instead of performed.
-5. **The HUD is constructed, animated and fed while hidden.** `JarvisUI` always enters desktop mode (`ui.py:5828`), which
+5. **The HUD is constructed, animated and fed while hidden.** `ZayaUI` always enters desktop mode (`ui.py:5828`), which
    hides the legacy surface that contains the HUD (`ui.py:3304-3307`), yet `HudCanvas` starts a 16 ms timer at construction
    (`ui.py:468-470`) and the playback loop keeps pushing viseme schedules and levels into it (`main.py:2107`, `:1676`).
    Per-frame work and audio-derived scheduling are spent on a widget that is not on screen in the default configuration.
 6. **Connect-timeout cleanup depends on the SDK.** In `_connect_live`, the `__aexit__` guard is entered only after
    `asyncio.wait_for` returns (`main.py:112-119`); a timeout raises before the `try`, so any half-opened transport is left
    to the SDK's own cancellation handling.
-7. **`shutdown_jarvis` uses `os._exit(0)`.** After saving the summary and asking for a goodbye (`main.py:1371-1386`), the
+7. **`shutdown_zaya` uses `os._exit(0)`.** After saving the summary and asking for a goodbye (`main.py:1371-1386`), the
    process exits immediately: TaskGroup `finally` blocks, the AudioDucker close, the dashboard shutdown and the
    conversation-store connection are all skipped. Close Zaya instead cancels the run task and unwinds normally
    (`main.py:928-938`, `ui.py:3338-3340`).
@@ -576,7 +576,7 @@ Each item is grounded in the code as written; none of these are hypotheses about
 12. **A single malformed server message ends the session.** `_receive_messages` prints, re-raises and lets the TaskGroup
     fail (`main.py:1985-1988`), so any unexpected shape in the stream costs a full reconnect rather than one skipped
     message.
-13. **`JarvisUI.glance` can never work.** It calls `self._avatar` (`ui.py:5994-6000`), which `JarvisUI.__init__` never
+13. **`ZayaUI.glance` can never work.** It calls `self._avatar` (`ui.py:5994-6000`), which `ZayaUI.__init__` never
     assigns (`ui.py:5824-5852`); the `AttributeError` is swallowed by the broad `except`. The working path is on the HUD
     itself (`self.hud.glance`, `ui.py:472-478`, used at `:4681`).
 14. **`ConversationStore.restore_content()` is production dead code.** It is defined at `conversation_store.py:114-124` and

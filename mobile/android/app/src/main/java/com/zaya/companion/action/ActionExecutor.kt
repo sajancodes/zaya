@@ -1422,7 +1422,7 @@ class ActionExecutor(
         }
     }
 
-    // ── Expanded PC & OpenJarvis Handlers ───────────────────────────────────
+    // ── Expanded PC & Zaya Handlers ───────────────────────────────────
 
     private fun executeEvaluateMath(action: AndroidAction.EvaluateMath): ActionResult {
         val res = systemUtils.evaluateMath(action.expression)

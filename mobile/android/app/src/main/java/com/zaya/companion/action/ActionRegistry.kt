@@ -493,8 +493,8 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // ── Expanded PC & OpenJarvis Functions ──────────────────────────────
-        // 13. Evaluate Math (PC terminal_exec & OpenJarvis Math Tool)
+        // ── Expanded PC & Zaya Functions ──────────────────────────────
+        // 13. Evaluate Math (PC terminal_exec & Zaya Math Tool)
         list.add(
             ActionCapability(
                 actionId = "evaluate_math",
@@ -508,7 +508,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 14. Device Diagnostics (PC system_monitor & OpenJarvis Hardware)
+        // 14. Device Diagnostics (PC system_monitor & Zaya Hardware)
         list.add(
             ActionCapability(
                 actionId = "get_device_diagnostics",
@@ -522,7 +522,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 15. Web Search (PC web_search & OpenJarvis Web Search)
+        // 15. Web Search (PC web_search & Zaya Web Search)
         list.add(
             ActionCapability(
                 actionId = "web_search",
@@ -536,7 +536,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 16. Weather Report (PC weather_report & OpenJarvis Weather)
+        // 16. Weather Report (PC weather_report & Zaya Weather)
         list.add(
             ActionCapability(
                 actionId = "get_weather",
@@ -550,7 +550,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 17. Daily Briefing (PC doc_generator & OpenJarvis Morning Briefing)
+        // 17. Daily Briefing (PC doc_generator & Zaya Morning Briefing)
         list.add(
             ActionCapability(
                 actionId = "get_daily_briefing",
@@ -564,7 +564,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 18. Set Timer (PC reminder & OpenJarvis Scheduled Monitors)
+        // 18. Set Timer (PC reminder & Zaya Scheduled Monitors)
         list.add(
             ActionCapability(
                 actionId = "set_timer",
@@ -578,7 +578,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 19. Set Alarm (PC reminder & OpenJarvis Alarms)
+        // 19. Set Alarm (PC reminder & Zaya Alarms)
         list.add(
             ActionCapability(
                 actionId = "set_alarm",
@@ -592,7 +592,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 20. Clipboard Operations (PC computer_control & OpenJarvis Clipboard)
+        // 20. Clipboard Operations (PC computer_control & Zaya Clipboard)
         list.add(
             ActionCapability(
                 actionId = "get_clipboard",
@@ -618,7 +618,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 21. WhatsApp Direct Messaging (PC whatsapp & OpenJarvis Messaging)
+        // 21. WhatsApp Direct Messaging (PC whatsapp & Zaya Messaging)
         list.add(
             ActionCapability(
                 actionId = "send_whatsapp_message",
@@ -632,7 +632,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 22. Inspect Storage (PC file_controller & OpenJarvis File I/O)
+        // 22. Inspect Storage (PC file_controller & Zaya File I/O)
         list.add(
             ActionCapability(
                 actionId = "inspect_storage",
@@ -686,7 +686,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 25. OpenJarvis FX Macro Currency Converter
+        // 25. Zaya FX Macro Currency Converter
         list.add(
             ActionCapability(
                 actionId = "convert_currency",
@@ -700,7 +700,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 26. OpenJarvis File Reader
+        // 26. Zaya File Reader
         list.add(
             ActionCapability(
                 actionId = "read_file",
@@ -714,7 +714,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 27. OpenJarvis File Writer
+        // 27. Zaya File Writer
         list.add(
             ActionCapability(
                 actionId = "write_file",
@@ -728,7 +728,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 28. OpenJarvis Think Scratchpad
+        // 28. Zaya Think Scratchpad
         list.add(
             ActionCapability(
                 actionId = "think",
@@ -742,7 +742,7 @@ class ActionRegistry(private val context: Context) {
             )
         )
 
-        // 29. OpenJarvis Knowledge Tools
+        // 29. Zaya Knowledge Tools
         list.add(
             ActionCapability(
                 actionId = "lookup_knowledge",

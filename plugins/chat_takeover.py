@@ -1,7 +1,7 @@
 """
-JARVIS plugin — Chat Takeover (Live-session screen vision + auto-reply).
+Zaya plugin — Chat Takeover (Live-session screen vision + auto-reply).
 
-"JARVIS, take over this conversation" — JARVIS watches the chat that is
+"Zaya, take over this conversation" — Zaya watches the chat that is
 open on the screen and, whenever the other person sends a new message,
 reads it straight from a screenshot (no clicking, no selecting, no
 copying), writes a reply in the user's own texting style and sends it
@@ -510,7 +510,7 @@ def _takeover_loop(user_instruction: str, duration_s: float, player,
     try:
         # the focus guard learns its window at the FIRST paste (that's when
         # the user is certainly on the chat) — never at start, where they may
-        # still be talking to JARVIS with the chat not even open yet
+        # still be talking to Zaya with the chat not even open yet
         focus_id = None
 
         system = _LIVE_SYSTEM
@@ -705,7 +705,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         with _state_lock:
             if _running():
                 # the main model sometimes issues a duplicate start call for
-                # the same spoken request — keep JARVIS from announcing twice
+                # the same spoken request — keep Zaya from announcing twice
                 if time.time() - _state.get("started_at", 0) < _START_DEBOUNCE:
                     return ("(Duplicate start call ignored — the takeover is "
                             "already active and was already announced. Do "

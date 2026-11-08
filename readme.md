@@ -478,7 +478,7 @@ tools/                   Setup helpers, poke-voice generation and code analysis
 docs/                    Character, implementation and validation documentation
 ```
 
-Internal names such as `JarvisLive`, `JarvisUI`, legacy profile folders, and
+Internal names such as `ZayaLive`, `ZayaUI`, legacy profile folders, and
 startup keys remain where changing them would break compatibility. The visible
 assistant identity is Zaya, created by Sajan Rai.
 

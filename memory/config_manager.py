@@ -118,7 +118,7 @@ def is_configured() -> bool:
 
 
 def get_assistant_name() -> str:
-    """Return the configured assistant name, or 'JARVIS' if not set."""
+    """Return the configured assistant name, or 'Zaya' if not set."""
     return "Zaya"
 
 
@@ -154,7 +154,7 @@ def save_voice(voice_name: str) -> None:
 
 
 def get_wake_word_enabled() -> bool:
-    """Whether local wake-word gating is on (assistant sleeps until 'Hey Jarvis')."""
+    """Whether local wake-word gating is on (assistant sleeps until 'Hey Zaya')."""
     return load_api_keys().get("wake_word_enabled", False)
 
 

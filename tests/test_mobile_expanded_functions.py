@@ -1,5 +1,5 @@
 """
-Unit tests for expanded PC functions and OpenJarvis capabilities on Mobile.
+Unit tests for expanded PC functions and Zaya capabilities on Mobile.
 Verifies action models, parameter verification, safety gates, deduplication,
 protocol envelopes, and math/diagnostics/briefing logic.
 """
@@ -207,7 +207,7 @@ class TestMobileExpandedFunctions(unittest.TestCase):
         self.assertIn("2 active tasks", briefing)
         self.assertIn("3 unread notifications", briefing)
 
-    def test_openjarvis_fx_currency_conversion(self):
+    def test_zaya_fx_currency_conversion(self):
         usd_rates = {
             "USD": 1.0,
             "EUR": 0.92,
@@ -226,7 +226,7 @@ class TestMobileExpandedFunctions(unittest.TestCase):
         supported = set(usd_rates.keys())
         self.assertNotIn("XYZ", supported)
 
-    def test_openjarvis_file_path_safety(self):
+    def test_zaya_file_path_safety(self):
         # Path traversal sequences like ".." must be stripped
         unsafe_paths = ["../../secret.txt", "notes/../../../etc/passwd", "safe_file.txt"]
         sanitized = [p.replace("..", "").lstrip("/\\") for p in unsafe_paths]
@@ -234,7 +234,7 @@ class TestMobileExpandedFunctions(unittest.TestCase):
             self.assertNotIn("..", s)
         self.assertEqual(sanitized[2], "safe_file.txt")
 
-    def test_openjarvis_write_file_confirmation_gate(self):
+    def test_zaya_write_file_confirmation_gate(self):
         # File writing is consequential and requires explicit user confirmation
         action = {
             "action_id": "write_file",
@@ -246,7 +246,7 @@ class TestMobileExpandedFunctions(unittest.TestCase):
         self.assertTrue(action["requires_confirmation"])
         self.assertEqual(action["risk"], "MEDIUM")
 
-    def test_openjarvis_think_scratchpad(self):
+    def test_zaya_think_scratchpad(self):
         # Think action returns internal scratchpad thought without vocalization
         thought = "Formulating multi-step execution plan for user request"
         res = {"success": True, "thought": thought, "silent": True}
@@ -254,7 +254,7 @@ class TestMobileExpandedFunctions(unittest.TestCase):
         self.assertTrue(res["silent"])
         self.assertEqual(res["thought"], thought)
 
-    def test_openjarvis_knowledge_lookup(self):
+    def test_zaya_knowledge_lookup(self):
         topic = "quantum computing"
         res = {
             "topic": topic,

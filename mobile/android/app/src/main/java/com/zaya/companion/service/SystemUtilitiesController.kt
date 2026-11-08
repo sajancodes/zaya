@@ -62,7 +62,7 @@ data class WebSearchResult(
 
 /**
  * Comprehensive system utilities controller bridging PC functions (from Zaya core)
- * and OpenJarvis primitives (calculator, weather, device diagnostics, clipboard,
+ * and Zaya primitives (calculator, weather, device diagnostics, clipboard,
  * alarms/timers, WhatsApp messaging, storage inspector, and daily briefing)
  * directly into the native Android companion.
  */
@@ -89,7 +89,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 1. Math Evaluation (PC terminal_exec & OpenJarvis Math Tool)
+    // 1. Math Evaluation (PC terminal_exec & Zaya Math Tool)
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
@@ -235,7 +235,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 2. Device Diagnostics & System Monitor (PC system_monitor & OpenJarvis)
+    // 2. Device Diagnostics & System Monitor (PC system_monitor & Zaya)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun getDeviceDiagnostics(): Map<String, Any?> {
@@ -301,7 +301,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 3. Web Search & Retrieval (PC web_search & OpenJarvis Search)
+    // 3. Web Search & Retrieval (PC web_search & Zaya Search)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun searchWeb(query: String, openInBrowser: Boolean = false): WebSearchResult {
@@ -331,7 +331,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 4. Weather Report (PC weather_report & OpenJarvis Weather)
+    // 4. Weather Report (PC weather_report & Zaya Weather)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun getWeather(requestedLocation: String? = null): WeatherResult {
@@ -380,7 +380,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 5. Daily Briefing / Morning Digest (PC doc_generator & OpenJarvis Digest)
+    // 5. Daily Briefing / Morning Digest (PC doc_generator & Zaya Digest)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun getDailyBriefing(activeTaskCount: Int = 0, unreadNotificationCount: Int = 0): Map<String, Any?> {
@@ -426,7 +426,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 6. Alarms & Timers (PC reminder & OpenJarvis Scheduled Monitors)
+    // 6. Alarms & Timers (PC reminder & Zaya Scheduled Monitors)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun setTimer(seconds: Int, label: String = "Timer"): Boolean {
@@ -465,7 +465,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 7. Clipboard Controller (PC computer_control & OpenJarvis Clipboard)
+    // 7. Clipboard Controller (PC computer_control & Zaya Clipboard)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun getClipboardText(): String? {
@@ -485,7 +485,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 8. Direct WhatsApp Messaging (PC whatsapp action & OpenJarvis Messaging)
+    // 8. Direct WhatsApp Messaging (PC whatsapp action & Zaya Messaging)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun sendWhatsAppMessage(recipient: String, message: String): Boolean {
@@ -520,7 +520,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 9. Storage & File Inspector (PC file_controller & OpenJarvis File I/O)
+    // 9. Storage & File Inspector (PC file_controller & Zaya File I/O)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun inspectStorage(requestedPath: String? = null): Map<String, Any?> {
@@ -598,7 +598,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 11. FX & Macroeconomic Currency Converter (OpenJarvis fx_macro.py)
+    // 11. FX & Macroeconomic Currency Converter (Zaya fx_macro.py)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun convertCurrency(amount: Double, fromCurrency: String, toCurrency: String): Map<String, Any?> {
@@ -648,7 +648,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 12. File Read & Write Utilities (OpenJarvis file_read.py & file_write.py)
+    // 12. File Read & Write Utilities (Zaya file_read.py & file_write.py)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun readFile(relativePathOrName: String, maxLines: Int = 100): Map<String, Any?> {
@@ -699,7 +699,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 13. Reasoning Scratchpad (OpenJarvis think.py)
+    // 13. Reasoning Scratchpad (Zaya think.py)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun think(thought: String): Map<String, Any?> {
@@ -713,7 +713,7 @@ class SystemUtilitiesController(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 14. Knowledge Entity Lookup (OpenJarvis knowledge_tools.py)
+    // 14. Knowledge Entity Lookup (Zaya knowledge_tools.py)
     // ──────────────────────────────────────────────────────────────────────────
 
     fun lookupKnowledge(topic: String): Map<String, Any?> {

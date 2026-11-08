@@ -34,7 +34,7 @@ DOCS_ARTICLES: Dict[str, Dict[str, str]] = {
   </li>
   <li><b>Configure Audio</b>: Allow microphone access and select your preferred Live voice (Nika, Puck, Charon, Kore, Fenrir, or Aoede).</li>
   <li><b>Optional Optical Controls</b>: If you have a webcam, you can enable the Vision Control Center and hand gesture tracking from settings. (Camera remains completely OFF at normal startup).</li>
-  <li><b>Start Interacting</b>: Say "Hey Jarvis" or hold your push-to-talk key and ask Zaya a question, request desktop assistance, or generate a 3D schematic!</li>
+  <li><b>Start Interacting</b>: Say "Hey Zaya" or hold your push-to-talk key and ask Zaya a question, request desktop assistance, or generate a 3D schematic!</li>
 </ol>
 """
     },
@@ -209,7 +209,7 @@ Mutable User Data:
 <ul>
   <li><b>Continuous Listening</b>: Zaya listens while the session is active and responds to natural speech.</li>
   <li><b>Push-to-Talk</b>: Hold your configured hotkey to speak; the microphone is instantly closed when released.</li>
-  <li><b>Wake Word</b>: Sleeps until it hears <i>"Hey Jarvis"</i> or <i>"Zaya"</i>.</li>
+  <li><b>Wake Word</b>: Sleeps until it hears <i>"Hey Zaya"</i> or <i>"Zaya"</i>.</li>
 </ul>
 
 <h2>Available Voices</h2>

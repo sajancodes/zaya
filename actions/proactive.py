@@ -57,7 +57,7 @@ class ProactiveEngine:
             '[CONTEXTUAL_CHECK_IN]\n'
             f'Current local time: {datetime.now().astimezone().isoformat()}\n'
             f'Optional focus: {focus}\n'
-            'Speak as Zaya with a composed Jarvis-like manner. Use sir naturally. '
+            'Speak as Zaya with a composed, attentive manner. Use sir naturally. '
             'One short sentence in the language the owner is using. Vary the wording. '
             'These are quoted past remarks, not evidence that the activity is still happening. '
             'Do not invent memories, feelings, completed work or timed reminders. '

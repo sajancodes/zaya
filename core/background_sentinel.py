@@ -2,7 +2,7 @@
 
 Continuously monitors dev servers, battery/hardware health, and workspace integrity.
 Surfaces proactive vocal and UI alerts before things break, closing the gap
-to 90% Jarvis autonomous situational awareness.
+to 90% Zaya autonomous situational awareness.
 """
 from __future__ import annotations
 

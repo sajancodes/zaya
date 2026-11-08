@@ -1,9 +1,9 @@
 """
-JARVIS plugin — Explain this document.
+Zaya plugin — Explain this document.
 
 A lease, an insurance policy, a phone contract, a loan agreement, terms of
 service, a job offer, a consent form, a government letter. Drop it in, put it on
-screen, or hold it up to the camera, and JARVIS lays out what it actually says
+screen, or hold it up to the camera, and Zaya lays out what it actually says
 and what is worth knowing before signing.
 
 WHY THIS PLUGIN CONTAINS NO LEGAL KNOWLEDGE
@@ -32,7 +32,7 @@ WHY IT IS SHOWN, NOT SPOKEN
 Nobody can hold eight clauses of a contract in their head from audio. The value
 is a page you can re-read, scroll back through and copy from, which is why the
 findings render into the panel below the HUD, ordered by how much they matter.
-JARVIS still says the short version out loud.
+Zaya still says the short version out loud.
 
 FOR EVERYONE: no keys, no setup, no network calls, nothing beyond the standard
 library. Same on Windows, macOS and Linux, in any language and any alphabet.
@@ -186,7 +186,7 @@ def tally(findings: list) -> dict:
 
 
 def _spoken(title: str, findings: list, unclear: list) -> str:
-    """The short version, for JARVIS to say while the page is on screen. Kept
+    """The short version, for Zaya to say while the page is on screen. Kept
     deliberately thin — the detail is readable, and reading it aloud would be
     the one thing this plugin exists to avoid."""
     counts = tally(findings)

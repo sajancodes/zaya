@@ -206,7 +206,7 @@ sealed class AndroidAction(
         val query: String,
     ) : AndroidAction("query_memory", ActionRisk.LOW)
 
-    // ── Expanded PC & OpenJarvis Functions ──────────────────────────────────
+    // ── Expanded PC & Zaya Functions ──────────────────────────────────
     data class EvaluateMath(
         val expression: String,
     ) : AndroidAction("evaluate_math", ActionRisk.LOW)
@@ -268,7 +268,7 @@ sealed class AndroidAction(
         val confirmed: Boolean = false,
     ) : AndroidAction("execute_pc_command", ActionRisk.HIGH, requiresConfirmation = true)
 
-    // OpenJarvis Specialized Tools
+    // Zaya Specialized Tools
     data class ConvertCurrency(
         val amount: Double,
         val from: String,

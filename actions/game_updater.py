@@ -1,5 +1,5 @@
 """
-Steam and Epic control for JARVIS — installing, updating, and reporting.
+Steam and Epic control for Zaya — installing, updating, and reporting.
 
 WHY THIS WAS REWRITTEN
 
@@ -38,7 +38,7 @@ WHY THIS WAS REWRITTEN
 
     Invoke is not a click. The mouse does not move, the window is not raised,
     and the user's foreground app keeps focus — which matters because these
-    calls happen while somebody is talking to JARVIS.
+    calls happen while somebody is talking to Zaya.
 
 WHAT THAT BUYS
 
@@ -2220,13 +2220,13 @@ def _schedule_windows(hour: int, minute: int) -> str:
 def _schedule_mac(hour: int, minute: int) -> str:
     plist_dir = Path.home() / "Library" / "LaunchAgents"
     plist_dir.mkdir(parents=True, exist_ok=True)
-    plist_path = plist_dir / "com.jarvis.gameupdater.plist"
+    plist_path = plist_dir / "com.zaya.gameupdater.plist"
     script_path = Path(__file__).resolve()
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-    <key>Label</key><string>com.jarvis.gameupdater</string>
+    <key>Label</key><string>com.zaya.gameupdater</string>
     <key>ProgramArguments</key>
     <array>
         <string>{sys.executable}</string>
@@ -2282,7 +2282,7 @@ def _cancel_scheduled_update() -> str:
                 if result.returncode == 0 else "There was no scheduled update.")
     if is_mac():
         plist_path = (Path.home() / "Library" / "LaunchAgents"
-                      / "com.jarvis.gameupdater.plist")
+                      / "com.zaya.gameupdater.plist")
         if plist_path.exists():
             subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
             plist_path.unlink()
@@ -2335,7 +2335,7 @@ def _schedule_status() -> str:
                 if when else "A game update is scheduled.")
     if is_mac():
         plist_path = (Path.home() / "Library" / "LaunchAgents"
-                      / "com.jarvis.gameupdater.plist")
+                      / "com.zaya.gameupdater.plist")
         return ("A game update is scheduled."
                 if plist_path.exists() else "No game update is scheduled.")
     try:

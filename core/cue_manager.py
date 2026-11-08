@@ -1,6 +1,6 @@
 """Dynamic conversational cue and custom trigger manager.
 
-Enables Jarvis-grade conditional reflexes:
+Enables Zaya-grade conditional reflexes:
 - Arms dynamic triggers from conversational setups (e.g. "when I say anything", "when I hum", "on my mark").
 - Intercepts subsequent user speech, humming, or phrases and executes the bound action instantly.
 - Eliminates cloud LLM hesitation and rigid refusals on conditional tasks.
