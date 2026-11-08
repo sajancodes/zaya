@@ -272,6 +272,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "event_log_errors",
     },
+    "SCHEDULED_TASKS_QUERY": {
+        "phrases": [
+            "scheduled tasks", "check scheduled tasks", "what tasks are scheduled",
+            "task scheduler", "list scheduled tasks", "check task scheduler"
+        ],
+        "dynamic": "scheduled_tasks",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -863,6 +870,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows event logs right now, sir.")
+
+        if intent_data.get("dynamic") == "scheduled_tasks":
+            try:
+                from actions.task_scheduler_sentinel import get_scheduler_summary
+                data = get_scheduler_summary()
+                running_part = f" ({data['running_tasks_count']} running)" if data['running_tasks_count'] else ""
+                ack = f"Task Scheduler has {data['user_and_app_tasks_count']} application tasks registered{running_part} out of {data['total_tasks_registered']} total, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect scheduled tasks right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
