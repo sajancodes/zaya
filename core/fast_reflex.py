@@ -159,6 +159,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "repo_status",
     },
+    "BLUETOOTH_STATUS_QUERY": {
+        "phrases": [
+            "is bluetooth on", "check bluetooth", "bluetooth status",
+            "bluetooth devices", "any bluetooth connected"
+        ],
+        "dynamic": "bluetooth_status",
+    },
     "WINDOW_SNAP_LEFT": {
         "phrases": [
             "snap left", "snap window left", "window left", "snap active window left"
@@ -565,6 +572,19 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect repository status right now, sir.")
+
+        if intent_data.get("dynamic") == "bluetooth_status":
+            try:
+                from actions.bluetooth_sentinel import _get_bluetooth_telemetry
+                data = _get_bluetooth_telemetry()
+                if data["adapter_present"]:
+                    ack = f"Bluetooth is on via {data['adapter_name']}. {data['paired_count']} paired device(s), {data['connected_count']} connected, sir."
+                else:
+                    ack = "Bluetooth is currently off or adapter is disconnected, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Bluetooth status right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
