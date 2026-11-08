@@ -131,6 +131,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "disk_space",
     },
+    "DEV_PORTS_QUERY": {
+        "phrases": [
+            "check dev ports", "are dev ports free", "check open ports",
+            "list listening ports", "listening ports", "check port status"
+        ],
+        "dynamic": "dev_ports",
+    },
     "WINDOW_SNAP_LEFT": {
         "phrases": [
             "snap left", "snap window left", "window left", "snap active window left"
@@ -479,6 +486,22 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect disk storage right now, sir.")
+
+        if intent_data.get("dynamic") == "dev_ports":
+            try:
+                from actions.port_sentinel import _scan_dev_ports
+                dev = _scan_dev_ports()
+                occ = len(dev.get("occupied", []))
+                free = len(dev.get("free", []))
+                if occ > 0:
+                    first = dev["occupied"][0]
+                    ack = f"{occ} dev port(s) active, including {first['port']} ({first['process_name']}). {free} ports free, sir."
+                else:
+                    ack = f"All {free} common dev ports are completely free, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=dev)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect dev ports right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
