@@ -9,6 +9,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Commit tracked changes before publishing.' }
     git diff --cached --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Commit staged changes before publishing.' }
+    if (-not $env:ZAYA_SIGNING_STORE -or -not (Test-Path $env:ZAYA_SIGNING_STORE)) {
+        throw 'ZAYA_SIGNING_STORE must point to a valid keystore file path before publishing a release.'
+    }
     try {
         $latest = Invoke-RestMethod 'https://github.com/sajancodes/zaya-companion-releases/releases/latest/download/update.json'
         $previous = [long]$latest.version_code

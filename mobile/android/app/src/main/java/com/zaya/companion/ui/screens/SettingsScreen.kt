@@ -282,7 +282,6 @@ fun SettingsScreen(runtime: ZayaRuntime, onBack: () -> Unit,
 }
 
 @Composable
-<<<<<<< HEAD
 fun PersonalMemoryCard(runtime: ZayaRuntime) {
     val memories by runtime.memoryStore.memories.collectAsStateWithLifecycle()
     var newKey by remember { mutableStateOf("") }
