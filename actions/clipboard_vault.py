@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import datetime
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -98,33 +99,55 @@ def _read_system_clipboard() -> str:
 
 
 def _write_system_clipboard(text: str) -> bool:
-    """Write text to system clipboard using pyperclip or ctypes fallback."""
+    """Write text to system clipboard using pyperclip or ctypes fallback with strict verification."""
     try:
         pyperclip.copy(text)
         return True
     except Exception:
         pass
 
+    if os.name != "nt":
+        return False
+
     try:
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         CF_UNICODETEXT = 13
         GMEM_MOVEABLE = 0x0002
+
         encoded = text.encode("utf-16-le") + b"\x00\x00"
         h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
-        if h_mem:
-            p_mem = kernel32.GlobalLock(h_mem)
-            ctypes.memmove(p_mem, encoded, len(encoded))
-            kernel32.GlobalUnlock(h_mem)
+        if not h_mem:
+            return False
+
+        p_mem = kernel32.GlobalLock(h_mem)
+        if not p_mem:
+            kernel32.GlobalFree(h_mem)
+            return False
+
+        ctypes.memmove(p_mem, encoded, len(encoded))
+        kernel32.GlobalUnlock(h_mem)
+
+        ownership_transferred = False
+        try:
             for _ in range(5):
                 if user32.OpenClipboard(None):
-                    user32.EmptyClipboard()
-                    user32.SetClipboardData(CF_UNICODETEXT, h_mem)
-                    user32.CloseClipboard()
-                    return True
+                    try:
+                        user32.EmptyClipboard()
+                        res = user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+                        if res:
+                            ownership_transferred = True
+                            return True
+                    finally:
+                        user32.CloseClipboard()
                 time.sleep(0.015)
+        finally:
+            if not ownership_transferred:
+                kernel32.GlobalFree(h_mem)
+
     except Exception:
         pass
+
     return False
 
 
