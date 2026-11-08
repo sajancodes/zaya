@@ -329,6 +329,25 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "local_ip",
     },
+    "MIC_STATUS_QUERY": {
+        "phrases": [
+            "is my mic muted", "check microphone", "mic status", "microphone status",
+            "microphone volume", "is microphone muted", "check mic", "mic volume"
+        ],
+        "dynamic": "mic_status",
+    },
+    "MIC_MUTE": {
+        "phrases": [
+            "mute my mic", "mute microphone", "mute mic", "mute the mic"
+        ],
+        "dynamic": "mic_mute",
+    },
+    "MIC_UNMUTE": {
+        "phrases": [
+            "unmute my mic", "unmute microphone", "unmute mic", "unmute the mic"
+        ],
+        "dynamic": "mic_unmute",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1007,6 +1026,37 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect network adapter IP right now, sir.")
+
+        if intent_data.get("dynamic") == "mic_status":
+            try:
+                from actions.mic_sentinel import get_microphone_status
+                data = get_microphone_status()
+                mute_str = "MUTED" if data["muted"] else "UNMUTED"
+                ack = f"Microphone is {mute_str} ({data['device']} at {data['volume_percent']}% volume), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect microphone status right now, sir.")
+
+        if intent_data.get("dynamic") == "mic_mute":
+            try:
+                from actions.mic_sentinel import set_microphone_mute
+                data = set_microphone_mute(True)
+                ack = "Microphone muted, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to mute microphone right now, sir.")
+
+        if intent_data.get("dynamic") == "mic_unmute":
+            try:
+                from actions.mic_sentinel import set_microphone_mute
+                data = set_microphone_mute(False)
+                ack = "Microphone unmuted, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to unmute microphone right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
