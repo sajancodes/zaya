@@ -240,6 +240,31 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "installed_software",
     },
+    "WHISPER_MODE_CMD": {
+        "phrases": [
+            "whisper mode", "night mode", "turn on whisper mode",
+            "quiet audio mode", "activate whisper mode"
+        ],
+        "tool": "ear_safety",
+        "args": {"action": "whisper"},
+        "ack": "Whisper Mode activated. Master volume set to 15% with DND engaged, sir.",
+    },
+    "NORMAL_AUDIO_MODE_CMD": {
+        "phrases": [
+            "normal audio mode", "daytime audio mode", "restore audio mode",
+            "turn off whisper mode"
+        ],
+        "tool": "ear_safety",
+        "args": {"action": "normal"},
+        "ack": "Normal audio mode restored at 50% volume, sir.",
+    },
+    "EAR_SAFETY_STATUS_QUERY": {
+        "phrases": [
+            "ear safety status", "check volume limit", "volume ceiling",
+            "what is my volume limit", "ear safety"
+        ],
+        "dynamic": "ear_safety_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -809,6 +834,17 @@ class FastReflexRouter:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect installed software right now, sir.")
 
+        if intent_data.get("dynamic") == "ear_safety_status":
+            try:
+                from actions.ear_safety import _load_safety_config, _get_master_volume
+                cfg = _load_safety_config()
+                vol = _get_master_volume()
+                ack = f"Ear safety ceiling is set to {cfg['max_volume_percent']}% (Current volume: {vol}%), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=cfg)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect ear safety status right now, sir.")
+
         # Media key dispatch
         media_key = intent_data.get("media_key")
         if media_key:
@@ -896,6 +932,22 @@ class FastReflexRouter:
             try:
                 from actions.focus_mode import focus_mode
                 res = focus_mode(args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "ear_safety":
+            args = intent_data.get("args", {})
+            try:
+                from actions.ear_safety import ear_safety
+                res = ear_safety(args)
             except Exception as e:
                 res = str(e)
             return FastReflexResult(
