@@ -99,11 +99,14 @@ class ActionRegistry:
     def names(self) -> set[str]:
         return set(self._actions.keys())
 
-    def register_action(self, rec: ActionRecord) -> bool:
+    def register_action(self, rec: ActionRecord, allow_replace: bool = False) -> bool:
         if not rec.valid:
             return False
         if rec.name in self._builtin_names:
             self._logger(f"Refusing to overwrite built-in action '{rec.name}'.")
+            return False
+        if not allow_replace and rec.name in self._actions:
+            self._logger(f"Refusing duplicate registration for existing action '{rec.name}'.")
             return False
         self._actions[rec.name] = rec
         self._all_records.append(rec)
@@ -115,23 +118,39 @@ class ActionRegistry:
             return False
         rec = self._actions.pop(name, None)
         if rec:
-            module_name = f"actions.{Path(rec.file).stem}"
-            sys.modules.pop(module_name, None)
+            module_stem = Path(rec.file).stem
+            still_used = any(Path(other.file).stem == module_stem for other in self._actions.values())
+            if not still_used:
+                module_name = f"actions.{module_stem}"
+                sys.modules.pop(module_name, None)
             return True
         return False
 
-    def load_action_file(self, path: Path, reserved_names: set[str] | None = None) -> list[ActionRecord]:
+    def load_action_file(
+        self,
+        path: Path,
+        reserved_names: set[str] | None = None,
+        allow_replace: bool = False,
+    ) -> list[ActionRecord]:
         path = Path(path)
         module_name = f"actions.{path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not build import spec for {path}")
+
+        # Preserve previous state for potential rollback
+        old_module = sys.modules.get(module_name)
+        old_actions = {name: rec for name, rec in self._actions.items() if Path(rec.file).stem == path.stem}
+
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         try:
             spec.loader.exec_module(module)
         except Exception:
-            sys.modules.pop(module_name, None)
+            if old_module is not None:
+                sys.modules[module_name] = old_module
+            else:
+                sys.modules.pop(module_name, None)
             raise
 
         module_tools = []
@@ -146,9 +165,12 @@ class ActionRegistry:
         reserved = set(reserved_names or ()) | self._builtin_names
         for t_dict in module_tools:
             rec = _validate(t_dict, path.name)
-            if rec.valid and rec.name in reserved:
+            if rec.valid and (rec.name in reserved or rec.name in self._builtin_names):
                 rec = ActionRecord(name=rec.name, file=path.name,
                                    error=f"Name '{rec.name}' collides with an immutable core tool or reserved name — rejected.")
+            elif rec.valid and not allow_replace and rec.name in self._actions:
+                rec = ActionRecord(name=rec.name, file=path.name,
+                                   error=f"Duplicate registration: action '{rec.name}' is already registered — rejected.")
             self._all_records.append(rec)
             if rec.valid:
                 self._actions[rec.name] = rec
@@ -156,6 +178,13 @@ class ActionRegistry:
                 self._logger(f"Action hot-loaded: {rec.name} ({path.name})")
             else:
                 self._logger(f"Action rejected: {path.name} — {rec.error}")
+
+        if not loaded and old_actions:
+            for name, o_rec in old_actions.items():
+                self._actions[name] = o_rec
+            if old_module is not None:
+                sys.modules[module_name] = old_module
+
         return loaded
 
     # -- called by main.py from _execute_tool --

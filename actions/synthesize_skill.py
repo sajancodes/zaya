@@ -33,12 +33,13 @@ def synthesize_skill(parameters: dict, **_kwargs) -> ToolResult:
         status = res.get("status", "failed")
         return ToolResult(status, res.get("message", "Remove completed."), data=res, side_effect=True)
 
-    # action == "create" / "synthesize"
+    # action == "create" / "update" / "synthesize"
     name = str(parameters.get("name") or "").strip()
     description = str(parameters.get("description") or f"Custom synthesized tool for {name}").strip()
     params = parameters.get("parameters") or {"type": "OBJECT", "properties": {}}
     code = str(parameters.get("python_code") or "").strip()
     test_params = parameters.get("test_parameters")
+    replace = bool(parameters.get("replace") or parameters.get("allow_overwrite") or action in ("update", "replace"))
 
     if not name:
         return ToolResult("failed", "Parameter 'name' is required for skill synthesis.")
@@ -51,6 +52,7 @@ def synthesize_skill(parameters: dict, **_kwargs) -> ToolResult:
         parameters=params,
         python_code=code,
         test_parameters=test_params,
+        replace=replace,
     )
 
     if res.get("status") == "success":
@@ -66,8 +68,8 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["create", "list", "remove"],
-                "description": "Action to perform: 'create' to synthesize a new tool, 'list' to show active custom tools, 'remove' to delete one."
+                "enum": ["create", "update", "list", "remove"],
+                "description": "Action to perform: 'create' to synthesize a new tool, 'update' to replace an existing tool, 'list' to show active custom tools, 'remove' to delete one."
             },
             "name": {
                 "type": "STRING",

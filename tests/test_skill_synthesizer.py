@@ -123,3 +123,99 @@ def test_synthesizer_collision_and_schema_validation(tmp_path):
     # 4. Built-in unregister protection
     assert registry.unregister_action("terminal_exec") is False
 
+
+def test_custom_skill_duplicate_collision_and_safe_replacement(tmp_path):
+    from core.action_loader import discover_actions, get_action_registry
+    synth = SkillSynthesizer(actions_dir=tmp_path)
+
+    v1_code = """
+def custom_worker(parameters: dict, **_kwargs) -> ToolResult:
+    return ToolResult("success", "v1 output", data={"version": 1})
+"""
+    v2_code = """
+def custom_worker(parameters: dict, **_kwargs) -> ToolResult:
+    return ToolResult("success", "v2 output", data={"version": 2})
+"""
+    broken_code = """
+def custom_worker(parameters: dict, **_kwargs) -> ToolResult:
+    raise RuntimeError("Intentional broken replacement")
+"""
+    params = {"type": "OBJECT", "properties": {}}
+
+    with patch("core.execution_policy.require_owner"):
+        # 1. Register new custom tool v1
+        res1 = synth.synthesize(
+            name="worker",
+            description="Worker v1",
+            parameters=params,
+            python_code=v1_code,
+            test_parameters={},
+        )
+        assert res1["status"] == "success"
+        assert res1["name"] == "custom_worker"
+        assert "v1 output" in str(res1["test_result"])
+
+        # 2. Attempt duplicate registration without replace=True -> Must fail
+        res_dup = synth.synthesize(
+            name="worker",
+            description="Worker v2 duplicate attempt",
+            parameters=params,
+            python_code=v2_code,
+            replace=False,
+        )
+        assert res_dup["status"] == "failed"
+        assert "Collision" in res_dup["error"]
+        assert "replace=True" in res_dup["error"]
+
+        # Ensure v1 is still active
+        reg = get_action_registry(tmp_path)
+        out_v1 = reg.run("custom_worker", {})
+        assert "v1 output" in str(out_v1)
+
+        # 3. Failed replacement with broken code -> Must rollback to v1!
+        res_bad_rep = synth.synthesize(
+            name="worker",
+            description="Worker broken replacement",
+            parameters=params,
+            python_code=broken_code,
+            test_parameters={},
+            replace=True,
+        )
+        assert res_bad_rep["status"] == "failed"
+
+        # Verify rollback preserved v1
+        out_v1_post_rollback = reg.run("custom_worker", {})
+        assert "v1 output" in str(out_v1_post_rollback)
+
+        # 4. Explicit replacement with working v2 -> Succeeds
+        res2 = synth.synthesize(
+            name="worker",
+            description="Worker v2",
+            parameters=params,
+            python_code=v2_code,
+            test_parameters={},
+            replace=True,
+        )
+        assert res2["status"] == "success"
+        out_v2 = reg.run("custom_worker", {})
+        assert "v2 output" in str(out_v2)
+
+        # 5. Rediscovery across restart (discover_actions)
+        new_reg = discover_actions(tmp_path, logger=lambda _: None)
+        assert new_reg.has("custom_worker")
+        out_reloaded = new_reg.run("custom_worker", {})
+        assert "v2 output" in str(out_reloaded)
+
+        # 6. Module preservation when another skill shares or unregister happens
+        reg.register_action(reg._actions["custom_worker"], allow_replace=True)
+        # Attempting unregister on built-in fails
+        reg._builtin_names.add("custom_worker_fake_core")
+        assert reg.unregister_action("custom_worker_fake_core") is False
+
+        # 7. Clean removal
+        rem = synth.remove_skill("worker")
+        assert rem["status"] == "success"
+        assert rem["deleted"] is True
+        assert not reg.has("custom_worker")
+
+

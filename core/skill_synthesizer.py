@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -109,8 +110,12 @@ TOOL = {{
         parameters: Dict[str, Any],
         python_code: str,
         test_parameters: Optional[Dict[str, Any]] = None,
+        replace: bool = False,
+        allow_overwrite: bool = False,
     ) -> Dict[str, Any]:
         """Synthesizes, writes, hot-loads, and verifies a custom skill tool."""
+        allow_replace = replace or allow_overwrite
+
         # Parameter schema validation
         if not isinstance(parameters, dict):
             return {
@@ -149,40 +154,77 @@ TOOL = {{
                 "error": f"Collision: Cannot overwrite built-in core action '{clean_name}'. Core tools are immutable.",
             }
 
+        target_file = self.actions_dir / f"{target_name}.py"
+
+        # Check existing dynamically registered tool names or files if replace is False
+        if not allow_replace:
+            if registry.has(target_name) or registry.has(clean_name):
+                return {
+                    "status": "failed",
+                    "error": f"Collision: Custom skill '{target_name}' is already registered. Set replace=True to update.",
+                }
+            if target_file.is_file():
+                return {
+                    "status": "failed",
+                    "error": f"Collision: Skill file '{target_file.name}' already exists. Set replace=True to overwrite.",
+                }
+
         full_code = self.scaffold_tool_code(clean_name, description, parameters, python_code)
 
         valid, reason = self.validate_code_safety(full_code)
         if not valid:
             return {"status": "failed", "error": f"Safety verification failed: {reason}"}
 
-        target_file = self.actions_dir / f"{target_name}.py"
+        # Backup state before modifying file or registry for rollback
+        old_file_content: Optional[str] = None
+        if target_file.is_file():
+            try:
+                old_file_content = target_file.read_text(encoding="utf-8")
+            except Exception:
+                old_file_content = None
+
+        old_rec = registry._actions.get(target_name) or registry._actions.get(clean_name)
+        old_module = sys.modules.get(f"actions.{target_name}")
+
+        def rollback():
+            if old_file_content is not None:
+                try:
+                    target_file.write_text(old_file_content, encoding="utf-8")
+                except Exception:
+                    pass
+            else:
+                try:
+                    target_file.unlink()
+                except Exception:
+                    pass
+
+            if old_rec is not None:
+                registry._actions[old_rec.name] = old_rec
+            else:
+                registry._actions.pop(target_name, None)
+                registry._actions.pop(clean_name, None)
+
+            if old_module is not None:
+                sys.modules[f"actions.{target_name}"] = old_module
+            else:
+                sys.modules.pop(f"actions.{target_name}", None)
+
         try:
             target_file.write_text(full_code, encoding="utf-8")
         except Exception as e:
+            rollback()
             return {"status": "failed", "error": f"Failed to write file {target_file}: {e}"}
 
         # Hot-load into ActionRegistry
         try:
-            loaded_records = registry.load_action_file(target_file)
+            loaded_records = registry.load_action_file(target_file, allow_replace=allow_replace)
         except Exception as e:
-            # Clean up on failed load
-            try:
-                target_file.unlink()
-            except Exception:
-                pass
-            import sys
-            sys.modules.pop(f"actions.{target_name}", None)
+            rollback()
             return {"status": "failed", "error": f"Hot-loading failed: {e}"}
 
         if not loaded_records or not any(r.valid for r in loaded_records):
             err = loaded_records[0].error if loaded_records else "No valid TOOL found in module"
-            try:
-                target_file.unlink()
-            except Exception:
-                pass
-            import sys
-            sys.modules.pop(f"actions.{target_name}", None)
-            return {"status": "failed", "error": f"Action validation failed: {err}"}
+            rollback()
             return {"status": "failed", "error": f"Action validation failed: {err}"}
 
         loaded_name = loaded_records[0].name
@@ -193,8 +235,12 @@ TOOL = {{
             try:
                 raw_out = registry.run(loaded_name, test_parameters)
                 test_result = str(raw_out)
+                if test_result.startswith(f"Tool '{loaded_name}' failed:") or test_result.startswith(f"Action '{loaded_name}' is not available"):
+                    rollback()
+                    return {"status": "failed", "error": f"Test execution failed: {test_result}"}
             except Exception as e:
-                test_result = f"Test execution error: {e}"
+                rollback()
+                return {"status": "failed", "error": f"Test execution failed: {e}"}
 
         # Index in KnowledgeStore
         try:
@@ -248,22 +294,41 @@ TOOL = {{
             target_name = clean_name
 
         registry = get_action_registry(self.actions_dir)
-        registry.unregister_action(target_name)
+        if registry.is_builtin(target_name) or registry.is_builtin(clean_name):
+            return {
+                "status": "failed",
+                "error": f"Cannot remove built-in core action '{name}'.",
+            }
+
+        unreg = registry.unregister_action(target_name)
+        if not unreg and clean_name != target_name:
+            unreg = registry.unregister_action(clean_name)
 
         target_file = self.actions_dir / f"{target_name}.py"
         deleted = False
-        if target_file.is_file():
+        other_uses_file = any(
+            Path(other.file).name == target_file.name
+            for other in registry._actions.values()
+        )
+        if target_file.is_file() and not other_uses_file:
             try:
                 target_file.unlink()
                 deleted = True
             except Exception as e:
                 return {"status": "failed", "error": f"Failed to delete {target_file}: {e}"}
 
+        # Clean from KnowledgeStore
+        try:
+            kstore = KnowledgeStore.get_store()
+            kstore.delete_fact(category="synthesized_skill", key=target_name)
+        except Exception:
+            pass
+
         return {
-            "status": "success" if deleted else "not_found",
+            "status": "success" if (deleted or unreg) else "not_found",
             "name": target_name,
             "deleted": deleted,
-            "message": f"Skill '{target_name}' {'removed' if deleted else 'was not found'}.",
+            "message": f"Skill '{target_name}' {'removed' if (deleted or unreg) else 'was not found'}.",
         }
 
 
