@@ -138,6 +138,20 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "dev_ports",
     },
+    "ACTIVE_AUDIO_DEVICE_QUERY": {
+        "phrases": [
+            "what audio device am i using", "what is my audio output",
+            "current audio device", "list audio devices", "audio output device"
+        ],
+        "dynamic": "audio_device",
+    },
+    "APP_AUDIO_QUERY": {
+        "phrases": [
+            "what apps are playing audio", "what apps are making sound",
+            "active audio apps", "app volume sessions"
+        ],
+        "dynamic": "app_audio",
+    },
     "WINDOW_SNAP_LEFT": {
         "phrases": [
             "snap left", "snap window left", "window left", "snap active window left"
@@ -502,6 +516,30 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect dev ports right now, sir.")
+
+        if intent_data.get("dynamic") == "audio_device":
+            try:
+                from actions.audio_switcher import _get_default_speakers
+                spk = _get_default_speakers()
+                ack = f"Audio is outputting through '{spk['device']}' at {spk['volume_percent']}%, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=spk)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect audio devices right now, sir.")
+
+        if intent_data.get("dynamic") == "app_audio":
+            try:
+                from actions.audio_switcher import _list_app_sessions
+                sessions = _list_app_sessions()
+                if sessions:
+                    apps_str = ", ".join(s["process"] for s in sessions)
+                    ack = f"Found {len(sessions)} active audio app(s): {apps_str}, sir."
+                else:
+                    ack = "No apps are currently producing audio, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=sessions)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect application audio sessions, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

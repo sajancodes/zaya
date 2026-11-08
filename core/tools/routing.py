@@ -76,7 +76,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "time": {"remind", "reminder", "calendar", "schedule", "meeting", "appointment",
              "alarm", "timer"},
     "media": {"music", "song", "play", "pause", "resume", "next", "previous", "volume",
-              "mute", "video", "youtube", "movie", "audio"},
+              "mute", "video", "youtube", "movie", "audio", "speakers", "headphones", "headset", "microphone"},
     "vision": {"see", "look", "screenshot", "screen", "camera", "image", "photo", "ocr",
                "read", "visible", "display", "perception", "vision"},
     "web": {"search", "web", "internet", "news", "weather", "google", "research",
@@ -107,7 +107,7 @@ _FALLBACK = (
 # Extra names that map to an area even when the tool name has no shared token.
 _CATEGORY_TOOLS: dict[str, set[str]] = {
     "app": {"open_app", "computer_control", "exit_app", "window_manager"},
-    "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager"},
+    "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager", "audio_switcher"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel"},
     "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel"},
@@ -118,7 +118,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "notes": {"quick_notes", "clipboard_vault"},
     "clipboard": {"clipboard_vault"},
     "time": {"reminder", "calendar_scheduler"},
-    "media": {"media_controller", "video_player"},
+    "media": {"media_controller", "video_player", "audio_switcher"},
     "vision": {"display_perception", "hand_controls", "screen_peeler"},
     "web": {"web_search", "deep_research", "weather_report", "market_analytics", "map_navigator"},
     "finance": {"market_analytics"},
