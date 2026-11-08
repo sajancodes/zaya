@@ -104,3 +104,42 @@ def test_conflicting_observations_reconciled_by_confidence(tmp_path):
          patch("core.workspace_context.tracker.snapshot", return_value={"project_name": ""}):
         snap = service.snapshot()
         assert snap["active_project"] == "PriorityApp"
+
+def test_coding_job_running_process_detected(tmp_path):
+    from unittest.mock import MagicMock
+    persisted_path = tmp_path / "project_state.json"
+    service = ProjectAwarenessService(persisted_path=persisted_path)
+
+    mock_job = MagicMock()
+    mock_job.project = "/Users/test/CodeProject"
+    mock_job.phase = "working"
+    mock_job.progress = "Editing files"
+    mock_job.updated_at = time.time()
+
+    mock_jobs = MagicMock()
+    mock_jobs.execution_status.return_value = {
+        "process_running": True,
+        "worker_running": True,
+        "pid": 4321,
+    }
+    mock_jobs.active.return_value = mock_job
+
+    with patch("core.coding_jobs.get_jobs", return_value=mock_jobs), \
+         patch("core.workspace_context.tracker.snapshot", return_value={"project_name": ""}):
+        snap = service.snapshot()
+        assert snap["running_process"] is not None
+        assert snap["running_process"]["type"] == "opencode"
+        assert snap["running_process"]["pid"] == 4321
+        assert snap["active_project"] == "CodeProject"
+
+
+def test_clear_active_project(tmp_path):
+    persisted_path = tmp_path / "project_state.json"
+    service = ProjectAwarenessService(persisted_path=persisted_path)
+    service.set_active_project("SomeProject")
+    assert service.active_project() == "SomeProject"
+
+    service.clear_active_project()
+    with patch("core.workspace_context.tracker.snapshot", return_value={"project_name": ""}), \
+         patch("memory.project_index.INDEX_PATH", tmp_path / "empty.json"):
+        assert service.active_project() == ""

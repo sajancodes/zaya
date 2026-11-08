@@ -98,6 +98,15 @@ class ProjectAwarenessService:
                 self._last_known_project = clean_name
                 self._save_to_disk()
 
+    def clear_active_project(self) -> None:
+        """Clears the active project and resets manual override."""
+        with self._lock:
+            self._manual_project = ""
+            self._manual_timestamp = 0.0
+            self._active_project = ""
+            self._last_known_project = ""
+            self._save_to_disk()
+
     def rehydrate(self) -> dict[str, Any]:
         """Rehydrates project state on startup or after provider reset."""
         with self._lock:
@@ -240,6 +249,36 @@ class ProjectAwarenessService:
             except Exception as e:
                 logger.debug("Failed to query task runtime: %s", e)
 
+            # 5b. Coding jobs (active or running coding process)
+            try:
+                from core.coding_jobs import get_jobs
+                c_jobs = get_jobs()
+                c_exec = c_jobs.execution_status()
+                if c_exec.get("process_running") or c_exec.get("worker_running"):
+                    active_job = c_jobs.active() or c_jobs.latest()
+                    running_process = {
+                        "type": "opencode",
+                        "pid": c_exec.get("pid"),
+                        "worker_running": c_exec.get("worker_running"),
+                        "process_running": c_exec.get("process_running"),
+                        "project": active_job.project if active_job else "",
+                        "phase": active_job.phase if active_job else "",
+                        "progress": active_job.progress if active_job else "",
+                    }
+                    if active_job and active_job.project:
+                        job_p_name = Path(active_job.project).name
+                        observations.append(Observation(
+                            source="coding_job",
+                            kind="process",
+                            project=job_p_name,
+                            timestamp=active_job.updated_at,
+                            confidence=0.98,
+                            stale=False,
+                            details=running_process,
+                        ))
+            except Exception as e:
+                logger.debug("Failed to query coding jobs: %s", e)
+
             # 6. Background Sentinel alerts
             sentinel_alerts: list[dict[str, Any]] = []
             try:
@@ -292,7 +331,7 @@ class ProjectAwarenessService:
             resolved_active = ""
             project_candidates: list[Observation] = [
                 obs for obs in observations
-                if obs.project and obs.kind in ("project", "workspace")
+                if obs.project and obs.kind in ("project", "workspace", "process")
             ]
 
             if project_candidates:
