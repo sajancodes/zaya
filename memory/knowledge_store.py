@@ -132,9 +132,11 @@ class KnowledgeStore:
                 if self.path.exists():
                     self.path.replace(corrupt_backup)
                 con = self._connect()
-                con.executescript(_SCHEMA)
-                con.commit()
-                con.close()
+                try:
+                    con.executescript(_SCHEMA)
+                    con.commit()
+                finally:
+                    con.close()
                 # Rebuild from memory_manager JSON
                 # Atomic JSON replacement permits a coherent snapshot without
                 # acquiring the manager lock while holding the index lock.

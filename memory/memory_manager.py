@@ -114,6 +114,16 @@ def _trim_to_limit(memory: dict) -> dict:
         del memory[cat][key]
         dropped.append(f"{cat}/{key}")
         print(f"[Memory] 🗑️  Trimmed {cat}/{key}")
+        try:
+            from memory.knowledge_store import get_knowledge_store
+            get_knowledge_store().delete_fact(cat, key)
+        except Exception:
+            pass
+        try:
+            from core.personal_memory import get_memory_brain
+            get_memory_brain().forget_memory(key)
+        except Exception:
+            pass
     if dropped and _trim_notifier:
         try:
             _trim_notifier(

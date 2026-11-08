@@ -528,8 +528,14 @@ class PersonalMemoryBrain:
             self._knowledge.clear()
             if self.storage_path.exists():
                 self.storage_path.unlink()
+            bak_storage = self.storage_path.with_suffix(".json.bak")
+            if bak_storage.exists():
+                bak_storage.unlink()
             if self.knowledge_path.exists():
                 self.knowledge_path.unlink()
+            bak_knowledge = self.knowledge_path.with_suffix(".json.bak")
+            if bak_knowledge.exists():
+                bak_knowledge.unlink()
             return True
 
     def cleanup_expired(self) -> int:
@@ -718,15 +724,20 @@ class PersonalMemoryBrain:
         current_len = len(header)
 
         for n in notes:
-            title = n.get("title", "")
-            topic = n.get("topic", "general")
-            content = n.get("content", "")
-            src = n.get("source", "user_note")
+            title = re.sub(r'[\r\n>]+', ' ', n.get("title", "")).strip()
+            topic = re.sub(r'[\r\n>]+', ' ', n.get("topic", "general")).strip()
+            src = re.sub(r'[\r\n>]+', ' ', n.get("source", "user_note")).strip()
             date = n.get("created_at", "")[:10]
+            raw_content = n.get("content", "")
+            sanitized_content = (
+                raw_content.replace("<<<UNTRUSTED USER NOTE END>>>", "[DELIMITER REMOVED]")
+                .replace("<<<UNTRUSTED USER NOTE START", "[DELIMITER REMOVED")
+                .replace(">>>", "]")
+            )
 
             block = (
                 f"<<<UNTRUSTED USER NOTE START: {title} (Topic: {topic}, Source: {src}, Date: {date})>>>\n"
-                f"{content}\n"
+                f"{sanitized_content}\n"
                 f"<<<UNTRUSTED USER NOTE END>>>\n"
             )
             if current_len + len(block) > max_chars:
