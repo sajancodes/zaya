@@ -151,6 +151,7 @@ class MobileApi:
         self.server = server
         self.loop: asyncio.AbstractEventLoop | None = None
         self.sessions: set[MobileSession] = set()
+        self.output_sockets: set[tuple[str, Any]] = set()
         self.tokens: dict[str, dict] = {}
         self.limiter = RateLimiter(limit=20, window=60.0)
         self.audio_seconds = 0.0
@@ -189,7 +190,7 @@ class MobileApi:
         return self.bridge.emit(protocol.envelope(type_, payload))
 
     def session_infos(self) -> list[dict]:
-        return [session.info() for session in self.sessions]
+        return [session.info() for session in list(self.sessions)]
 
     def stats(self) -> dict:
         return {'sessions': len(self.sessions), 'tokens': len(self.tokens),
@@ -357,13 +358,7 @@ class MobileApi:
                     return JSONResponse({'error': 'Unauthorized'}, status_code=401)
             if not target:
                 return JSONResponse({'ok': False, 'error': 'device_id required'}, status_code=400)
-            removed = self.devices.revoke(target)
-            for token, entry in list(self.tokens.items()):
-                if entry.get('device_id') == target:
-                    self.tokens.pop(token, None)
-            for session in list(self.sessions):
-                if session.device.get('device_id') == target:
-                    session.alive = False
+            removed = await self.revoke_device(target)
             self.server.note_remote_connection('A paired device was revoked.')
             return JSONResponse({'ok': True, 'revoked': bool(removed)})
 
@@ -409,8 +404,9 @@ class MobileApi:
             if action not in {'status', 'recent', 'unread', 'important', 'conversation', 'search'}:
                 return JSONResponse({'error': 'Unsupported action'}, status_code=400)
             try:
+                safe_limit = max(1, min(int(limit), 50))
                 result = await asyncio.get_running_loop().run_in_executor(
-                    None, self._whatsapp_query, action, chat, query, limit)
+                    None, self._whatsapp_query, action, chat, query, safe_limit)
             except Exception as error:
                 return JSONResponse({'ok': False, 'error': f'WhatsApp unavailable: {error}'},
                                     status_code=503)
@@ -563,14 +559,13 @@ class MobileApi:
             params = body.get('parameters')
             if params is not None and not isinstance(params, dict):
                 return JSONResponse({'ok': False, 'error': 'parameters must be an object'}, status_code=400)
-            confirmed = bool(body.get('confirmed', False))
             approval_id = str(body.get('approval_id') or '') or None
 
-            result = self.pc.execute(
+            result = await asyncio.to_thread(
+                self.pc.execute,
                 device['device_id'],
                 cmd,
                 params or {},
-                confirmed=confirmed,
                 approval_id=approval_id,
             )
             status_code = 200 if result.get('ok') else 400
@@ -594,11 +589,11 @@ class MobileApi:
                 return JSONResponse({'ok': False, 'error': 'Invalid, expired, or unauthorized approval token'},
                                     status_code=404)
 
-            result = self.pc.execute(
+            result = await asyncio.to_thread(
+                self.pc.execute,
                 device['device_id'],
                 pending.command,
                 pending.parameters,
-                confirmed=True,
                 approval_id=approval_id,
             )
             return JSONResponse(result, status_code=200 if result.get('ok') else 400)
@@ -661,6 +656,54 @@ class MobileApi:
             record = store.set_mode(chat_id, mode)
             return {'scope': 'chat', 'chat_id': record.get('chat_id'), 'mode': record.get('mode')}
         return store.set_global_mode(mode)
+
+    async def revoke_device(self, target: str) -> bool:
+        """Actively terminate active sockets and invalidate tokens for a revoked device."""
+        target = str(target or '').strip()
+        if not target:
+            return False
+        removed = self.devices.revoke(target) if self.devices else False
+        for token, entry in list(self.tokens.items()):
+            if entry.get('device_id') == target:
+                self.tokens.pop(token, None)
+        for session in list(self.sessions):
+            if session.device.get('device_id') == target:
+                session.alive = False
+                try:
+                    await session.ws.close(code=4001, reason="Device revoked")
+                except Exception:
+                    pass
+        for dev_id, ws in list(self.output_sockets):
+            if dev_id == target:
+                try:
+                    await ws.close(code=4001, reason="Device revoked")
+                except Exception:
+                    pass
+        active = self.calls.active()
+        if active is not None and active.device_id == target:
+            self.calls.end(active.call_id, outcome='disconnected')
+        return bool(removed)
+
+    async def revoke_all(self) -> int:
+        """Actively terminate all device connections and invalidate all tokens."""
+        count = self.devices.revoke_all() if self.devices else 0
+        self.tokens.clear()
+        for session in list(self.sessions):
+            session.alive = False
+            try:
+                await session.ws.close(code=4001, reason="All devices revoked")
+            except Exception:
+                pass
+        for _, ws in list(self.output_sockets):
+            try:
+                await ws.close(code=4001, reason="All devices revoked")
+            except Exception:
+                pass
+        self.output_sockets.clear()
+        active = self.calls.active()
+        if active is not None:
+            self.calls.end(active.call_id, outcome='disconnected')
+        return count
 
     def snapshot(self) -> dict:
         state = self.bridge.snapshot()
@@ -807,13 +850,12 @@ class MobileApi:
         if kind == 'pc.command':
             cmd = str(data.get('command') or '')
             params = data.get('parameters') or {}
-            confirmed = bool(data.get('confirmed', False))
             approval_id = str(data.get('approval_id') or '') or None
-            res = self.pc.execute(
+            res = await asyncio.to_thread(
+                self.pc.execute,
                 session.device['device_id'],
                 cmd,
                 params,
-                confirmed=confirmed,
                 approval_id=approval_id,
             )
             session.enqueue(protocol.envelope('pc.command.result', {
@@ -829,11 +871,11 @@ class MobileApi:
             if not pending or pending.device_id != session.device['device_id']:
                 session.enqueue(protocol.envelope('error', {'error': 'Invalid or expired approval token'}))
                 return
-            res = self.pc.execute(
+            res = await asyncio.to_thread(
+                self.pc.execute,
                 session.device['device_id'],
                 pending.command,
                 pending.parameters,
-                confirmed=True,
                 approval_id=approval_id,
             )
             session.enqueue(protocol.envelope('pc.command.result', {
@@ -1048,6 +1090,8 @@ class MobileApi:
             await websocket.close(code=4001)
             return
         await websocket.accept()
+        entry = (device["device_id"], websocket)
+        self.output_sockets.add(entry)
         listener = self.bridge.add_audio_listener(name=f'out:{device["device_id"][:8]}')
         event = asyncio.Event()
         listener.bind(asyncio.get_running_loop(), event)
@@ -1069,6 +1113,8 @@ class MobileApi:
                         'protocol_version': protocol.PROTOCOL_VERSION,
                         'type': 'audio.ping', 'payload': {'time': time.time()},
                     }), timeout=5.0)
+                if not self.device_for_token(token):
+                    break
                 frames = listener.drain()
                 if not frames:
                     continue
@@ -1088,6 +1134,7 @@ class MobileApi:
         except Exception as error:
             log.info('Phone output ended: %s', error)
         finally:
+            self.output_sockets.discard(entry)
             self.bridge.remove_audio_listener(listener)
             active = self.calls.active()
             if active is not None and active.state == 'answered' and active.device_id == device['device_id']:

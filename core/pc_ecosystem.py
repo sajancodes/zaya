@@ -401,8 +401,7 @@ class PCEcosystemBridge:
                 "parameters": {
                     "path": "string (required)",
                     "content": "string (required)",
-                    "append": "bool (optional)",
-                    "confirmed": "bool (optional)"
+                    "append": "bool (optional)"
                 },
             },
             "terminate_process": {
@@ -411,8 +410,7 @@ class PCEcosystemBridge:
                 "description": "Safely terminate a user-launched process",
                 "parameters": {
                     "process_name": "string (required)",
-                    "pid": "int (optional)",
-                    "confirmed": "bool (optional)"
+                    "pid": "int (optional)"
                 },
             },
         }
@@ -438,7 +436,7 @@ class PCEcosystemBridge:
         # 2. Check for unexpected fields if schema specifies strict params
         expected_params = allowed[cmd]["parameters"]
         # Allow control keys in parameters
-        accepted_keys = set(expected_params.keys()) | {"confirmed", "approval_id"}
+        accepted_keys = set(expected_params.keys()) | {"approval_id"}
         unexpected = [k for k in params.keys() if k not in accepted_keys]
         if unexpected:
             self.audit.log(device_id, cmd, "rejected", f"Unexpected parameters: {unexpected}", "invalid_arguments")
@@ -450,7 +448,7 @@ class PCEcosystemBridge:
 
         # 3. Handle Approval Gate for Consequential Operations
         is_consequential = allowed[cmd]["requires_approval"]
-        if is_consequential and not confirmed:
+        if is_consequential:
             # If an approval_id was passed, attempt to consume it
             if approval_id:
                 pending = self.approvals.consume(approval_id, device_id)
@@ -781,6 +779,50 @@ class PCEcosystemBridge:
         if not pname and pid is None:
             return {"ok": False, "status": "error", "error": "Either process_name or pid is required"}
 
+        try:
+            import psutil
+        except ImportError:
+            return {"ok": False, "status": "error", "error": "psutil is required for process termination"}
+
+        if pid is not None:
+            try:
+                pid = int(pid)
+            except (ValueError, TypeError):
+                return {"ok": False, "status": "error", "error": f"Invalid PID: {pid}"}
+            if not psutil.pid_exists(pid):
+                return {"ok": False, "status": "error", "error": f"Process with PID {pid} does not exist"}
+            try:
+                proc = psutil.Process(pid)
+                actual_name = (proc.name() or "").lower()
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as err:
+                return {"ok": False, "status": "error", "error": f"Cannot inspect process {pid}: {err}"}
+
+            if pname and pname not in actual_name:
+                return {
+                    "ok": False,
+                    "status": "error",
+                    "error": f"Process name '{pname}' does not match process with PID {pid} ('{actual_name}')",
+                }
+
+            if actual_name in _CRITICAL_SYSTEM_PROCESSES or any(c in actual_name for c in _CRITICAL_SYSTEM_PROCESSES):
+                return {
+                    "ok": False,
+                    "status": "error",
+                    "error": f"Refusing to terminate critical system process '{actual_name}' (PID {pid})",
+                }
+
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+                return {
+                    "ok": True,
+                    "status": "success",
+                    "data": {"terminated_count": 1, "target": actual_name, "pid": pid},
+                }
+            except Exception as err:
+                return {"ok": False, "status": "error", "error": f"Failed to terminate PID {pid}: {err}"}
+
+        # PID is None, pname is provided
         if pname in _CRITICAL_SYSTEM_PROCESSES or any(c in pname for c in _CRITICAL_SYSTEM_PROCESSES):
             return {
                 "ok": False,
@@ -788,33 +830,27 @@ class PCEcosystemBridge:
                 "error": f"Refusing to terminate critical system process '{pname}'",
             }
 
-        try:
-            import psutil
-            terminated = 0
-            for proc in psutil.process_iter(["pid", "name"]):
-                try:
-                    if pid is not None and proc.info["pid"] == pid:
-                        proc.terminate()
-                        proc.wait(timeout=3)
-                        terminated += 1
-                        break
-                    elif pname and pname in (proc.info["name"] or "").lower():
-                        proc.terminate()
-                        proc.wait(timeout=3)
-                        terminated += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
+        terminated = 0
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                proc_name = (proc.info["name"] or "").lower()
+                if pname in proc_name:
+                    if proc_name in _CRITICAL_SYSTEM_PROCESSES or any(c in proc_name for c in _CRITICAL_SYSTEM_PROCESSES):
+                        continue
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                    terminated += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
-            return {
-                "ok": True,
-                "status": "success",
-                "data": {
-                    "terminated_count": terminated,
-                    "target": pname or pid,
-                },
-            }
-        except ImportError:
-            return {"ok": False, "status": "error", "error": "psutil is required for process termination"}
+        return {
+            "ok": True,
+            "status": "success",
+            "data": {
+                "terminated_count": terminated,
+                "target": pname,
+            },
+        }
 
 
 _bridge_instance: PCEcosystemBridge | None = None
