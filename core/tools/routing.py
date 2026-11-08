@@ -123,10 +123,10 @@ _FALLBACK = (
 
 # Extra names that map to an area even when the tool name has no shared token.
 _CATEGORY_TOOLS: dict[str, set[str]] = {
-    "app": {"open_app", "computer_control", "exit_app", "window_manager", "startup_sentinel", "software_sentinel", "protocol_sentinel"},
+    "app": {"open_app", "computer_control", "exit_app", "window_manager", "startup_sentinel", "software_sentinel", "protocol_sentinel", "file_assoc_sentinel"},
     "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager", "audio_switcher", "bluetooth_sentinel", "driver_sentinel", "usb_sentinel", "mic_sentinel", "night_light_sentinel"},
     "browser": {"browser_control", "web_customizer"},
-    "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel", "usb_sentinel", "recycle_bin_sentinel"},
+    "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel", "usb_sentinel", "recycle_bin_sentinel", "file_assoc_sentinel"},
     "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel", "service_sentinel", "event_log_sentinel", "task_scheduler_sentinel", "firewall_sentinel", "memory_sentinel"},
     "git": {"git_control", "repo_sentinel"},
     "message": {"whatsapp", "send_message", "telegram_remote", "mobile_device"},
@@ -142,7 +142,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel", "adapter_sentinel", "mic_sentinel", "protocol_sentinel", "night_light_sentinel", "recycle_bin_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel", "adapter_sentinel", "mic_sentinel", "protocol_sentinel", "night_light_sentinel", "recycle_bin_sentinel", "file_assoc_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel", "recycle_bin_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -170,6 +170,8 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "bluelight": {"night_light_sentinel"},
     "trash": {"recycle_bin_sentinel"},
     "recyclebin": {"recycle_bin_sentinel"},
+    "association": {"file_assoc_sentinel"},
+    "defaultapp": {"file_assoc_sentinel"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel", "adapter_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},

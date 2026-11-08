@@ -396,6 +396,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "recycle_bin_empty",
     },
+    "DEFAULT_APP_QUERY": {
+        "phrases": [
+            "what opens pdf", "default app for pdf", "what app opens mp4",
+            "default browser app", "check file associations", "default apps", "what opens zip"
+        ],
+        "dynamic": "default_apps",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1182,6 +1189,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to empty Recycle Bin right now, sir.")
+
+        if intent_data.get("dynamic") == "default_apps":
+            try:
+                from actions.file_assoc_sentinel import get_common_associations_audit
+                data = get_common_associations_audit()
+                hl = data["highlights"]
+                ack = f"Default Apps: Web: {hl['browser_default']}, PDF: {hl['pdf_reader']}, Archives: {hl['archive_manager']}, Editor: {hl['text_editor']}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect default applications right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
