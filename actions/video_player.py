@@ -345,10 +345,7 @@ TOOL = {
         "Video always starts UNMUTED. Do not automatically mute media or the microphone. "
         "This returns the moment it is asked, before the picture appears: when "
         "it answers 'status=opening', say in one short sentence that you are "
-        "putting it on the display, and do not wait or call it again. "
-        "Do NOT use 'youtube_video' for this: that optional plugin opens videos "
-        "in the web browser and summarises transcripts, it never plays anything "
-        "on the assistant's display."
+        "putting it on the display, and do not wait or call it again."
     ),
     "parameters": {
         "type": "OBJECT",

@@ -1195,6 +1195,19 @@ def computer_settings(
         push_undo("dark mode toggled",
                   lambda: (dark_mode(), "Theme switched back.")[1])
 
+    elif action in ("set_wallpaper", "wallpaper"):
+        path_str = str(value or params.get("path", "")).strip()
+        if not path_str:
+            return "No image path provided for wallpaper."
+        p = Path(path_str).resolve()
+        if not p.exists():
+            return f"Wallpaper image not found: {p}"
+        if sys.platform == "win32":
+            import ctypes
+            res = ctypes.windll.user32.SystemParametersInfoW(20, 0, str(p), 3)
+            return f"Desktop wallpaper set to {p.name}." if res else "Could not set wallpaper."
+        return "Wallpaper setting is currently supported on Windows." 
+
     return f"Done: {action}."
 
 
@@ -1231,7 +1244,7 @@ TOOL = {
                     "scroll_bottom | page_up | page_down | copy | paste | cut | "
                     "undo | redo | select_all | save | enter | escape | press_key | "
                     "type_text | screenshot | lock_screen | open_settings | "
-                    "file_explorer | open_run | dark_mode | toggle_wifi | "
+                    "file_explorer | open_run | dark_mode | toggle_wifi | set_wallpaper | "
                     "restart | shutdown"
                 )
             },

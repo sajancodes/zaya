@@ -73,7 +73,6 @@ EXTERNAL_TOOLS = {
     "browser_control",
     "deep_research",
     "weather_report",
-    "flight_finder",
     "file_processor",
     "file_controller",
     "display_perception",
