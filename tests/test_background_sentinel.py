@@ -129,3 +129,26 @@ def test_conflict_scan_reports_all_files(tmp_path):
     assert len(alerts) == 3
     filenames = {Path(a.details["file"]).name for a in alerts}
     assert filenames == {"a.py", "b.kt", "c.xml"}
+
+def test_sentinel_retention_pruning(tmp_path):
+    import time
+    store = tmp_path / "alerts.json"
+    sentinel = BackgroundSentinel(store_path=store)
+    
+    # Pre-populate delivered with 300 entries, 100 of which are older than 30 days
+    old_time = time.time() - (35 * 86400)
+    recent_time = time.time() - 100
+    for i in range(100):
+        sentinel._delivered[f"old_{i}"] = old_time
+    for i in range(200):
+        sentinel._delivered[f"recent_{i}"] = recent_time
+
+    assert len(sentinel._delivered) == 300
+    
+    # Trigger a save via delivered()
+    sentinel.delivered({"id": "new_alert"})
+    
+    # Verify old entries were pruned
+    assert "old_0" not in sentinel._delivered
+    assert "recent_0" in sentinel._delivered
+    assert len(sentinel._delivered) <= 202

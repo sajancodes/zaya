@@ -104,6 +104,14 @@ class BackgroundSentinel:
     def _save_delivered(self) -> None:
         with self._lock:
             try:
+                # Retention bounds: keep at most 500 records; prune items older than 30 days if map > 250
+                if len(self._delivered) > 250:
+                    cutoff = time.time() - (30 * 86400)
+                    self._delivered = {k: v for k, v in self._delivered.items() if v >= cutoff}
+                    if len(self._delivered) > 500:
+                        sorted_items = sorted(self._delivered.items(), key=lambda kv: kv[1], reverse=True)[:500]
+                        self._delivered = dict(sorted_items)
+
                 self._store_path.parent.mkdir(parents=True, exist_ok=True)
                 temp = self._store_path.with_suffix(".tmp")
                 payload = {
