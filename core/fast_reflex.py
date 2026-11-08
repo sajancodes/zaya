@@ -124,6 +124,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "not_responding",
     },
+    "DISK_SPACE_QUERY": {
+        "phrases": [
+            "how much disk space", "free disk space", "check disk space",
+            "disk space", "storage status", "how much storage left", "hard drive space"
+        ],
+        "dynamic": "disk_space",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -426,6 +433,20 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to scan for unresponsive applications, sir.")
+
+        if intent_data.get("dynamic") == "disk_space":
+            try:
+                from actions.storage_sentinel import _get_drive_telemetry
+                drives = _get_drive_telemetry()
+                if drives:
+                    primary = drives[0]
+                    ack = f"Drive {primary['mountpoint']} has {primary['free_gb']} GB free out of {primary['total_gb']} GB, sir."
+                else:
+                    ack = "Storage information is currently unavailable, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=drives)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect disk storage right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
