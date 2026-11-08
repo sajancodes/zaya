@@ -210,6 +210,14 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "hardware_thermal",
     },
+    "WINDOWS_SERVICES_QUERY": {
+        "phrases": [
+            "windows services", "check windows services", "running services",
+            "list services", "service status", "how many services are running",
+            "background services"
+        ],
+        "dynamic": "windows_services",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -735,6 +743,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect hardware thermals right now, sir.")
+
+        if intent_data.get("dynamic") == "windows_services":
+            try:
+                from actions.service_sentinel import _get_services_summary
+                data = _get_services_summary()
+                ack = f"Windows has {data['running_count']} running services out of {data['total']} registered, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows services right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

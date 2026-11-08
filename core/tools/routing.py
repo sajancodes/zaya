@@ -96,6 +96,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "power": {"battery", "power", "charger", "charging", "cycles", "health", "mwh", "wear", "drain", "energy"},
     "env": {"env", "environment", "path", "variable", "variables", "toolchain", "sdk", "compiler"},
     "thermal": {"temp", "temperature", "thermals", "gpu", "celsius", "overheating", "overheat", "fan", "wattage", "vram"},
+    "service": {"service", "services", "daemon", "daemons", "wsl", "docker", "spooler", "svchost"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -115,7 +116,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager", "audio_switcher", "bluetooth_sentinel"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel"},
-    "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel"},
+    "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel", "service_sentinel"},
     "git": {"git_control", "repo_sentinel"},
     "message": {"whatsapp", "send_message", "telegram_remote", "mobile_device"},
     "phone": {"mobile_device", "mobile_call", "port_tunnel"},
@@ -130,13 +131,14 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel"},
     "storage": {"storage_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
     "power": {"power_sentinel", "computer_settings"},
     "env": {"env_sentinel"},
     "thermal": {"thermal_sentinel"},
+    "service": {"service_sentinel"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
