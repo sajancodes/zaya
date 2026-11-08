@@ -410,6 +410,25 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "timezone_status",
     },
+    "CLIPBOARD_HISTORY_QUERY": {
+        "phrases": [
+            "is clipboard history enabled", "check clipboard history", "clipboard history status",
+            "is clipboard history on", "clipboard history"
+        ],
+        "dynamic": "clipboard_history_status",
+    },
+    "CLIPBOARD_HISTORY_ON": {
+        "phrases": [
+            "enable clipboard history", "turn on clipboard history", "activate clipboard history"
+        ],
+        "dynamic": "clipboard_history_on",
+    },
+    "CLIPBOARD_HISTORY_OFF": {
+        "phrases": [
+            "disable clipboard history", "turn off clipboard history", "deactivate clipboard history"
+        ],
+        "dynamic": "clipboard_history_off",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1217,6 +1236,36 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect system timezone right now, sir.")
+
+        if intent_data.get("dynamic") == "clipboard_history_status":
+            try:
+                from actions.clipboard_ring_sentinel import get_clipboard_history_status
+                data = get_clipboard_history_status()
+                ack = f"Windows Clipboard History is currently {data['state_label']} ({data['hotkey']}), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to check Clipboard History status right now, sir.")
+
+        if intent_data.get("dynamic") == "clipboard_history_on":
+            try:
+                from actions.clipboard_ring_sentinel import set_clipboard_history
+                data = set_clipboard_history(True)
+                ack = "Windows Clipboard History enabled (Win + V), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to enable Clipboard History right now, sir.")
+
+        if intent_data.get("dynamic") == "clipboard_history_off":
+            try:
+                from actions.clipboard_ring_sentinel import set_clipboard_history
+                data = set_clipboard_history(False)
+                ack = "Windows Clipboard History disabled, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to disable Clipboard History right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
