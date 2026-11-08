@@ -90,6 +90,19 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "system_health",
     },
+    "NETWORK_PING_QUERY": {
+        "phrases": [
+            "ping", "check ping", "test ping", "ping test", "network ping", "what is my ping"
+        ],
+        "dynamic": "network_ping",
+    },
+    "NETWORK_STATUS_QUERY": {
+        "phrases": [
+            "check internet", "internet status", "network status", "is internet working",
+            "is wifi working", "check network", "internet connection"
+        ],
+        "dynamic": "network_status",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -324,6 +337,33 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="System metrics are currently unavailable, sir.")
+
+        if intent_data.get("dynamic") == "network_ping":
+            try:
+                from actions.network_diagnostics import _run_icmp_ping
+                res = _run_icmp_ping("1.1.1.1", count=1, timeout_ms=600)
+                if res.get("reachable"):
+                    ack = f"Ping is {res['avg_ms']} milliseconds, sir."
+                else:
+                    ack = "Ping target is currently unreachable, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=res)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to test ping right now, sir.")
+
+        if intent_data.get("dynamic") == "network_status":
+            try:
+                from actions.network_diagnostics import _check_tcp_latency, _get_local_ip
+                online = _check_tcp_latency("1.1.1.1", 53, timeout=0.8) is not None
+                local_ip = _get_local_ip()
+                if online:
+                    ack = f"Internet is connected, local IP is {local_ip}, sir."
+                else:
+                    ack = "Internet connection appears to be offline, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data={"online": online, "local_ip": local_ip})
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Network status is currently unavailable, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
