@@ -355,6 +355,33 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "protocol_handlers",
     },
+    "NIGHT_LIGHT_STATUS": {
+        "phrases": [
+            "is night light on", "check night light", "night light status",
+            "is blue light filter on", "check blue light filter"
+        ],
+        "dynamic": "night_light_status",
+    },
+    "NIGHT_LIGHT_ON": {
+        "phrases": [
+            "turn on night light", "enable night light", "activate night light",
+            "turn on blue light filter", "enable blue light filter"
+        ],
+        "dynamic": "night_light_on",
+    },
+    "NIGHT_LIGHT_OFF": {
+        "phrases": [
+            "turn off night light", "disable night light", "deactivate night light",
+            "turn off blue light filter", "disable blue light filter"
+        ],
+        "dynamic": "night_light_off",
+    },
+    "NIGHT_LIGHT_TOGGLE": {
+        "phrases": [
+            "toggle night light", "switch night light", "toggle blue light filter"
+        ],
+        "dynamic": "night_light_toggle",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1075,6 +1102,49 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect protocol handlers right now, sir.")
+
+        if intent_data.get("dynamic") == "night_light_status":
+            try:
+                from actions.night_light_sentinel import get_night_light_status
+                data = get_night_light_status()
+                sched = data["schedule"]
+                sched_txt = f" (scheduled {sched['start_time']} - {sched['end_time']})" if sched["has_schedule"] else ""
+                ack = f"Windows Night Light is currently {data['state_label']}{sched_txt}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to check Night Light status right now, sir.")
+
+        if intent_data.get("dynamic") == "night_light_on":
+            try:
+                from actions.night_light_sentinel import set_night_light
+                data = set_night_light(True)
+                ack = "Windows Night Light enabled, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to enable Night Light right now, sir.")
+
+        if intent_data.get("dynamic") == "night_light_off":
+            try:
+                from actions.night_light_sentinel import set_night_light
+                data = set_night_light(False)
+                ack = "Windows Night Light disabled, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to disable Night Light right now, sir.")
+
+        if intent_data.get("dynamic") == "night_light_toggle":
+            try:
+                from actions.night_light_sentinel import toggle_night_light
+                data = toggle_night_light()
+                new_state = "enabled" if data.get("enabled") else "disabled"
+                ack = f"Windows Night Light {new_state}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to toggle Night Light right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
