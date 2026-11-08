@@ -152,6 +152,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "app_audio",
     },
+    "REPO_STATUS_QUERY": {
+        "phrases": [
+            "git status", "repo status", "check git status",
+            "check repo status", "is repo clean", "any uncommitted changes"
+        ],
+        "dynamic": "repo_status",
+    },
     "WINDOW_SNAP_LEFT": {
         "phrases": [
             "snap left", "snap window left", "window left", "snap active window left"
@@ -540,6 +547,24 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect application audio sessions, sir.")
+
+        if intent_data.get("dynamic") == "repo_status":
+            try:
+                from actions.repo_sentinel import _inspect_repo_status
+                st = _inspect_repo_status()
+                if st.get("is_git_repo"):
+                    if st["clean"]:
+                        sync = f", ahead by {st['ahead']}" if st['ahead'] > 0 else ", in sync"
+                        ack = f"Repository '{st['repo_name']}' is clean on branch '{st['branch']}'{sync}, sir."
+                    else:
+                        dirty_total = st['unstaged_count'] + st['staged_count'] + st['untracked_count']
+                        ack = f"Repository '{st['repo_name']}' has {dirty_total} uncommitted file(s) on branch '{st['branch']}', sir."
+                else:
+                    ack = "Active directory is not a Git repository, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=st)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect repository status right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
