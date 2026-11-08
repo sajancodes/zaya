@@ -109,6 +109,16 @@ def _derive_key(session_key: str, salt: bytes = _AES_SALT) -> bytes:
     return hashlib.sha256(session_key.encode('utf-8') + salt).digest()
 
 
+def _decrypt_gcm(aes_key: bytes, enc_b64: str) -> str:
+    """Decrypt base64(nonce[12] ‖ ciphertext ‖ tag[16]) with AES-256-GCM."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    raw = base64.b64decode(enc_b64)
+    if len(raw) < 28:
+        raise ValueError("Invalid AES-GCM payload length")
+    nonce, ct_and_tag = raw[:12], raw[12:]
+    return AESGCM(aes_key).decrypt(nonce, ct_and_tag, None).decode('utf-8')
+
+
 def _decrypt_cbc(aes_key: bytes, enc_b64: str) -> str:
     """Decrypt base64(IV[16] ‖ ciphertext) with AES-256-CBC + PKCS7."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -172,20 +182,12 @@ def _ensure_network_access(port: int) -> None:
 
         need_port    = not _netsh_rule_exists(port_rule)
         need_prog    = not _netsh_rule_exists(prog_rule)
-        need_private = _network_is_public()
 
-        if not need_port and not need_prog and not need_private:
+        if not need_port and not need_prog:
             return  # already fully configured
 
-        # Build a .bat file — netsh + powershell, runs fast when elevated
+        # Build a .bat file — netsh runs fast when elevated
         bat_lines = ["@echo off"]
-        if need_private:
-            bat_lines.append(
-                'powershell -NoProfile -NonInteractive -Command "'
-                'Get-NetConnectionProfile | '
-                "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                'Set-NetConnectionProfile -NetworkCategory Private"'
-            )
         if need_port:
             bat_lines.append(
                 f'netsh advfirewall firewall add rule '
@@ -351,7 +353,7 @@ def _ensure_crypto_js() -> None:
         print(f"[Dashboard] Encryption will fall back to CDN load on client.")
 
 
-_ensure_crypto_js()
+# _ensure_crypto_js() not run at import time
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -466,8 +468,15 @@ def _ensure_certs() -> bool:
         crt_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
         try:
-            import os as _os
-            _os.chmod(key_p, 0o600)   # best effort — largely a no-op on Windows
+            if sys.platform == "win32":
+                import subprocess
+                subprocess.run(
+                    ["icacls", str(key_p), "/inheritance:r", "/grant:r", f"{os.environ.get('USERNAME', 'Users')}:(R,W)"],
+                    capture_output=True, timeout=5, check=False
+                )
+            else:
+                import os as _os
+                _os.chmod(key_p, 0o600)
         except Exception:
             pass
 
@@ -488,7 +497,9 @@ class DashboardServer:
 
     def __init__(self):
         self._ip                          = _local_ip()
-        self._tokens: set[str]            = set()
+        from dashboard.mobile_api import RateLimiter
+        self._tokens: dict[str, float]    = {}   # tok -> expires_at
+        self._login_limiter               = RateLimiter(limit=5, window=60.0)
         self._token_keys: dict[str, str]  = {}   # auth_token → session_key
         self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
         self._clients: set[WebSocket]     = set()
@@ -573,8 +584,13 @@ class DashboardServer:
         if not sk:
             return None
         for salt in (_AES_SALT, *_AES_LEGACY_SALTS):
+            aes_k = _derive_key(sk, salt)
             try:
-                return _decrypt_cbc(_derive_key(sk, salt), enc_b64)
+                return _decrypt_gcm(aes_k, enc_b64)
+            except Exception:
+                pass
+            try:
+                return _decrypt_cbc(aes_k, enc_b64)
             except Exception:
                 continue
         return None
@@ -608,9 +624,19 @@ class DashboardServer:
     def _build_app(self) -> "FastAPI":
         app = FastAPI(docs_url=None, redoc_url=None)
 
+        def _valid_token(tok: str) -> bool:
+            if not _valid_token(tok):
+                return False
+            exp = self._tokens.get(tok, 0.0)
+            if exp < time.time():
+                self._tokens.pop(tok, None)
+                self._token_keys.pop(tok, None)
+                return False
+            return True
+
         def _auth(req: Request) -> bool:
             tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            return bool(tok) and tok in self._tokens
+            return _valid_token(tok)
 
         # serve CryptoJS from local cache, fallback to CDN redirect
         @app.get("/static/crypto.js")
@@ -637,13 +663,17 @@ class DashboardServer:
 
         @app.post("/login")
         async def login(req: Request):
+            client_ip = req.client.host if req.client else "unknown"
+            if not self._login_limiter.allow(client_ip):
+                return JSONResponse({"ok": False, "error": "Too many login attempts. Please wait a minute."},
+                                    status_code=429)
             body    = await req.json()
             entered = str(body.get("pin", "")).strip().upper()
             now     = time.time()
             if entered in self._pending_keys and self._pending_keys[entered] > now:
                 del self._pending_keys[entered]          # one-time use
                 tok = secrets.token_urlsafe(32)
-                self._tokens.add(tok)
+                self._tokens[tok] = now + 86400.0
                 self._token_keys[tok] = entered
                 self._aes_key(entered)                   # pre-derive & cache
                 if self._connect_callback:
@@ -674,7 +704,7 @@ class DashboardServer:
 
             del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
-            self._tokens.add(tok)
+            self._tokens[tok] = now + 86400.0
             self._token_keys[tok] = key
             self._aes_key(key)
             dev_tok, device_id = self._pair_browser_device(key)
@@ -733,7 +763,7 @@ class DashboardServer:
                 return JSONResponse({"ok": False}, status_code=401)
 
             tok = secrets.token_urlsafe(32)
-            self._tokens.add(tok)
+            self._tokens[tok] = time.time() + 86400.0
             self._token_keys[tok] = session_key
             self._aes_key(session_key)
             if self._connect_callback:
@@ -765,15 +795,17 @@ class DashboardServer:
             """Invalidate every persistent device token (admin action)."""
             if not _auth(req):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            count = len(self._device_sessions)
+            count = len(self._device_sessions) + len(self._tokens)
             self._device_sessions.clear()
+            self._tokens.clear()
+            self._token_keys.clear()
+            self._aes_cache.clear()
             try:
                 count += self.device_registry().revoke_all()
             except Exception:
                 pass
             if self._mobile:
-                for token in list(self._mobile.tokens):
-                    self._mobile.tokens.pop(token, None)
+                await self._mobile.revoke_all()
             return JSONResponse({"ok": True, "revoked": count})
 
         @app.post("/api/command")
@@ -788,6 +820,8 @@ class DashboardServer:
                 if text is None:
                     return JSONResponse({"error": "Decryption failed"}, status_code=400)
             else:
+                if token in self._token_keys:
+                    return JSONResponse({"error": "Encrypted command required for secure session"}, status_code=400)
                 text = (body.get("text") or "").strip()
             if text:
                 self.submit_remote_command(text, source="dashboard",
@@ -809,7 +843,7 @@ class DashboardServer:
         @app.websocket("/ws/phone-audio")
         async def phone_audio_ws(websocket: WebSocket, token: str = ""):
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not _valid_token(tok):
                 await websocket.close(code=4001)
                 return
             await websocket.accept()
@@ -914,7 +948,7 @@ class DashboardServer:
         async def download_file(filename: str, token: str = ""):
             # Auth via query param — browser <a download> can't send custom headers
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not _valid_token(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
             path = self._uploads_dir / safe
@@ -925,7 +959,7 @@ class DashboardServer:
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not _valid_token(tok):
                 await websocket.close(code=4001)
                 return
             await websocket.accept()
