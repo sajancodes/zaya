@@ -5,6 +5,7 @@ import json
 from unittest.mock import MagicMock, patch
 import pytest
 
+import actions.night_light_sentinel as nls
 from actions.night_light_sentinel import (
     get_night_light_status,
     night_light_sentinel,
@@ -62,15 +63,14 @@ def test_get_night_light_status_mocked_on():
 
 
 def test_set_and_toggle_night_light():
-    with patch("actions.night_light_sentinel.set_night_light", return_value={"status": "success", "enabled": True}):
-        res_on = set_night_light(True)
+    with patch("actions.night_light_sentinel.set_night_light", return_value={"status": "success", "enabled": True}) as mock_set, \
+         patch("actions.night_light_sentinel.get_night_light_status", return_value={"status": "active", "enabled": False}):
+        res_on = nls.set_night_light(True)
         assert res_on["status"] == "success"
         assert res_on["enabled"] is True
 
-    with patch("actions.night_light_sentinel.get_night_light_status", return_value={"status": "active", "enabled": False}), \
-         patch("actions.night_light_sentinel.set_night_light", return_value={"status": "success", "enabled": True}) as mock_set:
-        res_tog = toggle_night_light()
-        mock_set.assert_called_once_with(True)
+        res_tog = nls.toggle_night_light()
+        mock_set.assert_called_with(True)
         assert res_tog["status"] == "success"
 
 

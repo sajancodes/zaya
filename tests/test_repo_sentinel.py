@@ -33,7 +33,7 @@ def test_repo_sentinel_status_live():
         res_raw = repo_sentinel({"action": "status"})
         res = json.loads(res_raw)
         assert res["status"] == "success"
-        assert "Repo 'Zaya':" in res["summary"]
+        assert f"Repo '{Path.cwd().name}':" in res["summary"]
         assert isinstance(res["data"]["branch"], str) and len(res["data"]["branch"]) > 0
         assert res["data"]["is_git_repo"] is True
 
@@ -109,7 +109,7 @@ def test_fast_reflex_repo_status():
 
     res = router.execute_intent("REPO_STATUS_QUERY")
     assert res.matched is True
-    assert "Repository 'Zaya'" in res.ack
+    assert f"Repository '{Path.cwd().name}'" in res.ack
 
 
 def test_tool_router_maps_repo_sentinel():

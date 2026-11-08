@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, Optional
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore
 
 from core.execution_policy import require_owner
 
@@ -26,6 +29,18 @@ def get_night_light_status() -> Dict[str, Any]:
     status = "active"
     schedule_start: Optional[str] = None
     schedule_end: Optional[str] = None
+
+    if winreg is None:
+        return {
+            "status": "unavailable",
+            "enabled": False,
+            "state_label": "OFF (Disabled)",
+            "schedule": {
+                "has_schedule": False,
+                "start_time": "Not set",
+                "end_time": "Not set",
+            },
+        }
 
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _CLOUDSTORE_PARENT) as parent:
@@ -71,6 +86,9 @@ def get_night_light_status() -> Dict[str, Any]:
 
 def set_night_light(enabled: bool) -> Dict[str, Any]:
     """Turn Windows Night Light on or off by updating CloudStore state."""
+    if winreg is None:
+        return {"status": "error", "message": "Windows Night Light is only available on Windows."}
+
     target_byte = 21 if enabled else 19
 
     try:
