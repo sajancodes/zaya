@@ -43,6 +43,9 @@ class TaskRuntime:
         self._lock = threading.RLock()
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.execute('PRAGMA journal_mode=WAL')
+        self.db.execute('PRAGMA busy_timeout=5000')
+        self.db.execute('PRAGMA synchronous=NORMAL')
+        self.db.execute('PRAGMA wal_autocheckpoint=1000')
         self.db.execute('CREATE TABLE IF NOT EXISTS runtime_tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS tool_results (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS tool_request_claims (request_id TEXT PRIMARY KEY, created_at REAL NOT NULL)')
@@ -174,6 +177,14 @@ class TaskRuntime:
         """Release only requests whose completed result proves no side effect."""
         with self._lock, self.db:
             self.db.execute('DELETE FROM tool_request_claims WHERE request_id=?', (request_id,))
+
+    def close(self) -> None:
+        with self._lock:
+            try:
+                self.db.execute('PRAGMA wal_checkpoint(PASSIVE)')
+            except Exception:
+                pass
+            self.db.close()
 
 
 _runtime: TaskRuntime | None = None

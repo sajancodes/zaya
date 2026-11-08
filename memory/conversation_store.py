@@ -41,6 +41,9 @@ class ConversationStore:
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=5)
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA busy_timeout=5000')
+        db.execute('PRAGMA synchronous=NORMAL')
         try:
             with db:
                 yield db
