@@ -436,6 +436,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "power_plan_status",
     },
+    "HOSTS_FILE_QUERY": {
+        "phrases": [
+            "check hosts file", "what's in my hosts file", "what is in my hosts file",
+            "hosts file entries", "local domain overrides", "hosts file status"
+        ],
+        "dynamic": "hosts_file_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1283,6 +1290,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect power scheme right now, sir.")
+
+        if intent_data.get("dynamic") == "hosts_file_status":
+            try:
+                from actions.hosts_sentinel import get_hosts_summary
+                data = get_hosts_summary()
+                dev_str = f" ({data['local_dev_mappings']} local dev mapping(s))" if data['local_dev_mappings'] else ""
+                ack = f"Hosts file contains {data['total_mappings']} active mapping(s){dev_str}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect hosts file right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

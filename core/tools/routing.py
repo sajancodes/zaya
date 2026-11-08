@@ -108,6 +108,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "dns": {"dns", "nameserver", "lookup", "resolve", "resolver", "domain", "hostname"},
     "ram": {"ram", "memory", "paging", "swap", "pagefile", "commit", "working_set", "rss"},
     "adapter": {"adapter", "adapters", "ip", "ipv4", "ipv6", "mac", "gateway", "router", "subnet", "netmask", "nic"},
+    "hosts": {"hosts", "override", "loopback", "localhost", "mapping"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -142,7 +143,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel", "adapter_sentinel", "mic_sentinel", "protocol_sentinel", "night_light_sentinel", "recycle_bin_sentinel", "file_assoc_sentinel", "clock_sentinel", "clipboard_ring_sentinel", "power_plan_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel", "adapter_sentinel", "mic_sentinel", "protocol_sentinel", "night_light_sentinel", "recycle_bin_sentinel", "file_assoc_sentinel", "clock_sentinel", "clipboard_ring_sentinel", "power_plan_sentinel", "hosts_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel", "recycle_bin_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -174,7 +175,8 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "defaultapp": {"file_assoc_sentinel"},
     "timezone": {"clock_sentinel"},
     "clock": {"clock_sentinel"},
-    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel", "adapter_sentinel"},
+    "hosts": {"hosts_sentinel"},
+    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel", "adapter_sentinel", "hosts_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
     "home": {"home_assistant", "printer_control"},
