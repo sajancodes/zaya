@@ -600,19 +600,100 @@ def shutdown_computer():
     else:
         subprocess.run(["systemctl", "poweroff"], capture_output=True)
 
+OVERLAY_SCHEMES = {
+    "performance": "ded574b5-45a0-4f42-8737-46345c09c238",  # Best performance
+    "balanced":    "00000000-0000-0000-0000-000000000000",  # Balanced
+    "saver":       "961cc777-2547-4f9d-8174-7d86181b8a7a",  # Best power efficiency
+}
+
+OVERLAY_LABELS = {
+    "ded574b5-45a0-4f42-8737-46345c09c238": "Best performance",
+    "3af9b8d9-7c97-431d-ad78-34a8bfea439f": "Better performance",
+    "00000000-0000-0000-0000-000000000000": "Balanced",
+    "961cc777-2547-4f9d-8174-7d86181b8a7a": "Best power efficiency",
+}
+
+
+def _get_windows_overlay_guid() -> str:
+    """Returns the GUID string of the active Windows 10/11 modern Power Mode slider."""
+    if _OS != "Windows":
+        return ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", wintypes.BYTE * 8)
+            ]
+
+        powrprof = ctypes.WinDLL("powrprof.dll")
+        get_overlay = getattr(powrprof, "PowerGetActualOverlayScheme", None)
+        if not get_overlay:
+            return ""
+        out_g = _GUID()
+        ret = get_overlay(ctypes.byref(out_g))
+        if ret != 0:
+            return ""
+        b = bytes(out_g.Data4)
+        return f"{out_g.Data1:08x}-{out_g.Data2:04x}-{out_g.Data3:04x}-{b[:2].hex()}-{b[2:].hex()}".lower()
+    except Exception as e:
+        print(f"[Settings] _get_windows_overlay_guid failed: {e}")
+        return ""
+
+
+def _set_windows_overlay_guid(guid_str: str) -> bool:
+    """Sets the active Windows 10/11 modern Power Mode slider scheme (Settings / battery slider)."""
+    if _OS != "Windows":
+        return False
+    try:
+        import ctypes
+        import uuid
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", wintypes.BYTE * 8)
+            ]
+
+        powrprof = ctypes.WinDLL("powrprof.dll")
+        set_overlay = getattr(powrprof, "PowerSetActiveOverlayScheme", None)
+        if not set_overlay:
+            return False
+        g = _GUID.from_buffer_copy(uuid.UUID(guid_str).bytes_le)
+        return set_overlay(ctypes.byref(g)) == 0
+    except Exception as e:
+        print(f"[Settings] _set_windows_overlay_guid failed: {e}")
+        return False
+
+
 def get_power_mode() -> str:
-    """Returns the name and GUID of the currently active power scheme."""
+    """Returns the name and status of the active power plan and Windows power mode slider."""
     if _OS == "Windows":
+        scheme_name = "Unknown"
+        scheme_guid = ""
         try:
             res = subprocess.run(["powercfg", "/getactivescheme"],
                                  capture_output=True, text=True, timeout=5, **_WIN_HIDE)
-            out = res.stdout.strip()
-            m = re.search(r"GUID:\s*([a-f0-9\-]+)\s*\((.+?)\)", out, re.I)
+            m = re.search(r"GUID:\s*([a-f0-9\-]+)\s*\((.+?)\)", res.stdout, re.I)
             if m:
-                return f"{m.group(2).strip()} ({m.group(1).strip()})"
-            return out or "Unknown"
+                scheme_guid = m.group(1).strip()
+                scheme_name = m.group(2).strip()
         except Exception as e:
-            return f"Error querying power scheme: {e}"
+            scheme_name = f"Error: {e}"
+
+        overlay_guid = _get_windows_overlay_guid()
+        overlay_label = OVERLAY_LABELS.get(overlay_guid, overlay_guid) if overlay_guid else None
+
+        if overlay_label and overlay_label.lower() != scheme_name.lower():
+            return f"{overlay_label} (Plan: {scheme_name})"
+        return scheme_name or overlay_label or "Standard"
     elif _OS == "Darwin":
         try:
             res = subprocess.run(["pmset", "-g"], capture_output=True, text=True, timeout=5)
@@ -651,7 +732,7 @@ def list_power_schemes() -> list[tuple[str, str, bool]]:
 
 
 def set_power_mode(mode: str) -> str:
-    """Switches the operating system power scheme / performance mode.
+    """Switches both the classic power plan and the modern Windows power mode slider.
 
     Supported modes:
       'performance' / 'ultimate' / 'high_performance'
@@ -663,8 +744,10 @@ def set_power_mode(mode: str) -> str:
         schemes = list_power_schemes()
         target_guid = None
         target_name = ""
+        overlay_target = None
 
         if any(k in mode_norm for k in ("perf", "ultimate", "high", "gaming", "max")):
+            overlay_target = OVERLAY_SCHEMES["performance"]
             # Prefer an explicit ultimate scheme, then high performance
             for guid, name, _ in schemes:
                 n_low = name.lower()
@@ -677,6 +760,7 @@ def set_power_mode(mode: str) -> str:
                 target_name = "High performance"
 
         elif any(k in mode_norm for k in ("saver", "battery", "eco", "low", "efficient")):
+            overlay_target = OVERLAY_SCHEMES["saver"]
             for guid, name, _ in schemes:
                 n_low = name.lower()
                 if "saver" in n_low or "battery" in n_low or "eco" in n_low:
@@ -688,6 +772,7 @@ def set_power_mode(mode: str) -> str:
                 target_name = "Power saver"
 
         else: # Default or balanced
+            overlay_target = OVERLAY_SCHEMES["balanced"]
             for guid, name, _ in schemes:
                 if "balanced" in name.lower():
                     target_guid = guid
@@ -697,7 +782,11 @@ def set_power_mode(mode: str) -> str:
                 target_guid = "SCHEME_BALANCED"
                 target_name = "Balanced"
 
-        # Apply using powercfg
+        # 1. Apply Windows Modern Power Mode overlay slider
+        if overlay_target:
+            _set_windows_overlay_guid(overlay_target)
+
+        # 2. Apply classic power scheme using powercfg
         try:
             res = subprocess.run(["powercfg", "/setactive", target_guid],
                                  capture_output=True, text=True, timeout=5, **_WIN_HIDE)
@@ -1005,6 +1094,7 @@ def computer_settings(
     if action in ("performance_mode", "ultimate_performance", "high_performance",
                   "balanced_mode", "battery_saver", "power_saver", "set_power_mode"):
         before_guid = None
+        before_overlay = None
         if _OS == "Windows":
             try:
                 out = subprocess.check_output(["powercfg", "/getactivescheme"],
@@ -1014,12 +1104,18 @@ def computer_settings(
                     before_guid = m.group(1).strip()
             except Exception:
                 pass
+            before_overlay = _get_windows_overlay_guid()
 
         mode = value or action
         result_msg = set_power_mode(mode)
-        if before_guid:
-            push_undo(f"power mode ({action})",
-                      lambda g=before_guid: (subprocess.run(["powercfg", "/setactive", g], **_WIN_HIDE), f"Restored power scheme {g}.")[1])
+        if before_guid or before_overlay:
+            def _restore_power(g=before_guid, ov=before_overlay):
+                if g:
+                    subprocess.run(["powercfg", "/setactive", g], **_WIN_HIDE)
+                if ov:
+                    _set_windows_overlay_guid(ov)
+                return "Restored power mode."
+            push_undo(f"power mode ({action})", _restore_power)
         return result_msg
 
     if action == "volume_set":

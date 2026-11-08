@@ -6,6 +6,9 @@ from actions.computer_settings import (
     set_power_mode,
     computer_settings,
     _detect_action,
+    _get_windows_overlay_guid,
+    _set_windows_overlay_guid,
+    OVERLAY_SCHEMES,
 )
 from core.undo import undo_last
 from core.execution_policy import with_trust, TRUST_LOCAL_OWNER, TRUST_EXTERNAL_MESSAGE
@@ -55,6 +58,23 @@ def test_power_mode_switching_and_undo():
             set_power_mode("performance")
         elif "saver" in initial_mode.lower():
             set_power_mode("battery_saver")
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="Windows specific overlay test")
+def test_windows_modern_overlay_sync():
+    initial_overlay = _get_windows_overlay_guid()
+    try:
+        with with_trust(TRUST_LOCAL_OWNER):
+            # Switch to performance: overlay should match performance GUID
+            computer_settings({"action": "performance_mode"})
+            assert _get_windows_overlay_guid() == OVERLAY_SCHEMES["performance"]
+
+            # Switch to balanced: overlay should match balanced GUID
+            computer_settings({"action": "balanced_mode"})
+            assert _get_windows_overlay_guid() == OVERLAY_SCHEMES["balanced"]
+    finally:
+        if initial_overlay:
+            _set_windows_overlay_guid(initial_overlay)
 
 
 def test_owner_trust_gate():
