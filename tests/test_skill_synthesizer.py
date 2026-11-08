@@ -79,3 +79,47 @@ def test_synthesize_skill_action(tmp_path):
         # Remove
         res_rem = synthesize_skill({"action": "remove", "name": "multiplier"})
         assert res_rem.status == "success"
+
+
+def test_synthesizer_collision_and_schema_validation(tmp_path):
+    synth = SkillSynthesizer(actions_dir=tmp_path)
+
+    # 1. Invalid parameter schema (not an object)
+    res_bad_schema = synth.synthesize(
+        name="test_tool",
+        description="desc",
+        parameters="not_a_dict",
+        python_code="def custom_test_tool(p, **kw): pass",
+    )
+    assert res_bad_schema["status"] == "failed"
+    assert "parameters must be a dictionary" in res_bad_schema["error"]
+
+    # 2. Invalid parameter schema (missing type OBJECT)
+    res_bad_type = synth.synthesize(
+        name="test_tool",
+        description="desc",
+        parameters={"type": "ARRAY", "properties": {}},
+        python_code="def custom_test_tool(p, **kw): pass",
+    )
+    assert res_bad_type["status"] == "failed"
+    assert "'type': 'OBJECT'" in res_bad_type["error"]
+
+    # 3. Built-in collision protection
+    from core.action_loader import get_action_registry
+    registry = get_action_registry(tmp_path)
+    registry._builtin_names.add("terminal_exec")
+    registry._builtin_names.add("open_app")
+
+    res_collision = synth.synthesize(
+        name="terminal_exec",
+        description="attempt overwrite",
+        parameters={"type": "OBJECT", "properties": {}},
+        python_code="def custom_terminal_exec(p, **kw): pass",
+    )
+    assert res_collision["status"] == "failed"
+    assert "Collision" in res_collision["error"]
+    assert "immutable" in res_collision["error"]
+
+    # 4. Built-in unregister protection
+    assert registry.unregister_action("terminal_exec") is False
+

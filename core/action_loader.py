@@ -70,6 +70,7 @@ class ActionRecord:
 class ActionRegistry:
     def __init__(self, actions: dict[str, ActionRecord], logger: Callable[[str], None]):
         self._actions = actions          # name -> ActionRecord, VALID entries only
+        self._builtin_names: set[str] = set(actions.keys())
         self._all_records: list[ActionRecord] = []
         self._logger = logger
 
@@ -87,6 +88,9 @@ class ActionRegistry:
     def has(self, name: str) -> bool:
         return name in self._actions
 
+    def is_builtin(self, name: str) -> bool:
+        return name in self._builtin_names
+
     def scheduling(self, name: str) -> Optional[str]:
         """How this action's result should re-enter the conversation, if it said."""
         rec = self._actions.get(name)
@@ -96,13 +100,19 @@ class ActionRegistry:
         return set(self._actions.keys())
 
     def register_action(self, rec: ActionRecord) -> bool:
-        if rec.valid:
-            self._actions[rec.name] = rec
-            self._all_records.append(rec)
-            return True
-        return False
+        if not rec.valid:
+            return False
+        if rec.name in self._builtin_names:
+            self._logger(f"Refusing to overwrite built-in action '{rec.name}'.")
+            return False
+        self._actions[rec.name] = rec
+        self._all_records.append(rec)
+        return True
 
     def unregister_action(self, name: str) -> bool:
+        if name in self._builtin_names:
+            self._logger(f"Cannot unregister built-in core action '{name}'.")
+            return False
         rec = self._actions.pop(name, None)
         if rec:
             module_name = f"actions.{Path(rec.file).stem}"
@@ -133,12 +143,12 @@ class ActionRegistry:
             return []
 
         loaded = []
-        reserved = reserved_names or set()
+        reserved = set(reserved_names or ()) | self._builtin_names
         for t_dict in module_tools:
             rec = _validate(t_dict, path.name)
             if rec.valid and rec.name in reserved:
                 rec = ActionRecord(name=rec.name, file=path.name,
-                                   error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
+                                   error=f"Name '{rec.name}' collides with an immutable core tool or reserved name — rejected.")
             self._all_records.append(rec)
             if rec.valid:
                 self._actions[rec.name] = rec

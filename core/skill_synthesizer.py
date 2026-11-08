@@ -111,6 +111,24 @@ TOOL = {{
         test_parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Synthesizes, writes, hot-loads, and verifies a custom skill tool."""
+        # Parameter schema validation
+        if not isinstance(parameters, dict):
+            return {
+                "status": "failed",
+                "error": "Invalid tool schema: parameters must be a dictionary.",
+            }
+        p_type = str(parameters.get("type", "")).upper()
+        if p_type != "OBJECT":
+            return {
+                "status": "failed",
+                "error": "Invalid tool schema: parameters must specify 'type': 'OBJECT'.",
+            }
+        if not isinstance(parameters.get("properties"), dict):
+            return {
+                "status": "failed",
+                "error": "Invalid tool schema: parameters must include a 'properties' dictionary.",
+            }
+
         clean_name = name.strip().lower()
         if not _VALID_NAME_RE.match(clean_name):
             return {
@@ -122,6 +140,14 @@ TOOL = {{
             target_name = f"custom_{clean_name}"
         else:
             target_name = clean_name
+
+        # Immutable built-in protection and collision detection
+        registry = get_action_registry(self.actions_dir)
+        if clean_name in registry._builtin_names or target_name in registry._builtin_names:
+            return {
+                "status": "failed",
+                "error": f"Collision: Cannot overwrite built-in core action '{clean_name}'. Core tools are immutable.",
+            }
 
         full_code = self.scaffold_tool_code(clean_name, description, parameters, python_code)
 
@@ -136,7 +162,6 @@ TOOL = {{
             return {"status": "failed", "error": f"Failed to write file {target_file}: {e}"}
 
         # Hot-load into ActionRegistry
-        registry = get_action_registry(self.actions_dir)
         try:
             loaded_records = registry.load_action_file(target_file)
         except Exception as e:
@@ -145,6 +170,8 @@ TOOL = {{
                 target_file.unlink()
             except Exception:
                 pass
+            import sys
+            sys.modules.pop(f"actions.{target_name}", None)
             return {"status": "failed", "error": f"Hot-loading failed: {e}"}
 
         if not loaded_records or not any(r.valid for r in loaded_records):
@@ -153,6 +180,9 @@ TOOL = {{
                 target_file.unlink()
             except Exception:
                 pass
+            import sys
+            sys.modules.pop(f"actions.{target_name}", None)
+            return {"status": "failed", "error": f"Action validation failed: {err}"}
             return {"status": "failed", "error": f"Action validation failed: {err}"}
 
         loaded_name = loaded_records[0].name
