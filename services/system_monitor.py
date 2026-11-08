@@ -72,11 +72,16 @@ def _nvml_gpu() -> float:
         return -1.0
 
 
+_pynvml_inited = False
+_wmi_client = None
+
 def _get_gpu_usage() -> float:
-    # pynvml — subprocess-free, works everywhere if installed
+    global _pynvml_inited
     try:
         import pynvml  # type: ignore
-        pynvml.nvmlInit()
+        if not _pynvml_inited:
+            pynvml.nvmlInit()
+            _pynvml_inited = True
         h = pynvml.nvmlDeviceGetHandleByIndex(0)
         return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
     except Exception:
@@ -101,14 +106,16 @@ def _get_cpu_temp() -> float:
 
     # Windows: wmi module (pure Python COM, zero subprocess)
     if _OS == "Windows":
+        global _wmi_client
         try:
             import wmi  # type: ignore
-            w = wmi.WMI(namespace="root/wmi")
-            tz = w.MSAcpi_ThermalZoneTemperature()
+            if _wmi_client is None:
+                _wmi_client = wmi.WMI(namespace="root/wmi")
+            tz = _wmi_client.MSAcpi_ThermalZoneTemperature()
             if tz:
                 return (tz[0].CurrentTemperature / 10.0) - 273.15
         except Exception:
-            pass
+            _wmi_client = None
 
     return -1.0
 

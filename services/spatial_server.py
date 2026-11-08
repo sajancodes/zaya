@@ -42,8 +42,11 @@ def make_app(session,token):
 
     @app.get('/assets/{bundle_id}/{name}')
     async def get_asset(bundle_id:str,name:str):
-        from core.spatial.asset_import import resource
+        import re
         from fastapi import Response,HTTPException
+        if not re.fullmatch(r'[a-f0-9]{32}', bundle_id) or not re.fullmatch(r'[\w\-.]+', name) or '..' in name:
+            raise HTTPException(400, 'Invalid asset identifier')
+        from core.spatial.asset_import import resource
         value=resource(bundle_id,name)
         if value is None:
             raise HTTPException(404)
@@ -129,10 +132,17 @@ def start():
 
 
 def stop():
-    if _server is not None:
-        from core.spatial.spatial_session import session
-        session.save()
-    if _server:
-        _server.should_exit=True
-    if _thread:
-        _thread.join(3)
+    global _server,_thread,_url
+    with _lock:
+        if _server is not None:
+            try:
+                from core.spatial.spatial_session import session
+                session.save()
+            except Exception:
+                pass
+            _server.should_exit = True
+        if _thread is not None:
+            _thread.join(3)
+        _server = None
+        _thread = None
+        _url = ''

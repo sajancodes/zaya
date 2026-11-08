@@ -166,12 +166,28 @@ class ZayaBar(QWidget):
             self.main_window._log_sig.emit('SYS: Poke voice queued until the current speech finishes.')
         elif self.config['poke_audio_enabled']:
             sound = self.sounds.get(index)
-            if sound and sound.status() == QSoundEffect.Status.Ready:
-                for previous in self.sounds.values():
-                    if previous.isPlaying():
-                        previous.stop()
-                sound.play()
-                self.reaction_requested.emit(reaction['text'])
+            if sound:
+                if sound.status() == QSoundEffect.Status.Ready:
+                    for previous in self.sounds.values():
+                        if previous.isPlaying():
+                            previous.stop()
+                    sound.play()
+                    self.reaction_requested.emit(reaction['text'])
+                elif sound.status() == QSoundEffect.Status.Loading:
+                    def _on_ready(target_sound=sound, txt=reaction['text']):
+                        if target_sound.status() == QSoundEffect.Status.Ready:
+                            try:
+                                target_sound.statusChanged.disconnect(_on_ready)
+                            except Exception:
+                                pass
+                            for previous in self.sounds.values():
+                                if previous.isPlaying():
+                                    previous.stop()
+                            target_sound.play()
+                            self.reaction_requested.emit(txt)
+                    sound.statusChanged.connect(_on_ready)
+                else:
+                    self.reaction_requested.emit(reaction['text'])
             elif not reaction.get('audio'):
                 self.reaction_requested.emit(reaction['text'])
             else:

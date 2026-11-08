@@ -112,6 +112,11 @@ class ShellSessions:
         if os.name == 'nt':
             if shell == 'cmd':
                 argv = [os.environ.get('COMSPEC', 'cmd.exe'), '/d', '/s', '/c', command]
+            elif shell == 'bash':
+                bash_exe = shutil.which('bash')
+                if not bash_exe:
+                    return ToolResult('failed', 'Bash is unavailable on this Windows machine.')
+                argv = [bash_exe, '-c', command]
             else:
                 executable = shutil.which('pwsh') or shutil.which('powershell')
                 if not executable:

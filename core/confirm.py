@@ -159,16 +159,19 @@ def resolve(accepted: bool, *, expected=None) -> None:
     freeze the interface on its way out."""
     global _pending
 
+    hide_cb = None
     with _lock:
         if expected is not None and _pending is not expected:
             return
         p, _pending = _pending, None
-        # Do not hide a newer confirmation installed during this resolution.
         if p is not None and _hide_cb:
-            try:
-                _hide_cb()
-            except Exception:
-                pass
+            hide_cb = _hide_cb
+
+    if hide_cb:
+        try:
+            hide_cb()
+        except Exception:
+            pass
 
     if p is None:
         return
@@ -208,8 +211,9 @@ def pending_title() -> str:
 
 def cancel_task(task_id: str) -> None:
     """Cancel only the gate belonging to this originating operator task."""
+    pending = None
     with _lock:
-        pending = _pending
-        if pending is None or pending.task_id != task_id:
-            return
+        if _pending is not None and _pending.task_id == task_id:
+            pending = _pending
+    if pending is not None:
         resolve(False, expected=pending)

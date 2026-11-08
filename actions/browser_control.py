@@ -371,7 +371,17 @@ _MAC_APP_NAMES: dict[str, str] = {
 _WIN_EXE_HINTS: dict[str, str] = {"chrome": "chrome", "edge": "msedge"}
 
 
-def _open_native(url: str, browser_name: Optional[str]) -> str:
+def _incognito_flags(browser_name: str) -> list[str]:
+    name = (browser_name or "").lower()
+    if "edge" in name:
+        return ["-inprivate"]
+    elif "firefox" in name:
+        return ["-private-window"]
+    else:
+        return ["--incognito"]
+
+
+def _open_native(url: str, browser_name: Optional[str], incognito: bool = False) -> str:
     """
     Opens the user's REAL browser normally — with their own profile,
     logged-in accounts and extensions. No automation attaches, so an
@@ -412,8 +422,10 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 exe = _find_exe_windows(_WIN_EXE_HINTS.get(name, name))
         if exe:
             try:
+                inc_flags = _incognito_flags(name) if incognito else []
+                launch_args = [exe] + inc_flags + ([url] if url else [])
                 subprocess.Popen(
-                    [exe, url] if url else [exe],
+                    launch_args,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return f"Opened in {name}: {url}" if url else f"Opened {name}."
@@ -483,6 +495,7 @@ class _BrowserSession:
         self._loop.run_forever()
 
     async def _async_init(self):
+        self._launch_lock = asyncio.Lock()
         self._pw = await async_playwright().start()
 
     def run(self, coro, timeout: int = 60) -> str:
@@ -1076,7 +1089,7 @@ def browser_control(
             nav_url = params.get("url", "").strip()
 
         try:
-            result = _open_native(nav_url, browser)
+            result = _open_native(nav_url, browser, incognito=bool(params.get('incognito', False)))
         except (ValueError, OSError) as error:
             return _browser_failure(action, error, browser)
         if result.startswith("Opened") and nav_url:

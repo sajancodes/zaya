@@ -24,8 +24,10 @@ def resolve_url(value: str) -> str:
         raise ValueError('A valid HTTP(S) URL without embedded credentials is required.')
     if '.' not in parts.hostname and parts.hostname != 'localhost':
         raise ValueError('Unknown site name; provide an exact URL or use search.')
-    # Accessing port validates malformed numeric ports.
-    _ = parts.port
+    try:
+        _ = parts.port
+    except ValueError:
+        raise ValueError('Invalid port in URL.')
     return value
 
 
@@ -44,4 +46,12 @@ def normalize_git_remote(value: str) -> str:
 
 def matches(expected: str, actual: str) -> bool:
     a, b = urlsplit(expected), urlsplit(actual)
-    return (a.hostname, a.port, a.path.rstrip('/')) == (b.hostname, b.port, b.path.rstrip('/')) and b.scheme in {'http', 'https'}
+    try:
+        a_port = a.port
+    except ValueError:
+        a_port = None
+    try:
+        b_port = b.port
+    except ValueError:
+        b_port = None
+    return (a.hostname, a_port, a.path.rstrip('/')) == (b.hostname, b_port, b.path.rstrip('/')) and b.scheme in {'http', 'https'}

@@ -34,7 +34,7 @@ def _open_project(value: str, directory: Path, session_id: str) -> ToolResult:
             return ToolResult('failed', 'The native VS Code launcher could not be verified.')
         executable = str(native)
     def launch():
-        result = sessions.run_argv([executable, '--reuse-window', str(target)], directory, 30, session_id)
+        result = sessions.run_argv([executable, '--reuse-window', str(target)], directory, 10, session_id)
         if result.status == 'success':
             result.status = 'partial'
             result.summary = f'VS Code launch requested for existing folder {target}. The opened window has not been independently verified.'

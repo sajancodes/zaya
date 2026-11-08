@@ -46,8 +46,8 @@ def maybe_cleanup():
             candidates = list(collection(name).where(filter=FieldFilter('expires_at', '<=', now)).limit(100).stream())
 
             @firestore.transactional
-            def remove(transaction):
-                snapshots = [doc.reference.get(transaction=transaction) for doc in candidates]
+            def remove(transaction, current_candidates=candidates):
+                snapshots = [doc.reference.get(transaction=transaction) for doc in current_candidates]
                 expired = [doc for doc in snapshots if doc.exists and (doc.to_dict() or {}).get('expires_at', now + timedelta(days=1)) <= now]
                 for doc in expired:
                     transaction.delete(doc.reference)

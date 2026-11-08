@@ -381,7 +381,11 @@ def rename_file(path: str, name: str = "", new_name: str = "") -> str:
         if not new_name:
             return "No new name provided."
 
-        new_path = target.parent / new_name
+        if "/" in new_name or "\\" in new_name or ".." in new_name:
+            return "Invalid new name: directory separators and parent traversal are not allowed."
+        new_path = (target.parent / new_name).resolve()
+        if not _is_safe_path(new_path):
+            return f"Access denied: {new_path}"
         if new_path.exists():
             return f"A file named '{new_name}' already exists here."
 

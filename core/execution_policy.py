@@ -19,10 +19,9 @@ TRUST_SYSTEM_EVENT = 'system_event'
 TRUST_UNKNOWN = 'unknown'
 
 _in_test = bool(
-    'unittest' in sys.modules
-    or 'pytest' in sys.modules
+    os.environ.get('PYTEST_CURRENT_TEST')
     or os.environ.get('ZAYA_TEST_RUN') == '1'
-    or (sys.argv and any('unittest' in a or 'pytest' in a for a in sys.argv))
+    or ('pytest' in sys.modules and any('pytest' in a for a in sys.argv))
 )
 
 # Fail-closed: default to TRUST_UNKNOWN in production. Privileged execution requires explicit owner context.
