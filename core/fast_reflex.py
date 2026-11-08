@@ -180,6 +180,20 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "battery_health",
     },
+    "PATH_AUDIT_QUERY": {
+        "phrases": [
+            "check path", "audit path", "verify path",
+            "path status", "check path entries", "how is my path"
+        ],
+        "dynamic": "path_audit",
+    },
+    "DEV_TOOLS_AUDIT_QUERY": {
+        "phrases": [
+            "which dev tools are installed", "check dev tools", "installed cli tools",
+            "what compilers are installed", "list dev tools", "installed developer tools"
+        ],
+        "dynamic": "dev_tools_audit",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -659,6 +673,27 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect battery health right now, sir.")
+
+        if intent_data.get("dynamic") == "path_audit":
+            try:
+                from actions.env_sentinel import _audit_path
+                res = _audit_path()
+                ack = f"PATH has {res['total_entries']} entries ({res['missing_count']} missing, {res['duplicate_count']} duplicates). Status: {res['health']}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=res)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to audit system PATH right now, sir.")
+
+        if intent_data.get("dynamic") == "dev_tools_audit":
+            try:
+                from actions.env_sentinel import _audit_developer_tools
+                res = _audit_developer_tools()
+                top = ", ".join(t["name"] for t in res["installed"][:6])
+                ack = f"Found {res['installed_count']} active developer tools on PATH: {top}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=res)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to audit developer tools right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
