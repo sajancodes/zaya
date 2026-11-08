@@ -382,6 +382,20 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "night_light_toggle",
     },
+    "RECYCLE_BIN_QUERY": {
+        "phrases": [
+            "how much trash is in recycle bin", "check recycle bin", "recycle bin status",
+            "recycle bin size", "is recycle bin empty", "check trash", "check the trash"
+        ],
+        "dynamic": "recycle_bin_status",
+    },
+    "RECYCLE_BIN_EMPTY": {
+        "phrases": [
+            "empty recycle bin", "clear recycle bin", "empty the recycle bin",
+            "empty trash", "clear trash"
+        ],
+        "dynamic": "recycle_bin_empty",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1145,6 +1159,29 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to toggle Night Light right now, sir.")
+
+        if intent_data.get("dynamic") == "recycle_bin_status":
+            try:
+                from actions.recycle_bin_sentinel import get_recycle_bin_stats
+                data = get_recycle_bin_stats()
+                if data["is_empty"]:
+                    ack = "Recycle Bin is completely empty, sir."
+                else:
+                    ack = f"Recycle Bin contains {data['items_count']:,} item(s) using {data['size_mb']} MB of disk space, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Recycle Bin right now, sir.")
+
+        if intent_data.get("dynamic") == "recycle_bin_empty":
+            try:
+                from actions.recycle_bin_sentinel import empty_recycle_bin
+                data = empty_recycle_bin()
+                ack = f"Recycle Bin emptied, freed {data.get('freed_mb', 0)} MB across {data.get('freed_items', 0)} item(s), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to empty Recycle Bin right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
