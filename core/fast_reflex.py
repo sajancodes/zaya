@@ -322,6 +322,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "memory_analysis",
     },
+    "LOCAL_IP_QUERY": {
+        "phrases": [
+            "what is my local ip", "my ip address", "local ip", "check local ip",
+            "what is my ip", "router ip", "default gateway", "my mac address"
+        ],
+        "dynamic": "local_ip",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -989,6 +996,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect memory usage right now, sir.")
+
+        if intent_data.get("dynamic") == "local_ip":
+            try:
+                from actions.adapter_sentinel import get_network_ip_summary
+                data = get_network_ip_summary()
+                gw_str = f" (Router: {data['default_gateway']})" if data['default_gateway'] != "Unknown" else ""
+                ack = f"Your local IP is {data['primary_ip']} on {data['primary_adapter_name']}{gw_str}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect network adapter IP right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

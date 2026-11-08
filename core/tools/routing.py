@@ -107,6 +107,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "boot": {"boot", "uptime", "reboot", "restart", "shutdown", "wake", "sleep", "standby"},
     "dns": {"dns", "nameserver", "lookup", "resolve", "resolver", "domain", "hostname"},
     "ram": {"ram", "memory", "paging", "swap", "pagefile", "commit", "working_set", "rss"},
+    "adapter": {"adapter", "adapters", "ip", "ipv4", "ipv6", "mac", "gateway", "router", "subnet", "netmask", "nic"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -141,7 +142,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel", "adapter_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -160,7 +161,8 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "boot": {"boot_sentinel"},
     "dns": {"dns_sentinel"},
     "ram": {"memory_sentinel"},
-    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel"},
+    "adapter": {"adapter_sentinel"},
+    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel", "adapter_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
     "home": {"home_assistant", "printer_control"},
