@@ -173,6 +173,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "focus_status",
     },
+    "BATTERY_HEALTH_QUERY": {
+        "phrases": [
+            "battery health", "battery wear", "battery degradation",
+            "check battery health", "battery cycle count", "how healthy is my battery"
+        ],
+        "dynamic": "battery_health",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -636,6 +643,22 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect focus status right now, sir.")
+
+        if intent_data.get("dynamic") == "battery_health":
+            try:
+                from actions.power_sentinel import _generate_battery_health_report
+                rep = _generate_battery_health_report()
+                if rep.get("has_battery"):
+                    cond = rep.get("condition", "Good")
+                    pct = rep.get("health_percent", 100.0)
+                    cycles = rep.get("cycle_count", "N/A")
+                    ack = f"Battery health is {cond} at {pct}% with {cycles} cycles completed, sir."
+                else:
+                    ack = "Running on direct AC power with no battery hardware detected, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=rep)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect battery health right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
