@@ -233,6 +233,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "wifi_status",
     },
+    "INSTALLED_SOFTWARE_QUERY": {
+        "phrases": [
+            "installed software", "check installed apps", "how many apps are installed",
+            "list installed programs", "installed programs", "what apps are installed"
+        ],
+        "dynamic": "installed_software",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -791,6 +798,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Wi-Fi status right now, sir.")
+
+        if intent_data.get("dynamic") == "installed_software":
+            try:
+                from actions.software_sentinel import _audit_installed_software
+                apps = _audit_installed_software()
+                ack = f"Found {len(apps)} installed desktop applications registered on Windows, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=apps[:10])
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect installed software right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
