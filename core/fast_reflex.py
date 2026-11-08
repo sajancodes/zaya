@@ -429,6 +429,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "clipboard_history_off",
     },
+    "POWER_PLAN_QUERY": {
+        "phrases": [
+            "what power plan am i on", "check power plan", "power plan status",
+            "current power scheme", "what is my power mode"
+        ],
+        "dynamic": "power_plan_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1266,6 +1273,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to disable Clipboard History right now, sir.")
+
+        if intent_data.get("dynamic") == "power_plan_status":
+            try:
+                from actions.power_plan_sentinel import get_active_power_scheme
+                data = get_active_power_scheme()
+                ack = f"Active Windows power plan is {data['name']}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect power scheme right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
