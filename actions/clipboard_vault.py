@@ -11,7 +11,9 @@ import ctypes
 import datetime
 import json
 from pathlib import Path
+import re
 import sqlite3
+import time
 from typing import Any, Dict, List, Optional
 
 import pyperclip
@@ -19,6 +21,24 @@ import pyperclip
 from core.execution_policy import require_owner
 
 MAX_UNPINNED_HISTORY = 100
+
+
+def redact_sensitive_preview(text: str) -> str:
+    """Mask high-risk secret tokens (OpenAI, GitHub, private keys, connection strings) in previews/logs."""
+    if not text:
+        return ""
+    # Private keys
+    text = re.sub(r"-----BEGIN [A-Z ]+ PRIVATE KEY-----.*?-----END [A-Z ]+ PRIVATE KEY-----", "[REDACTED PRIVATE KEY]", text, flags=re.DOTALL)
+    text = re.sub(r"-----BEGIN [A-Z ]+ PRIVATE KEY-----.*", "[REDACTED PRIVATE KEY]", text)
+    # API keys: sk-...
+    text = re.sub(r"\b(sk-[a-zA-Z0-9_\-]{6})[a-zA-Z0-9_\-]+", r"\1...[REDACTED]", text)
+    # GitHub PATs
+    text = re.sub(r"\b(gh[pousr]_[a-zA-Z0-9]{4})[a-zA-Z0-9]+", r"\1...[REDACTED]", text)
+    # JWT tokens
+    text = re.sub(r"\beyJ[a-zA-Z0-9_\-]{8,}\.eyJ[a-zA-Z0-9_\-]{8,}\.[a-zA-Z0-9_\-]+", "[REDACTED JWT]", text)
+    # Database URIs with credentials
+    text = re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", text)
+    return text
 
 
 def _get_db_path() -> Path:
@@ -55,20 +75,23 @@ def _read_system_clipboard() -> str:
     except Exception:
         pass
 
-    # Win32 ctypes fallback
+    # Win32 ctypes fallback with retry for clipboard contention
     try:
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         CF_UNICODETEXT = 13
-        if user32.OpenClipboard(None):
-            h_data = user32.GetClipboardData(CF_UNICODETEXT)
-            if h_data:
-                p_data = kernel32.GlobalLock(h_data)
-                text = ctypes.c_wchar_p(p_data).value
-                kernel32.GlobalUnlock(h_data)
+        for _ in range(5):
+            if user32.OpenClipboard(None):
+                h_data = user32.GetClipboardData(CF_UNICODETEXT)
+                if h_data:
+                    p_data = kernel32.GlobalLock(h_data)
+                    text = ctypes.c_wchar_p(p_data).value
+                    kernel32.GlobalUnlock(h_data)
+                    user32.CloseClipboard()
+                    return text or ""
                 user32.CloseClipboard()
-                return text or ""
-            user32.CloseClipboard()
+                return ""
+            time.sleep(0.015)
     except Exception:
         pass
     return ""
@@ -93,11 +116,13 @@ def _write_system_clipboard(text: str) -> bool:
             p_mem = kernel32.GlobalLock(h_mem)
             ctypes.memmove(p_mem, encoded, len(encoded))
             kernel32.GlobalUnlock(h_mem)
-            if user32.OpenClipboard(None):
-                user32.EmptyClipboard()
-                user32.SetClipboardData(CF_UNICODETEXT, h_mem)
-                user32.CloseClipboard()
-                return True
+            for _ in range(5):
+                if user32.OpenClipboard(None):
+                    user32.EmptyClipboard()
+                    user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+                    user32.CloseClipboard()
+                    return True
+                time.sleep(0.015)
     except Exception:
         pass
     return False
@@ -137,20 +162,21 @@ def clipboard_vault(parameters: dict, **_kwargs) -> str:
                 "data": {"content": "", "char_count": 0}
             }, indent=2)
 
-        # Auto-store into vault if different from the latest entry
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT content FROM clips ORDER BY id DESC LIMIT 1")
-            row = cur.fetchone()
-            if not row or row[0] != text:
-                now_iso = datetime.datetime.now().isoformat()
-                cur.execute(
-                    "INSERT INTO clips (created_at, content, label, pinned, char_count) VALUES (?, ?, ?, ?, ?)",
-                    (now_iso, text, "", 0, len(text)),
-                )
-                _trim_history(conn)
+        # Auto-store into vault if non-empty and different from the latest entry
+        if text.strip():
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT content FROM clips ORDER BY id DESC LIMIT 1")
+                row = cur.fetchone()
+                if not row or row[0] != text:
+                    now_iso = datetime.datetime.now().isoformat()
+                    cur.execute(
+                        "INSERT INTO clips (created_at, content, label, pinned, char_count) VALUES (?, ?, ?, ?, ?)",
+                        (now_iso, text, "", 0, len(text)),
+                    )
+                    _trim_history(conn)
 
-        preview = text[:80] + ("..." if len(text) > 80 else "")
+        preview = redact_sensitive_preview(text[:80]) + ("..." if len(text) > 80 else "")
         return json.dumps({
             "status": "success",
             "summary": f"Clipboard contains {len(text)} character(s): '{preview}'",
@@ -225,20 +251,17 @@ def clipboard_vault(parameters: dict, **_kwargs) -> str:
             cur = conn.cursor()
             if clip_id:
                 cur.execute("SELECT * FROM clips WHERE id = ?", (clip_id,))
+                row = cur.fetchone()
             elif label:
+                # 1. Try exact label match first
                 cur.execute("SELECT * FROM clips WHERE label = ? ORDER BY id DESC LIMIT 1", (label,))
-                if not cur.fetchone():
-                    # Fuzzy match label
+                row = cur.fetchone()
+                if not row:
+                    # 2. Fuzzy match fallback
                     cur.execute("SELECT * FROM clips WHERE label LIKE ? ORDER BY id DESC LIMIT 1", (f"%{label}%",))
+                    row = cur.fetchone()
             else:
                 return json.dumps({"status": "error", "message": "Must provide 'label' or 'id' to copy snippet."}, indent=2)
-
-            cur = conn.cursor()
-            if clip_id:
-                cur.execute("SELECT * FROM clips WHERE id = ?", (clip_id,))
-            else:
-                cur.execute("SELECT * FROM clips WHERE label LIKE ? ORDER BY id DESC LIMIT 1", (f"%{label}%",))
-            row = cur.fetchone()
 
         if not row:
             return json.dumps({"status": "error", "message": f"Snippet '{label or clip_id}' not found."}, indent=2)
@@ -286,7 +309,7 @@ def clipboard_vault(parameters: dict, **_kwargs) -> str:
 
         clips_list = []
         for r in rows:
-            preview = r["content"][:100] + ("..." if len(r["content"]) > 100 else "")
+            preview = redact_sensitive_preview(r["content"][:100]) + ("..." if len(r["content"]) > 100 else "")
             clips_list.append({
                 "id": r["id"],
                 "created_at": r["created_at"],

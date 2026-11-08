@@ -181,3 +181,37 @@ def test_tool_router_maps_clipboard():
     routed = router.route("search my clipboard history for password", declarations)
     names = [d["name"] for d in routed.declarations]
     assert "clipboard_vault" in names
+
+
+def test_clipboard_redaction_and_exact_match(temp_clipboard_db):
+    from actions.clipboard_vault import redact_sensitive_preview
+
+    # Test token redaction
+    redacted_openai = redact_sensitive_preview("sk-proj-1234567890abcdef1234567890")
+    assert "...[REDACTED]" in redacted_openai
+    assert "1234567890abcdef" not in redacted_openai
+
+    redacted_gh = redact_sensitive_preview("ghp_1234567890abcdefghijklmnopqrstuv")
+    assert "...[REDACTED]" in redacted_gh
+    assert "1234567890abcdef" not in redacted_gh
+
+    assert "[REDACTED PRIVATE KEY]" in redact_sensitive_preview("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----")
+    assert "[REDACTED JWT]" in redact_sensitive_preview("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3j")
+    assert "postgres://user:***@localhost:5432/db" == redact_sensitive_preview("postgres://user:secretpass123@localhost:5432/db")
+
+    # Ordinary text and URLs must not be redacted
+    normal = "https://github.com/sajancodes/zaya and regular notes 123"
+    assert redact_sensitive_preview(normal) == normal
+
+    # Test exact vs fuzzy snippet recall
+    with patch("actions.clipboard_vault._write_system_clipboard", return_value=True) as mock_write:
+        with with_trust(TRUST_LOCAL_OWNER):
+            clipboard_vault({"action": "save_snippet", "label": "unicode_snippet", "text": "Unicode text"})
+            clipboard_vault({"action": "save_snippet", "label": "code", "text": "Exact code match"})
+
+            res_raw = clipboard_vault({"action": "copy_snippet", "label": "code"})
+            res = json.loads(res_raw)
+            assert res["status"] == "success"
+            assert res["data"]["label"] == "code"
+            mock_write.assert_called_with("Exact code match")
+
