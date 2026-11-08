@@ -177,3 +177,23 @@ def test_confirm_cancel_task_releases_lock():
     from core import confirm
     # Verify calling cancel_task with nonexistent task does not crash or deadlock
     confirm.cancel_task("nonexistent-task-id")
+
+def test_pc_ecosystem_terminate_escalates_on_timeout():
+    import psutil
+    from core.pc_ecosystem import PCEcosystemBridge
+
+    bridge = PCEcosystemBridge()
+    mock_proc = MagicMock()
+    mock_proc.info = {"pid": 9999, "name": "stubborn.exe"}
+    mock_proc.pid = 9999
+    mock_proc.name.return_value = "stubborn.exe"
+
+    # First wait() raises TimeoutExpired; second wait() succeeds after kill()
+    mock_proc.wait.side_effect = [psutil.TimeoutExpired(3), None]
+
+    with patch("psutil.pid_exists", return_value=True), \
+         patch("psutil.Process", return_value=mock_proc):
+        res = bridge._cmd_terminate_process("device_1", {"pid": 9999})
+        assert res["ok"] is True
+        mock_proc.terminate.assert_called_once()
+        mock_proc.kill.assert_called_once()

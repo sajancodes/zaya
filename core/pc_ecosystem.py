@@ -813,7 +813,11 @@ class PCEcosystemBridge:
 
             try:
                 proc.terminate()
-                proc.wait(timeout=3)
+                try:
+                    proc.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2)
                 return {
                     "ok": True,
                     "status": "success",
@@ -838,7 +842,11 @@ class PCEcosystemBridge:
                     if proc_name in _CRITICAL_SYSTEM_PROCESSES or any(c in proc_name for c in _CRITICAL_SYSTEM_PROCESSES):
                         continue
                     proc.terminate()
-                    proc.wait(timeout=3)
+                    try:
+                        proc.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=2)
                     terminated += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
