@@ -103,6 +103,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "network_status",
     },
+    "CLIPBOARD_READ_QUERY": {
+        "phrases": [
+            "what's on my clipboard", "what is on my clipboard", "read clipboard",
+            "check clipboard", "read my clipboard", "what did i copy"
+        ],
+        "dynamic": "clipboard_read",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -364,6 +371,21 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Network status is currently unavailable, sir.")
+
+        if intent_data.get("dynamic") == "clipboard_read":
+            try:
+                from actions.clipboard_vault import _read_system_clipboard
+                text = _read_system_clipboard().strip()
+                if not text:
+                    ack = "The clipboard is currently empty, sir."
+                elif len(text) > 70:
+                    ack = f"Clipboard has {len(text)} characters: {text[:65]}..., sir."
+                else:
+                    ack = f"Clipboard content is: {text}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data={"content": text, "char_count": len(text)})
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to read the clipboard right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
