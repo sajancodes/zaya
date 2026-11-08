@@ -226,6 +226,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "startup_programs",
     },
+    "WIFI_STATUS_QUERY": {
+        "phrases": [
+            "wifi status", "wifi signal", "what wifi am i on",
+            "check wifi", "wifi connection", "wifi speed", "is wifi connected"
+        ],
+        "dynamic": "wifi_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -771,6 +778,19 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect startup programs right now, sir.")
+
+        if intent_data.get("dynamic") == "wifi_status":
+            try:
+                from actions.wifi_sentinel import _get_wifi_interface_telemetry
+                data = _get_wifi_interface_telemetry()
+                if data.get("connected"):
+                    ack = f"Connected to '{data['ssid']}' on {data['band']} with {data['signal_percent']}% signal ({data['rx_rate_mbps']} Mbps), sir."
+                else:
+                    ack = "Wi-Fi is currently disconnected or inactive, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Wi-Fi status right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
