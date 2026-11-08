@@ -92,6 +92,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "mission": {"mission", "plan", "steps", "background", "supervise", "multi", "task"},
     "whatsapp": {"whatsapp", "auto", "reply", "monitor", "contact"},
     "home": {"lights", "light", "tuya", "smart", "home", "mqtt", "printer"},
+    "focus": {"focus", "disturb", "dnd", "quiet", "pomodoro", "notification", "notifications"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -118,7 +119,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "memory": {"personal_profile", "conversation_history", "session_activity", "quick_notes", "clipboard_vault"},
     "notes": {"quick_notes", "clipboard_vault"},
     "clipboard": {"clipboard_vault"},
-    "time": {"reminder", "calendar_scheduler"},
+    "time": {"reminder", "calendar_scheduler", "focus_mode"},
     "media": {"media_controller", "video_player", "audio_switcher"},
     "vision": {"display_perception", "hand_controls", "screen_peeler"},
     "web": {"web_search", "deep_research", "weather_report", "market_analytics", "map_navigator"},
@@ -126,9 +127,10 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode"},
     "storage": {"storage_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
+    "focus": {"focus_mode"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},

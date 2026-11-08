@@ -166,6 +166,40 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "bluetooth_status",
     },
+    "FOCUS_MODE_QUERY": {
+        "phrases": [
+            "focus mode status", "how much focus time left", "is focus mode on",
+            "check focus session", "focus status"
+        ],
+        "dynamic": "focus_status",
+    },
+    "FOCUS_MODE_START": {
+        "phrases": [
+            "start focus mode", "turn on focus mode", "activate focus mode",
+            "enter focus mode", "begin focus mode"
+        ],
+        "tool": "focus_mode",
+        "args": {"action": "start", "duration_minutes": 25, "goal": "Deep work"},
+        "ack": "Focus mode activated for 25 minutes. Do Not Disturb is active, sir.",
+    },
+    "FOCUS_MODE_STOP": {
+        "phrases": [
+            "end focus mode", "stop focus mode", "turn off focus mode",
+            "finish focus session", "exit focus mode"
+        ],
+        "tool": "focus_mode",
+        "args": {"action": "stop"},
+        "ack": "Focus session completed, sir.",
+    },
+    "DND_TOGGLE": {
+        "phrases": [
+            "toggle do not disturb", "toggle dnd", "turn on do not disturb",
+            "quiet hours", "enable do not disturb"
+        ],
+        "tool": "focus_mode",
+        "args": {"action": "dnd_toggle"},
+        "ack": "Do Not Disturb toggled, sir.",
+    },
     "WINDOW_SNAP_LEFT": {
         "phrases": [
             "snap left", "snap window left", "window left", "snap active window left"
@@ -586,6 +620,23 @@ class FastReflexRouter:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Bluetooth status right now, sir.")
 
+        if intent_data.get("dynamic") == "focus_status":
+            try:
+                from actions.focus_mode import _get_active_session, _get_windows_quiet_hours_state
+                act = _get_active_session()
+                if act:
+                    elapsed = round((time.time() - act.get("start_ts", time.time())) / 60.0, 1)
+                    rem = max(0.0, round(act.get("target_minutes", 25) - elapsed, 1))
+                    ack = f"Focus mode is active on '{act.get('goal', 'Deep work')}'. {rem}m remaining of {act.get('target_minutes', 25)}m, sir."
+                else:
+                    quiet = _get_windows_quiet_hours_state()
+                    dnd_str = "DND is on" if quiet.get("dnd_active") else "DND is off"
+                    ack = f"No active focus session ({dnd_str}), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=act)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect focus status right now, sir.")
+
         # Media key dispatch
         media_key = intent_data.get("media_key")
         if media_key:
@@ -657,6 +708,22 @@ class FastReflexRouter:
             try:
                 from actions.window_manager import window_manager
                 res = window_manager(args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "focus_mode":
+            args = intent_data.get("args", {})
+            try:
+                from actions.focus_mode import focus_mode
+                res = focus_mode(args)
             except Exception as e:
                 res = str(e)
             return FastReflexResult(
