@@ -293,6 +293,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "usb_devices",
     },
+    "FIREWALL_STATUS_QUERY": {
+        "phrases": [
+            "firewall status", "check firewall", "windows firewall",
+            "is firewall enabled", "check firewall status"
+        ],
+        "dynamic": "firewall_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -917,6 +924,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect USB devices right now, sir.")
+
+        if intent_data.get("dynamic") == "firewall_status":
+            try:
+                from actions.firewall_sentinel import get_firewall_summary
+                data = get_firewall_summary()
+                ack = f"Windows Firewall: {data['security_posture']}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows Firewall status right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
