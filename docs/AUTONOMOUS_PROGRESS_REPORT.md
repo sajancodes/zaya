@@ -214,13 +214,31 @@
 - **Commit:** `0e5c04e`
 - **Verification:** 4 unit tests passing. Verifies consecutive failure circuit breakers, cooldown recovery, and diagnostic health reporting.
 
+### Cycle 58: Dynamic Scratch Sandbox & Safe Script Evaluator
+- **Capability:** Bounded, isolated scratch execution environment for evaluating ad-hoc Python snippets, mathematical models, and data transforms with captured IO and lifecycle cleanup.
+- **Components:** `core/scratch_sandbox.py`, `actions/scratch_eval.py`, `tests/test_scratch_sandbox.py`.
+- **Commit:** `ef0bb07`
+- **Verification:** 5 unit tests passing. Verifies execution timeout bounding, runtime error isolation, and scratch directory purging.
+
+### Cycle 59: Intelligent Spatial Multi-Window Layout Orchestrator
+- **Capability:** Desktop window layout orchestration providing developer split (60/40), dual split, quad grid, and centered focus modes, alongside custom named layout persistence and restoration.
+- **Components:** `core/spatial_layout.py`, `actions/spatial_layout_action.py`, `tests/test_spatial_layout.py`.
+- **Commit:** `9125363`
+- **Verification:** 5 unit tests passing. Verifies layout preset geometry calculations, multi-window tiling, and custom preset restoration.
+
+### Cycle 60: Real-Time Audio Latency & Acoustic Calibration Engine
+- **Capability:** Passively monitors ambient background room noise in dBFS, computes speech Signal-to-Noise Ratio (SNR), measures voice turn-around latency, and dynamically tunes speech silence cutoff thresholds.
+- **Components:** `core/voice_calibration.py`, `actions/audio_calibration_action.py`, `tests/test_voice_calibration.py`.
+- **Commit:** `bf224e8`
+- **Verification:** 5 unit tests passing. Verifies RMS energy computation, noise floor tracking, speech cadence classification (brisk, deliberate, normal), and persistence.
+
 ---
 
 ## 5. Test Verification Matrix
 
-| Test Suite | Baseline | Post-Audit | Jarvis Elevation (Cycles 50–57) | Status |
+| Test Suite | Baseline | Post-Audit | Jarvis Elevation (Cycles 50–60) | Status |
 |---|---|---|---|---|
-| Full Pytest Suite | 797 passed | 838 passed | **877 passed** | **100% Passed (0 failures, 2 warnings in 51.58s)** |
+| Full Pytest Suite | 797 passed | 838 passed | **892 passed** | **100% Passed (0 failures, 2 warnings in 54.98s)** |
 | Ruff Non-Style Lint | 2 baseline findings | 0 findings | 0 findings | **Clean** |
 | Android Lint | N/A | `:app:lintRelease` successful | `:app:lintRelease` successful | **Clean** |
 | Android Build | N/A | `:app:assembleRelease` & `:app:bundleRelease` | `:app:assembleRelease` & `:app:bundleRelease` | **Clean** |
@@ -248,5 +266,9 @@
 - `ae084e4`: `feat(foresight): implement proactive contextual anticipation and executive briefing engine`
 - `34d3ac5`: `feat(dialog): implement multi-modal mixed-initiative dialog state coordinator`
 - `0e5c04e`: `feat(metacognition): implement self-reflective tool reliability tracker and circuit breaker`
+- `ece1176`: `docs: update progress report with cycles 55-57 and 877 passing tests`
+- `ef0bb07`: `feat(sandbox): implement dynamic scratch code evaluator and isolated runtime`
+- `9125363`: `feat(layout): implement spatial multi-window layout orchestrator and presets`
+- `bf224e8`: `feat(audio): implement real-time acoustic calibration and adaptive silence tuning`
 
 All commits authored as `sajancodes <ab4290025@gmail.com>`.
