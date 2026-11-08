@@ -110,6 +110,20 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "clipboard_read",
     },
+    "TOP_CPU_QUERY": {
+        "phrases": [
+            "what's using the most cpu", "what is using the most cpu", "top cpu",
+            "top cpu process", "what's slowing down my pc", "top cpu processes"
+        ],
+        "dynamic": "top_cpu",
+    },
+    "NOT_RESPONDING_QUERY": {
+        "phrases": [
+            "any frozen apps", "any hung apps", "any apps not responding",
+            "not responding apps", "frozen windows", "hung windows"
+        ],
+        "dynamic": "not_responding",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -386,6 +400,32 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to read the clipboard right now, sir.")
+
+        if intent_data.get("dynamic") == "top_cpu":
+            try:
+                from actions.process_sentinel import _get_top_cpu
+                top = _get_top_cpu(1)
+                if top:
+                    ack = f"Top CPU process is {top[0]['name']} at {top[0]['cpu_percent']}%, sir."
+                else:
+                    ack = "No high CPU processes detected, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=top)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect CPU processes right now, sir.")
+
+        if intent_data.get("dynamic") == "not_responding":
+            try:
+                from actions.process_sentinel import _detect_hung_windows
+                hung = _detect_hung_windows()
+                if hung:
+                    ack = f"Detected {len(hung)} frozen window(s): {hung[0]['title']} ({hung[0]['process_name']}), sir."
+                else:
+                    ack = "No frozen or unresponsive applications detected, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=hung)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to scan for unresponsive applications, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
