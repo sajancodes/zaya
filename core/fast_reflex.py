@@ -314,6 +314,14 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "dns_health",
     },
+    "MEMORY_ANALYSIS_QUERY": {
+        "phrases": [
+            "memory breakdown", "top memory apps", "memory pressure",
+            "what is using my ram", "memory leak check", "ram breakdown",
+            "memory footprint", "app memory usage"
+        ],
+        "dynamic": "memory_analysis",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -968,6 +976,19 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect DNS health right now, sir.")
+
+        if intent_data.get("dynamic") == "memory_analysis":
+            try:
+                from actions.memory_sentinel import assess_memory_pressure
+                data = assess_memory_pressure()
+                stats = data["stats"]
+                dom = data.get("dominant_application")
+                top_str = f" Leading consumer: {dom['application']} ({dom['memory_mb']:,} MB)." if dom else ""
+                ack = f"RAM Status: {data['pressure_level']}. Using {stats['ram_used_gb']} GB of {stats['ram_total_gb']} GB ({stats['ram_percent']}%).{top_str}"
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect memory usage right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

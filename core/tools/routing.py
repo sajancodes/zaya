@@ -106,6 +106,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "firewall": {"firewall", "advfirewall", "inbound", "outbound", "rules", "block", "allow", "netsh"},
     "boot": {"boot", "uptime", "reboot", "restart", "shutdown", "wake", "sleep", "standby"},
     "dns": {"dns", "nameserver", "lookup", "resolve", "resolver", "domain", "hostname"},
+    "ram": {"ram", "memory", "paging", "swap", "pagefile", "commit", "working_set", "rss"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -125,11 +126,11 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager", "audio_switcher", "bluetooth_sentinel", "driver_sentinel", "usb_sentinel"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel", "usb_sentinel"},
-    "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel", "service_sentinel", "event_log_sentinel", "task_scheduler_sentinel", "firewall_sentinel"},
+    "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel", "port_sentinel", "service_sentinel", "event_log_sentinel", "task_scheduler_sentinel", "firewall_sentinel", "memory_sentinel"},
     "git": {"git_control", "repo_sentinel"},
     "message": {"whatsapp", "send_message", "telegram_remote", "mobile_device"},
     "phone": {"mobile_device", "mobile_call", "port_tunnel"},
-    "memory": {"personal_profile", "conversation_history", "session_activity", "quick_notes", "clipboard_vault"},
+    "memory": {"personal_profile", "conversation_history", "session_activity", "quick_notes", "clipboard_vault", "memory_sentinel"},
     "notes": {"quick_notes", "clipboard_vault"},
     "clipboard": {"clipboard_vault"},
     "time": {"reminder", "calendar_scheduler", "focus_mode", "task_scheduler_sentinel"},
@@ -140,7 +141,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel", "memory_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -158,6 +159,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "firewall": {"firewall_sentinel"},
     "boot": {"boot_sentinel"},
     "dns": {"dns_sentinel"},
+    "ram": {"memory_sentinel"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
