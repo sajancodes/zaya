@@ -1275,6 +1275,10 @@ class FastReflexRouter:
                 data = empty_recycle_bin(confirm=True)
                 if data.get("status") == "success":
                     ack = f"Recycle Bin emptied, freed {data.get('freed_mb', 0)} MB across {data.get('freed_items', 0)} item(s), sir."
+                elif data.get("status") == "partial_success":
+                    ack = f"Recycle Bin partially emptied: removed {data.get('freed_items', 0)} item(s) ({data.get('freed_mb', 0)} MB), but {data.get('remaining_items', 0)} item(s) remain locked, sir."
+                elif data.get("status") == "unverified":
+                    ack = "Recycle Bin empty command executed, but remaining items could not be verified, sir."
                 elif data.get("status") == "cancelled":
                     ack = "Recycle Bin emptying was cancelled, sir."
                 else:

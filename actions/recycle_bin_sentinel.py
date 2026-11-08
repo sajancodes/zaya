@@ -140,26 +140,46 @@ def empty_recycle_bin(drive: Optional[str] = None, confirm: bool = False) -> Dic
 
         # Post-empty verification
         post = get_recycle_bin_stats(drive)
-        post_items = post.get("items_count", 0) if post.get("status") == "success" else 0
+        if post.get("status") != "success":
+            return {
+                "status": "unverified",
+                "message": f"Empty command executed, but post-operation verification failed: {post.get('message', 'Unknown error')}",
+                "freed_items": None,
+                "freed_bytes": None,
+                "freed_mb": None,
+                "post_verification": post,
+            }
+
         prev_items = prev.get("items_count", 0)
+        prev_bytes = prev.get("size_bytes", 0)
+        post_items = post.get("items_count", 0)
+        post_bytes = post.get("size_bytes", 0)
+
         items_freed = max(0, prev_items - post_items)
-        freed_mb = prev.get("size_mb", 0.0)
+        bytes_freed = max(0, prev_bytes - post_bytes)
+        freed_mb = round(bytes_freed / (1024 * 1024), 2)
 
         if post_items > 0:
             return {
                 "status": "partial_success",
                 "freed_items": items_freed,
+                "freed_bytes": bytes_freed,
                 "freed_mb": freed_mb,
                 "remaining_items": post_items,
-                "message": f"Partially emptied Recycle Bin: removed {items_freed} item(s), {post_items} item(s) remain in use or locked.",
+                "remaining_bytes": post_bytes,
+                "remaining_mb": post.get("size_mb", 0.0),
+                "message": f"Partially emptied Recycle Bin: removed {items_freed} item(s) ({freed_mb} MB freed), {post_items} item(s) remain in use or locked.",
             }
 
         return {
             "status": "success",
-            "freed_items": prev_items,
-            "freed_bytes": prev.get("size_bytes", 0),
+            "freed_items": items_freed,
+            "freed_bytes": bytes_freed,
             "freed_mb": freed_mb,
-            "message": f"Emptied Recycle Bin. Removed {prev_items} item(s) and freed {freed_mb} MB.",
+            "remaining_items": 0,
+            "remaining_bytes": 0,
+            "remaining_mb": 0.0,
+            "message": f"Emptied Recycle Bin. Removed {items_freed} item(s) and freed {freed_mb} MB.",
         }
     except Exception as e:
         return {"status": "error", "message": f"Failed to empty Recycle Bin: {e}"}
