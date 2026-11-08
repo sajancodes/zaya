@@ -66,14 +66,61 @@ def test_empty_recycle_bin_mocked():
         "drive": "All Drives",
         "is_empty": False,
     }
+    mock_post = {
+        "status": "success",
+        "items_count": 0,
+        "size_bytes": 0,
+        "size_mb": 0.0,
+        "size_gb": 0.0,
+        "drive": "All Drives",
+        "is_empty": True,
+    }
 
-    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", return_value=mock_stats), \
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", side_effect=[mock_stats, mock_post]), \
          patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0) as mock_empty:
-        res = empty_recycle_bin()
+        res = empty_recycle_bin(confirm=True)
         assert res["status"] == "success"
         assert res["freed_items"] == 5
         assert res["freed_mb"] == 10.0
         mock_empty.assert_called_once()
+
+
+def test_empty_recycle_bin_safety_and_hresult_handling():
+    mock_stats = {
+        "status": "success",
+        "items_count": 5,
+        "size_bytes": 10485760,
+        "size_mb": 10.0,
+        "size_gb": 0.01,
+        "drive": "All Drives",
+        "is_empty": False,
+    }
+
+    # 1. Confirmation required when confirm=False
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", return_value=mock_stats):
+        res_confirm = empty_recycle_bin(confirm=False)
+        assert res_confirm["status"] == "confirmation_required"
+        assert "Confirmation required" in res_confirm["message"]
+
+    # 2. Cancelled HRESULT
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", return_value=mock_stats), \
+         patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0x80004004):
+        res_cancel = empty_recycle_bin(confirm=True)
+        assert res_cancel["status"] == "cancelled"
+
+    # 3. Access denied HRESULT
+    with patch("actions.recycle_bin_sentinel.get_recycle_bin_stats", return_value=mock_stats), \
+         patch("ctypes.windll.shell32.SHEmptyRecycleBinW", return_value=0x80070005):
+        res_denied = empty_recycle_bin(confirm=True)
+        assert res_denied["status"] == "error"
+        assert "Permission denied" in res_denied["message"]
+
+    # 4. Query failure must not report is_empty: True
+    with patch("ctypes.windll.shell32.SHQueryRecycleBinW", return_value=1):
+        stats_err = get_recycle_bin_stats()
+        assert stats_err["status"] == "error"
+        assert stats_err["is_empty"] is False
+
 
 
 def test_recycle_bin_sentinel_actions():

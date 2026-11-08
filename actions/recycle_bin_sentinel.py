@@ -60,7 +60,7 @@ def get_recycle_bin_stats(drive: Optional[str] = None) -> Dict[str, Any]:
                 "size_mb": 0.0,
                 "size_gb": 0.0,
                 "drive": clean_drive or "All Drives",
-                "is_empty": True,
+                "is_empty": False,
             }
 
         num_items = int(rb.i64NumItems)
@@ -86,17 +86,40 @@ def get_recycle_bin_stats(drive: Optional[str] = None) -> Dict[str, Any]:
             "size_mb": 0.0,
             "size_gb": 0.0,
             "drive": clean_drive or "All Drives",
-            "is_empty": True,
+            "is_empty": False,
         }
 
 
-def empty_recycle_bin(drive: Optional[str] = None) -> Dict[str, Any]:
-    """Empty the Windows Recycle Bin without UI prompts or interruptions."""
+def empty_recycle_bin(drive: Optional[str] = None, confirm: bool = False) -> Dict[str, Any]:
+    """Empty the Windows Recycle Bin, validating HRESULT and confirming destructive action."""
     if os.name != "nt":
         return {"status": "unavailable", "message": "Recycle Bin operations require Windows."}
 
     # Record previous size to announce freed space
     prev = get_recycle_bin_stats(drive)
+    if prev.get("status") == "error":
+        return {"status": "error", "message": f"Cannot inspect Recycle Bin: {prev.get('message')}"}
+
+    if prev.get("is_empty"):
+        return {
+            "status": "success",
+            "freed_items": 0,
+            "freed_bytes": 0,
+            "freed_mb": 0.0,
+            "message": "Recycle Bin is already empty.",
+        }
+
+    # Destructive operation safety confirmation
+    if not confirm:
+        return {
+            "status": "confirmation_required",
+            "message": (
+                f"Confirmation required: Emptying the Recycle Bin permanently deletes "
+                f"{prev.get('items_count', 0)} item(s) ({prev.get('size_mb', 0)} MB). Pass confirm=True to proceed."
+            ),
+            "items_count": prev.get("items_count", 0),
+            "size_mb": prev.get("size_mb", 0.0),
+        }
 
     clean_drive = drive.strip() if drive else None
     if clean_drive and not clean_drive.endswith("\\"):
@@ -107,16 +130,36 @@ def empty_recycle_bin(drive: Optional[str] = None) -> Dict[str, Any]:
         shell32 = ctypes.windll.shell32
         hr = shell32.SHEmptyRecycleBinW(None, clean_drive, flags)
 
-        # hr == 0 (S_OK) or hr == 0x80004005 (already empty)
+        unsigned_hr = (hr & 0xFFFFFFFF) if hr is not None else 0
+        if unsigned_hr == 0x80004004:
+            return {"status": "cancelled", "message": "Recycle Bin emptying was cancelled by user."}
+        if unsigned_hr == 0x80070005:
+            return {"status": "error", "message": "Permission denied: access denied to empty Recycle Bin."}
+        if unsigned_hr != 0:
+            return {"status": "error", "message": f"SHEmptyRecycleBinW failed with HRESULT {unsigned_hr:#x}."}
+
+        # Post-empty verification
+        post = get_recycle_bin_stats(drive)
+        post_items = post.get("items_count", 0) if post.get("status") == "success" else 0
+        prev_items = prev.get("items_count", 0)
+        items_freed = max(0, prev_items - post_items)
         freed_mb = prev.get("size_mb", 0.0)
-        items_freed = prev.get("items_count", 0)
+
+        if post_items > 0:
+            return {
+                "status": "partial_success",
+                "freed_items": items_freed,
+                "freed_mb": freed_mb,
+                "remaining_items": post_items,
+                "message": f"Partially emptied Recycle Bin: removed {items_freed} item(s), {post_items} item(s) remain in use or locked.",
+            }
 
         return {
             "status": "success",
-            "freed_items": items_freed,
+            "freed_items": prev_items,
             "freed_bytes": prev.get("size_bytes", 0),
             "freed_mb": freed_mb,
-            "message": f"Emptied Recycle Bin. Removed {items_freed} item(s) and freed {freed_mb} MB.",
+            "message": f"Emptied Recycle Bin. Removed {prev_items} item(s) and freed {freed_mb} MB.",
         }
     except Exception as e:
         return {"status": "error", "message": f"Failed to empty Recycle Bin: {e}"}
@@ -148,7 +191,8 @@ def recycle_bin_sentinel(parameters: Optional[Dict[str, Any]] = None, **_kwargs)
         }, indent=2)
 
     if action in ("empty", "clear", "purge"):
-        res = empty_recycle_bin(drive)
+        confirm = bool(params.get("confirm", False))
+        res = empty_recycle_bin(drive, confirm=confirm)
         return json.dumps(res, indent=2)
 
     return json.dumps({
@@ -171,6 +215,10 @@ TOOL = {
             "drive": {
                 "type": "STRING",
                 "description": "Specific drive root to inspect or empty (e.g. 'C:\\'). Leave omitted for all drives.",
+            },
+            "confirm": {
+                "type": "BOOLEAN",
+                "description": "Must be set to true to execute destructive clearing of the Recycle Bin.",
             },
         },
     },
