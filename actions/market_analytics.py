@@ -21,6 +21,7 @@ _COMMON_ALIASES: Dict[str, str] = {
     "alphabet": "GOOGL",
     "amazon": "AMZN",
     "tesla": "TSLA",
+    "meta platforms": "META",
     "meta": "META",
     "facebook": "META",
     "netflix": "NFLX",
@@ -28,8 +29,12 @@ _COMMON_ALIASES: Dict[str, str] = {
     "intel": "INTC",
     "broadcom": "AVGO",
     "qualcomm": "QCOM",
+    "taiwan semiconductor manufacturing company": "TSM",
     "taiwan semiconductor": "TSM",
     "tsmc": "TSM",
+    "berkshire hathaway": "BRK-B",
+    "jpmorgan chase": "JPM",
+    "jpmorgan": "JPM",
     "bitcoin": "BTC-USD",
     "btc": "BTC-USD",
     "ethereum": "ETH-USD",
@@ -40,6 +45,7 @@ _COMMON_ALIASES: Dict[str, str] = {
     "doge": "DOGE-USD",
     "sp500": "^GSPC",
     "s&p 500": "^GSPC",
+    "s&p": "^GSPC",
     "nasdaq": "^IXIC",
     "dow": "^DJI",
     "dow jones": "^DJI",
@@ -105,28 +111,57 @@ def _fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
 
 
 _STOPWORDS = {
-    "compare", "versus", "vs", "and", "with", "between", "the", "price",
-    "of", "today", "how", "is", "doing", "what", "whats", "what's", "in",
-    "for", "stock", "stocks", "crypto", "quote", "quotes", "market", "to"
+    "a", "about", "all", "am", "an", "and", "any", "are", "as", "at",
+    "be", "been", "between", "both", "but", "by", "can", "check", "compare",
+    "could", "did", "do", "does", "doing", "for", "from", "get", "had",
+    "has", "have", "he", "her", "here", "him", "his", "how", "i", "if",
+    "in", "into", "is", "it", "its", "just", "like", "look", "market",
+    "markets", "me", "more", "my", "no", "not", "now", "of", "off", "on",
+    "one", "or", "our", "out", "over", "performing", "performance", "please",
+    "price", "prices", "quote", "quotes", "see", "she", "should", "show",
+    "so", "some", "stock", "stocks", "tell", "than", "that", "the", "their",
+    "them", "then", "there", "these", "they", "this", "those", "time", "to",
+    "today", "too", "up", "us", "versus", "very", "via", "vs", "was",
+    "we", "were", "what", "whats", "what's", "when", "where", "which",
+    "while", "who", "whom", "why", "will", "with", "would", "you", "your",
+    "happening", "technology", "tech", "sector", "trend", "trends",
+}
+
+_CONVERSATIONAL_INDICATORS = {
+    "what", "whats", "what's", "how", "tell", "show", "check", "is", "are",
+    "doing", "performing", "happening", "today", "yesterday", "tomorrow",
+    "compare", "versus", "vs", "between", "in", "about", "market", "markets",
+    "price", "prices", "stock", "stocks", "trend", "trends", "see", "please",
 }
 
 
 def _extract_symbols(input_val: Any) -> List[str]:
-    """Extract stock and crypto symbols, correctly handling multiword company names and natural language questions."""
+    """Extract stock and crypto symbols, correctly handling multiword company names,
+
+    explicit tickers, and discarding natural-language conversational words.
+    """
     if isinstance(input_val, list):
         symbols = []
         for item in input_val:
             symbols.extend(_extract_symbols(str(item)))
         return list(dict.fromkeys(symbols))
 
-    text = str(input_val or "").strip()
-    if not text:
+    raw_text = str(input_val or "").strip()
+    if not raw_text:
         return []
 
-    # Strip contractions and conversational punctuation
-    clean_text = re.sub(r"['’]s\b", "", text)
+    # Strip possessive contractions and conversational punctuation
+    clean_text = re.sub(r"['’]s\b", "", raw_text)
     clean_text = re.sub(r"[?!.,;:\"'’`]+", " ", clean_text).strip()
     low_text = clean_text.lower()
+    raw_tokens = raw_text.split()
+    low_tokens = low_text.split()
+
+    is_conversational = (
+        "?" in raw_text
+        or any(tok in _CONVERSATIONAL_INDICATORS for tok in low_tokens)
+        or len(low_tokens) > 3
+    )
 
     found_matches: List[tuple[int, str]] = []
     mask = [False] * len(low_text)
@@ -142,16 +177,29 @@ def _extract_symbols(input_val: Any) -> List[str]:
                     mask[i] = True
                 found_matches.append((start, ticker))
 
-    # 2. Tokenize remaining words, discard stopwords, and normalize
-    for m in re.finditer(r"\b[A-Za-z0-9\.\-\^]+\b", low_text):
+    # 2. Match explicit tickers or standalone symbols in unmasked portions
+    for m in re.finditer(r"\b[A-Za-z0-9\.\-\^]+\b", clean_text):
         start, end = m.span()
         if not any(mask[start:end]):
-            word = m.group(0).lower()
-            if word in _STOPWORDS:
+            word = m.group(0)
+            low_word = word.lower()
+            if low_word in _STOPWORDS:
                 continue
-            normalized = _normalize_symbol(word)
-            if re.match(r"^[A-Z0-9\.\-\^]{1,10}$", normalized):
-                found_matches.append((start, normalized))
+
+            has_symbol_syntax = any(c in word for c in ("^", "-", ".", "="))
+            is_explicit_uppercase = (1 <= len(word) <= 5 and word.isupper())
+
+            if is_conversational:
+                # In conversational sentences, only accept valid syntax symbols or explicit uppercase tickers
+                if has_symbol_syntax or is_explicit_uppercase:
+                    normalized = _normalize_symbol(word)
+                    if re.match(r"^[A-Z0-9\.\-\^]{1,10}$", normalized):
+                        found_matches.append((start, normalized))
+            else:
+                # Direct symbol input (e.g. "aapl", "nvda, msft")
+                normalized = _normalize_symbol(word)
+                if re.match(r"^[A-Z0-9\.\-\^]{1,10}$", normalized):
+                    found_matches.append((start, normalized))
 
     # Sort strictly by position in sentence, then deduplicate
     found_matches.sort(key=lambda x: x[0])
