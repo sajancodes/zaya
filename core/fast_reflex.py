@@ -75,6 +75,105 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         "phrases": ["what date is it", "what's today's date", "today's date", "what is today's date", "what day is today"],
         "dynamic": "date",
     },
+    "POWER_PERFORMANCE": {
+        "phrases": [
+            "performance mode", "switch to performance mode", "enable performance mode",
+            "turn on performance mode", "high performance mode", "activate performance mode"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "performance_mode"},
+        "ack": "Performance mode activated, sir.",
+    },
+    "POWER_BALANCED": {
+        "phrases": [
+            "balanced mode", "switch to balanced mode", "enable balanced mode",
+            "turn on balanced mode", "balanced power mode"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "balanced_mode"},
+        "ack": "Balanced mode enabled, sir.",
+    },
+    "POWER_BATTERY": {
+        "phrases": [
+            "battery saver", "switch to battery saver", "enable battery saver",
+            "turn on battery saver", "power saver mode"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "battery_saver"},
+        "ack": "Battery saver activated, sir.",
+    },
+    "SYSTEM_LOCK": {
+        "phrases": [
+            "lock screen", "lock my pc", "lock computer", "lock the screen", "lock workstation"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "lock_screen"},
+        "ack": "Workstation locked, sir.",
+    },
+    "SHOW_DESKTOP": {
+        "phrases": [
+            "show desktop", "minimize all windows", "minimize everything", "go to desktop"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "show_desktop"},
+        "ack": "Showing desktop, sir.",
+    },
+    "SLEEP_DISPLAY": {
+        "phrases": [
+            "sleep display", "turn off screen", "turn off display", "turn off monitor"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "sleep_display"},
+        "ack": "Display turned off, sir.",
+    },
+    "DARK_MODE": {
+        "phrases": [
+            "toggle dark mode", "switch dark mode", "toggle theme", "toggle dark theme"
+        ],
+        "tool": "computer_settings",
+        "args": {"action": "dark_mode"},
+        "ack": "Theme toggled, sir.",
+    },
+    "OPEN_CALCULATOR": {
+        "phrases": [
+            "open calculator", "launch calculator", "start calculator"
+        ],
+        "tool": "open_app",
+        "args": {"app": "calculator"},
+        "ack": "Opening calculator, sir.",
+    },
+    "OPEN_NOTEPAD": {
+        "phrases": [
+            "open notepad", "launch notepad", "start notepad"
+        ],
+        "tool": "open_app",
+        "args": {"app": "notepad"},
+        "ack": "Opening Notepad, sir.",
+    },
+    "OPEN_TERMINAL": {
+        "phrases": [
+            "open terminal", "launch terminal", "open command prompt", "launch cmd"
+        ],
+        "tool": "open_app",
+        "args": {"app": "terminal"},
+        "ack": "Opening terminal, sir.",
+    },
+    "OPEN_EXPLORER": {
+        "phrases": [
+            "open file explorer", "open explorer", "open files", "launch file explorer"
+        ],
+        "tool": "open_app",
+        "args": {"app": "file explorer"},
+        "ack": "Opening File Explorer, sir.",
+    },
+    "OPEN_TASK_MANAGER": {
+        "phrases": [
+            "open task manager", "launch task manager", "start task manager"
+        ],
+        "tool": "open_app",
+        "args": {"app": "task manager"},
+        "ack": "Opening Task Manager, sir.",
+    },
 }
 
 
@@ -117,7 +216,7 @@ class FastReflexRouter:
     def match(self, text: str) -> Tuple[Optional[str], float]:
         """Matches input text against reflex intents. Returns (intent_name, score)."""
         clean = text.lower().strip()
-        clean = re.sub(r"^(zaya|jarvis|hey zaya|please|hey)\s+", "", clean).strip()
+        clean = re.sub(r"^(zaya|hey zaya|please|hey)\s+", "", clean).strip()
         clean = re.sub(r"[?!.,]", "", clean).strip()
 
         if not clean:
@@ -200,6 +299,38 @@ class FastReflexRouter:
             try:
                 from actions.computer_control import computer_control
                 res = computer_control(args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "computer_settings":
+            args = intent_data.get("args", {})
+            try:
+                from actions.computer_settings import computer_settings
+                res = computer_settings(args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "open_app":
+            args = intent_data.get("args", {})
+            try:
+                from actions.open_app import open_app
+                res = open_app(args)
             except Exception as e:
                 res = str(e)
             return FastReflexResult(

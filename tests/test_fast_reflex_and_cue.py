@@ -49,6 +49,49 @@ def test_fast_reflex_speed():
     assert duration < 0.1, f"Expected < 100ms for 100 evals, took {duration*1000:.2f}ms"
 
 
+def test_fast_reflex_system_and_apps():
+    from unittest.mock import patch
+    router = FastReflexRouter()
+
+    # Match system controls
+    intent, score = router.match("switch to performance mode")
+    assert intent == "POWER_PERFORMANCE"
+    assert score >= 0.88
+
+    intent, score = router.match("lock my pc")
+    assert intent == "SYSTEM_LOCK"
+    assert score >= 0.88
+
+    intent, score = router.match("show desktop")
+    assert intent == "SHOW_DESKTOP"
+    assert score >= 0.88
+
+    intent, score = router.match("open calculator")
+    assert intent == "OPEN_CALCULATOR"
+    assert score >= 0.88
+
+    intent, score = router.match("launch notepad")
+    assert intent == "OPEN_NOTEPAD"
+    assert score >= 0.88
+
+    # Test execution with mocked actions
+    with patch("actions.computer_settings.computer_settings", return_value="Performance mode active.") as mock_cs:
+        res = router.handle("performance mode")
+        assert res is not None
+        assert res.matched is True
+        assert res.tool_name == "computer_settings"
+        assert res.arguments == {"action": "performance_mode"}
+        assert "Performance mode" in res.ack
+
+    with patch("actions.open_app.open_app", return_value="Opened calc.") as mock_oa:
+        res = router.handle("open calculator")
+        assert res is not None
+        assert res.matched is True
+        assert res.tool_name == "open_app"
+        assert res.arguments == {"app": "calculator"}
+        assert "calculator" in res.ack.lower()
+
+
 def test_cue_manager_intent_detection():
     cm = CueManager()
 
