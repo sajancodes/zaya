@@ -54,6 +54,46 @@ def dispatch_media_key(action: str) -> bool:
     return False
 
 
+_DUCK_PREVIOUS_VOLUME: int | None = None
+
+
+def fade_volume(target_percent: int, duration_seconds: float = 1.5, steps: int = 15) -> bool:
+    """Smoothly fades system master volume to target_percent over duration_seconds."""
+    from actions.computer_settings import volume_get, volume_set
+    cur = volume_get()
+    if cur is None:
+        cur = 50
+    target = max(0, min(100, int(target_percent)))
+    if cur == target:
+        return True
+
+    delay = max(0.01, duration_seconds / float(steps))
+    diff = target - cur
+    for i in range(1, steps + 1):
+        step_val = int(round(cur + diff * (i / float(steps))))
+        volume_set(step_val)
+        time.sleep(delay)
+    volume_set(target)
+    return True
+
+
+def duck_volume(target_percent: int = 25) -> bool:
+    """Ducks audio down to target_percent, preserving prior volume level."""
+    global _DUCK_PREVIOUS_VOLUME
+    from actions.computer_settings import volume_get
+    cur = volume_get()
+    if cur is not None and _DUCK_PREVIOUS_VOLUME is None:
+        _DUCK_PREVIOUS_VOLUME = cur
+    return fade_volume(target_percent, duration_seconds=0.6, steps=8)
+
+
+def unduck_volume() -> bool:
+    """Restores pre-duck volume level."""
+    global _DUCK_PREVIOUS_VOLUME
+    target = _DUCK_PREVIOUS_VOLUME if _DUCK_PREVIOUS_VOLUME is not None else 60
+    _DUCK_PREVIOUS_VOLUME = None
+    return fade_volume(target, duration_seconds=0.8, steps=8)
+
 def control_media_playback(parameters: dict, **_kwargs) -> str:
     """Universal Desktop Media Playback Control Action."""
     require_owner()
@@ -64,6 +104,42 @@ def control_media_playback(parameters: dict, **_kwargs) -> str:
         action = "next"
     elif action in ("back", "previous_song"):
         action = "previous"
+
+    if action in ("fade_out", "fade_down"):
+        target = int(parameters.get("target", 0))
+        dur = float(parameters.get("duration", 1.5))
+        fade_volume(target, duration_seconds=dur)
+        return json.dumps({
+            "status": "success",
+            "action": action,
+            "message": f"Volume smoothly faded down to {target}%."
+        }, indent=2)
+
+    if action in ("fade_in", "fade_up"):
+        target = int(parameters.get("target", 50))
+        dur = float(parameters.get("duration", 1.5))
+        fade_volume(target, duration_seconds=dur)
+        return json.dumps({
+            "status": "success",
+            "action": action,
+            "message": f"Volume smoothly faded in to {target}%."
+        }, indent=2)
+
+    if action == "duck":
+        duck_volume(int(parameters.get("target", 25)))
+        return json.dumps({
+            "status": "success",
+            "action": "duck",
+            "message": "Audio ducked for clear hearing."
+        }, indent=2)
+
+    if action == "unduck":
+        unduck_volume()
+        return json.dumps({
+            "status": "success",
+            "action": "unduck",
+            "message": "Audio volume restored."
+        }, indent=2)
 
     if action not in VK_MEDIA:
         # An unknown action was never dispatched. Saying otherwise told the
@@ -101,7 +177,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["play", "pause", "toggle", "next", "previous", "stop", "mute", "volume_up", "volume_down"],
+                "enum": ["play", "pause", "toggle", "next", "previous", "stop", "mute", "volume_up", "volume_down", "fade_out", "fade_in", "duck", "unduck"],
                 "description": "The media control operation to execute."
             }
         },

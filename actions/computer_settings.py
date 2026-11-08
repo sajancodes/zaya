@@ -98,17 +98,20 @@ def volume_get() -> int | None:
     undoable — a wrong undo is worse than no undo."""
     try:
         if _OS == "Windows":
-            import math
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            if hasattr(speakers, "volume_percent") and speakers.volume_percent is not None:
+                return max(0, min(100, int(round(float(speakers.volume_percent)))))
+            if hasattr(speakers, "EndpointVolume") and speakers.EndpointVolume:
+                scalar = speakers.EndpointVolume.GetMasterVolumeLevelScalar()
+                return max(0, min(100, int(round(scalar * 100.0))))
             from ctypes import cast, POINTER
             from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            db        = vol.GetMasterVolumeLevel()
-            if db <= -65.0:
-                return 0
-            return max(0, min(100, round(10 ** (db / 20) * 100)))
+            from pycaw.pycaw import IAudioEndpointVolume
+            dev = getattr(speakers, "_dev", speakers)
+            interface = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol = cast(interface, POINTER(IAudioEndpointVolume))
+            return max(0, min(100, int(round(vol.GetMasterVolumeLevelScalar() * 100.0))))
         if _OS == "Darwin":
             r = subprocess.run(["osascript", "-e", "output volume of (get volume settings)"],
                                capture_output=True, text=True, timeout=5)
@@ -163,16 +166,20 @@ def volume_set(value: int):
     value = max(0, min(100, int(value)))
     if _OS == "Windows":
         try:
-            import math
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
-            vol.SetMasterVolumeLevel(vol_db, None)
-            return
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            scalar = float(value) / 100.0
+            if hasattr(speakers, "EndpointVolume") and speakers.EndpointVolume:
+                speakers.EndpointVolume.SetMasterVolumeLevelScalar(scalar, None)
+                return
+            if hasattr(speakers, "_dev"):
+                from ctypes import cast, POINTER
+                from comtypes import CLSCTX_ALL
+                from pycaw.pycaw import IAudioEndpointVolume
+                interface = speakers._dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                vol = cast(interface, POINTER(IAudioEndpointVolume))
+                vol.SetMasterVolumeLevelScalar(scalar, None)
+                return
         except Exception as e:
             print(f"[Settings] pycaw failed, using keypress fallback: {e}")
             pyautogui.press("volumemute")
