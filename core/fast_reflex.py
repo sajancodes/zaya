@@ -286,6 +286,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "hardware_devices",
     },
+    "USB_DEVICES_QUERY": {
+        "phrases": [
+            "usb devices", "check usb devices", "what usb devices are plugged in",
+            "check usb", "usb ports", "removable drives", "usb flash drive"
+        ],
+        "dynamic": "usb_devices",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -899,6 +906,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect hardware devices right now, sir.")
+
+        if intent_data.get("dynamic") == "usb_devices":
+            try:
+                from actions.usb_sentinel import get_usb_summary
+                data = get_usb_summary()
+                drives_note = f" and {data['removable_drives_count']} removable storage drive(s)" if data['removable_drives_count'] else ""
+                ack = f"Detected {data['connected_usb_devices_count']} connected USB devices{drives_note}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect USB devices right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
