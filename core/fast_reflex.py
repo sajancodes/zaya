@@ -279,6 +279,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "scheduled_tasks",
     },
+    "HARDWARE_DEVICES_QUERY": {
+        "phrases": [
+            "hardware devices", "check hardware devices", "device drivers",
+            "check drivers", "any device problems", "hardware health", "device manager"
+        ],
+        "dynamic": "hardware_devices",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -881,6 +888,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect scheduled tasks right now, sir.")
+
+        if intent_data.get("dynamic") == "hardware_devices":
+            try:
+                from actions.driver_sentinel import get_hardware_health_summary
+                data = get_hardware_health_summary()
+                prob_part = f" Warning: {data['problem_device_count']} problem devices detected." if data['problem_device_count'] else " All devices OK."
+                ack = f"Hardware Health: {data['hardware_health']}. GPU: {data['primary_gpu']}.{prob_part}"
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect hardware devices right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
