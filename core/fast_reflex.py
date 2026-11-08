@@ -194,6 +194,14 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "dev_tools_audit",
     },
+    "SCREEN_RESOLUTION_QUERY": {
+        "phrases": [
+            "screen resolution", "what is my screen resolution", "display resolution",
+            "check screen resolution", "refresh rate", "what is my refresh rate",
+            "display refresh rate", "check display hz"
+        ],
+        "dynamic": "display_resolution",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -694,6 +702,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to audit developer tools right now, sir.")
+
+        if intent_data.get("dynamic") == "display_resolution":
+            try:
+                from actions.display_sentinel import _get_display_metrics
+                m = _get_display_metrics()
+                ack = f"Display is {m['physical_width']}x{m['physical_height']} at {m['refresh_rate_hz']}Hz ({m['dpi_scale_percent']}% scaling, {m['primary_gpu']}), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=m)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect display resolution right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
