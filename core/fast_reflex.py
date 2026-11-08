@@ -265,6 +265,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "ear_safety_status",
     },
+    "EVENT_LOG_QUERY": {
+        "phrases": [
+            "system errors", "check system errors", "event log errors",
+            "system crash logs", "any crashes", "check event log", "windows event logs"
+        ],
+        "dynamic": "event_log_errors",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -844,6 +851,18 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect ear safety status right now, sir.")
+
+        if intent_data.get("dynamic") == "event_log_errors":
+            try:
+                from actions.event_log_sentinel import get_event_log_summary
+                data = get_event_log_summary()
+                latest_crash = data.get("latest_app_crash")
+                crash_note = f" Latest crash: {latest_crash['app_name']}." if latest_crash else ""
+                ack = f"Event Log Status: {data['health_status']}. Found {data['recent_system_errors_count']} system errors and {data['recent_app_crashes_count']} app crashes.{crash_note}"
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows event logs right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
