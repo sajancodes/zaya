@@ -403,6 +403,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "default_apps",
     },
+    "TIMEZONE_QUERY": {
+        "phrases": [
+            "what is my timezone", "check timezone", "what's my timezone",
+            "system timezone", "current timezone", "utc offset", "what timezone am i in"
+        ],
+        "dynamic": "timezone_status",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1200,6 +1207,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect default applications right now, sir.")
+
+        if intent_data.get("dynamic") == "timezone_status":
+            try:
+                from actions.clock_sentinel import get_system_timezone_info
+                data = get_system_timezone_info()
+                ack = f"System timezone is {data['timezone_name']} ({data['utc_offset']}), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect system timezone right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
