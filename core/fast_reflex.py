@@ -604,6 +604,22 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+_NEGATION_RE = re.compile(
+    r"\b(don't|dont|do\s+not|never|not|no|stop|cancel|avoid|prevent|disallow|won't|wont|will\s+not|shouldn't|should\s+not|cannot|can't|cant|refrain\s+from|i\s+(?:don't|dont|do\s+not)\s+want)\b",
+    re.IGNORECASE,
+)
+
+_QUESTION_HYPOTHETICAL_RE = re.compile(
+    r"^(what\s+happens\s+if|what\s+would\s+happen|what\s+if|how\s+do\s+i|how\s+can\s+i|how\s+to|why\s+would|why\s+should|explain\s+how|explain\s+why|explain\s+what|explain\b|tell\s+me\s+about|tell\s+me\s+how|tell\s+me\s+what|is\s+it\s+(?:possible|safe)\s+to|can\s+you\s+explain|what\s+are\s+the\s+consequences)\b",
+    re.IGNORECASE,
+)
+
+_FILLER_WORDS = {
+    "the", "a", "an", "my", "your", "please", "zaya", "hey", "can", "you",
+    "to", "for", "me", "now", "just", "it", "this", "that", "up", "on", "in"
+}
+
+
 def _tokenize_3grams(text: str) -> set[str]:
     clean = re.sub(r"[^\w\s]", "", text.lower().strip())
     words = clean.split()
@@ -624,13 +640,13 @@ class FastReflexRouter:
         self._vocab_idx = {gram: i for i, gram in enumerate(self._vocab_list)}
         dim = len(self._vocab_list)
 
-        # Precompute normalized intent vectors
+        # Precompute normalized intent vectors with phrases
         for intent_name, intent_data in REFLEX_INTENTS.items():
             for p in intent_data["phrases"]:
                 v = self._vectorize(p, dim)
                 norm = np.linalg.norm(v)
                 if norm > 0:
-                    self._intent_vectors.append((intent_name, v / norm))
+                    self._intent_vectors.append((intent_name, v / norm, p))
 
     def _vectorize(self, text: str, dim: int) -> np.ndarray:
         vec = np.zeros(dim, dtype=np.float32)
@@ -642,10 +658,17 @@ class FastReflexRouter:
 
     def match(self, text: str) -> Tuple[Optional[str], float]:
         """Matches input text against reflex intents. Returns (intent_name, score)."""
-        clean = text.lower().strip()
-        clean = re.sub(r"^(zaya|hey zaya|please|hey)\s+", "", clean).strip()
-        clean = re.sub(r"[?!.,]", "", clean).strip()
+        raw_clean = text.lower().strip()
+        raw_clean = re.sub(r"^(zaya|hey zaya|please|hey)\s+", "", raw_clean).strip()
 
+        # Questions, explanations, or hypotheticals must route to full reasoning engine
+        if _QUESTION_HYPOTHETICAL_RE.search(raw_clean):
+            return None, 0.0
+
+        is_question = text.strip().endswith("?") or "?" in text
+        user_negations = set(m.lower().strip() for m in _NEGATION_RE.findall(raw_clean))
+
+        clean = re.sub(r"[?!.,]", "", raw_clean).strip()
         if not clean:
             return None, 0.0
 
@@ -653,6 +676,12 @@ class FastReflexRouter:
         for intent_name, intent_data in REFLEX_INTENTS.items():
             for p in intent_data["phrases"]:
                 if clean == p:
+                    phrase_negations = set(m.lower().strip() for m in _NEGATION_RE.findall(p))
+                    if user_negations - phrase_negations:
+                        # Extra unhandled negation
+                        continue
+                    if is_question and not intent_name.endswith("_QUERY"):
+                        continue
                     return intent_name, 1.0
 
         # Don't evaluate long conversational queries as micro-reflexes
@@ -668,13 +697,33 @@ class FastReflexRouter:
 
         best_intent = None
         best_score = 0.0
-        for intent_name, ref_vec in self._intent_vectors:
+        best_phrase = ""
+        for intent_name, ref_vec, p in self._intent_vectors:
             score = float(np.dot(query_vec, ref_vec))
             if score > best_score:
                 best_score = score
                 best_intent = intent_name
+                best_phrase = p
 
-        if best_score >= 0.88:
+        if best_score >= 0.88 and best_intent:
+            # Action intents must never match questions
+            if is_question and not best_intent.endswith("_QUERY"):
+                return None, best_score
+
+            # Verify negation consistency: user cannot have extra negations not present in matched phrase
+            phrase_negations = set(m.lower().strip() for m in _NEGATION_RE.findall(best_phrase))
+            if user_negations - phrase_negations:
+                return None, 0.0
+
+            # Substantive token coverage check: substantive words cannot silently vanish
+            q_words = set(re.findall(r"\b\w+\b", clean))
+            p_words = set(re.findall(r"\b\w+\b", best_phrase))
+            extra_words = [w for w in (q_words - p_words) if w not in _FILLER_WORDS]
+            if extra_words:
+                # If any extra word is a negation, question marker, or if there are 2+ extra substantive words
+                if any(_NEGATION_RE.search(w) for w in extra_words) or len(extra_words) >= 2:
+                    return None, 0.0
+
             return best_intent, best_score
         return None, best_score
 
@@ -1223,8 +1272,13 @@ class FastReflexRouter:
         if intent_data.get("dynamic") == "recycle_bin_empty":
             try:
                 from actions.recycle_bin_sentinel import empty_recycle_bin
-                data = empty_recycle_bin()
-                ack = f"Recycle Bin emptied, freed {data.get('freed_mb', 0)} MB across {data.get('freed_items', 0)} item(s), sir."
+                data = empty_recycle_bin(confirm=True)
+                if data.get("status") == "success":
+                    ack = f"Recycle Bin emptied, freed {data.get('freed_mb', 0)} MB across {data.get('freed_items', 0)} item(s), sir."
+                elif data.get("status") == "cancelled":
+                    ack = "Recycle Bin emptying was cancelled, sir."
+                else:
+                    ack = data.get("message") or "Unable to empty Recycle Bin right now, sir."
                 return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
             except Exception:
                 pass

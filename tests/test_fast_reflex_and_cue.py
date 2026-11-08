@@ -196,3 +196,39 @@ def test_fast_reflex_battery_and_health():
         assert "24.5%" in res.ack
         assert "48.0%" in res.ack
 
+
+def test_fast_reflex_negation_and_question_rejection():
+    router = FastReflexRouter()
+
+    # Negated commands must NEVER trigger action intents
+    negated_cases = [
+        "Don't empty the recycle bin.",
+        "Never delete those files.",
+        "Do not mute my microphone.",
+        "Don't disable Night Light.",
+        "I don't want clipboard history enabled.",
+        "Not empty recycle bin.",
+        "I don't want to empty recycle bin.",
+        "Never empty recycle bin.",
+    ]
+    for prompt in negated_cases:
+        intent, _ = router.match(prompt)
+        assert intent is None, f"Prompt '{prompt}' should not trigger an intent, got {intent}"
+
+    # Question and hypothetical statements must route to reasoning engine, not fast actions
+    question_cases = [
+        "What happens if I empty the recycle bin?",
+        "Explain how to disable the firewall.",
+        "What would happen if I delete those files?",
+        "Explain how to empty recycle bin",
+    ]
+    for prompt in question_cases:
+        intent, _ = router.match(prompt)
+        assert intent is None, f"Question '{prompt}' should not trigger an intent, got {intent}"
+
+    # Positive command must still execute
+    intent, score = router.match("Empty the recycle bin.")
+    assert intent == "RECYCLE_BIN_EMPTY"
+    assert score >= 0.88
+
+
