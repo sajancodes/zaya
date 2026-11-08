@@ -17,27 +17,47 @@ def ghost_operator(parameters: dict, **_kwargs) -> ToolResult:
     action = str(parameters.get("action") or "inspect").lower().strip()
     engine = get_ghost_operator()
 
+    if action == "metrics":
+        metrics = engine.get_display_metrics()
+        return ToolResult(
+            "success",
+            f"Display metrics: {metrics['width']}x{metrics['height']} (DPI {metrics['dpi']}, Scale {int(metrics['scale_factor']*100)}%)",
+            data=metrics,
+        )
+
     if action == "inspect":
         win = engine.get_active_window()
         pos = engine.get_cursor_pos()
+        metrics = engine.get_display_metrics()
         return ToolResult(
             "success",
-            f"Active window: '{win.get('title')}' at cursor pos {pos}",
-            data={"window": win, "cursor": pos},
+            f"Active window: '{win.get('title')}' at cursor pos {pos} (Scale {int(metrics['scale_factor']*100)}%)",
+            data={"window": win, "cursor": pos, "metrics": metrics},
         )
 
+    # Coordinate normalization resolution if 0-1000 scale is given
+    norm_x = parameters.get("normalized_x", parameters.get("norm_x"))
+    norm_y = parameters.get("normalized_y", parameters.get("norm_y"))
+
     if action == "move":
-        x = int(parameters.get("x", 0))
-        y = int(parameters.get("y", 0))
-        smooth = bool(parameters.get("smooth", False))
-        ok = engine.move_cursor(x, y, smooth=smooth)
+        if norm_x is not None and norm_y is not None:
+            x, y = engine.map_vision_coordinate(norm_x, norm_y)
+        else:
+            x = int(parameters.get("x", 0))
+            y = int(parameters.get("y", 0))
+        smooth = bool(parameters.get("smooth", True))
+        bezier = bool(parameters.get("bezier", True))
+        ok = engine.move_cursor(x, y, smooth=smooth, bezier=bezier)
         if ok:
             return ToolResult("success", f"Cursor moved to ({x}, {y})", data={"x": x, "y": y}, side_effect=True)
         return ToolResult("failed", f"Failed to move cursor to ({x}, {y})")
 
     if action in ("click", "double_click", "right_click"):
-        x = parameters.get("x")
-        y = parameters.get("y")
+        if norm_x is not None and norm_y is not None:
+            x, y = engine.map_vision_coordinate(norm_x, norm_y)
+        else:
+            x = parameters.get("x")
+            y = parameters.get("y")
         btn = "right" if action == "right_click" else str(parameters.get("button", "left"))
         double = action == "double_click"
         ok = engine.click(button=btn, double=double, x=x, y=y)
@@ -94,7 +114,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["inspect", "move", "click", "double_click", "right_click", "drag", "scroll", "focus_window", "workflow"],
+                "enum": ["inspect", "metrics", "move", "click", "double_click", "right_click", "drag", "scroll", "focus_window", "workflow"],
                 "description": "The UI automation operation to perform."
             },
             "x": {

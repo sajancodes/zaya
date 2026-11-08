@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+import math
+import random
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -65,20 +67,136 @@ class GhostOperatorEngine:
         except Exception:
             return False
 
-    def move_cursor(self, x: int, y: int, smooth: bool = False, steps: int = 8) -> bool:
-        """Moves cursor to (x, y) with optional interpolation."""
+    def get_display_metrics(self) -> Dict[str, Any]:
+        """Returns virtual screen dimensions, offsets, and High-DPI scale factor."""
+        if not self._is_win32:
+            return {
+                "width": 1920,
+                "height": 1080,
+                "virtual_left": 0,
+                "virtual_top": 0,
+                "virtual_width": 1920,
+                "virtual_height": 1080,
+                "dpi": 96,
+                "scale_factor": 1.0,
+            }
+        try:
+            user32 = ctypes.windll.user32
+            sw = user32.GetSystemMetrics(0)
+            sh = user32.GetSystemMetrics(1)
+            vx = user32.GetSystemMetrics(76)
+            vy = user32.GetSystemMetrics(77)
+            vw = user32.GetSystemMetrics(78)
+            vh = user32.GetSystemMetrics(79)
+
+            dpi = 96
+            if hasattr(user32, "GetDpiForSystem"):
+                try:
+                    dpi = user32.GetDpiForSystem() or 96
+                except Exception:
+                    dpi = 96
+
+            return {
+                "width": sw or 1920,
+                "height": sh or 1080,
+                "virtual_left": vx or 0,
+                "virtual_top": vy or 0,
+                "virtual_width": vw or sw or 1920,
+                "virtual_height": vh or sh or 1080,
+                "dpi": dpi,
+                "scale_factor": round(dpi / 96.0, 2),
+            }
+        except Exception:
+            return {
+                "width": 1920,
+                "height": 1080,
+                "virtual_left": 0,
+                "virtual_top": 0,
+                "virtual_width": 1920,
+                "virtual_height": 1080,
+                "dpi": 96,
+                "scale_factor": 1.0,
+            }
+
+    def map_vision_coordinate(self, norm_x: float, norm_y: float) -> Tuple[int, int]:
+        """Maps normalized 0-1000 vision coordinates to physical pixel coordinates."""
+        metrics = self.get_display_metrics()
+        vx = metrics["virtual_left"]
+        vy = metrics["virtual_top"]
+        vw = metrics["virtual_width"]
+        vh = metrics["virtual_height"]
+
+        # Clamp 0-1000
+        nx = max(0.0, min(1000.0, float(norm_x)))
+        ny = max(0.0, min(1000.0, float(norm_y)))
+
+        px = int(round(vx + (nx / 1000.0) * (vw - 1)))
+        py = int(round(vy + (ny / 1000.0) * (vh - 1)))
+        return px, py
+
+    @staticmethod
+    def generate_bezier_trajectory(
+        start: Tuple[int, int], end: Tuple[int, int], steps: int = 15
+    ) -> List[Tuple[int, int]]:
+        """Generates a human-like cubic Bezier trajectory with cosine easing."""
+        x0, y0 = start
+        x3, y3 = end
+        dx = x3 - x0
+        dy = y3 - y0
+        dist = math.hypot(dx, dy)
+
+        if dist < 4 or steps <= 1:
+            return [end]
+
+        # Perpendicular unit vector for organic hand curvature
+        nx = -dy / dist
+        ny = dx / dist
+        deviation = min(45.0, dist * 0.18)
+        dev1 = (random.random() - 0.5) * deviation
+        dev2 = (random.random() - 0.5) * deviation
+
+        p1 = (x0 + dx * 0.25 + nx * dev1, y0 + dy * 0.25 + ny * dev1)
+        p2 = (x0 + dx * 0.75 + nx * dev2, y0 + dy * 0.75 + ny * dev2)
+
+        trajectory: List[Tuple[int, int]] = []
+        for i in range(1, steps + 1):
+            t = i / float(steps)
+            # Cosine ease-in-out
+            u = (1.0 - math.cos(t * math.pi)) / 2.0
+
+            bx = (1 - u) ** 3 * x0 + 3 * (1 - u) ** 2 * u * p1[0] + 3 * (1 - u) * u ** 2 * p2[0] + u ** 3 * x3
+            by = (1 - u) ** 3 * y0 + 3 * (1 - u) ** 2 * u * p1[1] + 3 * (1 - u) * u ** 2 * p2[1] + u ** 3 * y3
+
+            # Tiny micro-jitter only on intermediate steps
+            jitter_x = (random.random() - 0.5) * 0.5 if i < steps else 0.0
+            jitter_y = (random.random() - 0.5) * 0.5 if i < steps else 0.0
+
+            trajectory.append((int(round(bx + jitter_x)), int(round(by + jitter_y))))
+        return trajectory
+
+    def move_cursor(
+        self, x: int, y: int, smooth: bool = False, steps: int = 12, bezier: bool = True
+    ) -> bool:
+        """Moves cursor to (x, y) with optional smooth Bezier interpolation."""
         if not self._is_win32:
             return False
         if not smooth or steps <= 1:
             return self.set_cursor_pos(x, y)
 
         cur_x, cur_y = self.get_cursor_pos()
-        for i in range(1, steps + 1):
-            t = i / steps
-            interp_x = int(cur_x + (x - cur_x) * t)
-            interp_y = int(cur_y + (y - cur_y) * t)
-            self.set_cursor_pos(interp_x, interp_y)
-            time.sleep(0.005)
+        if bezier:
+            trajectory = self.generate_bezier_trajectory((cur_x, cur_y), (x, y), steps=steps)
+            for pt_x, pt_y in trajectory:
+                self.set_cursor_pos(pt_x, pt_y)
+                time.sleep(0.004)
+        else:
+            for i in range(1, steps + 1):
+                t = i / steps
+                interp_x = int(cur_x + (x - cur_x) * t)
+                interp_y = int(cur_y + (y - cur_y) * t)
+                self.set_cursor_pos(interp_x, interp_y)
+                time.sleep(0.005)
+
         return self.set_cursor_pos(x, y)
 
     def click(
