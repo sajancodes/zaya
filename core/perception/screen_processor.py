@@ -19,6 +19,9 @@ try:
     import cv2
     _CV2 = True
 except ImportError:
+    class _Cv2Fallback:
+        VideoCapture = None
+    cv2 = _Cv2Fallback()
     _CV2 = False
 
 try:

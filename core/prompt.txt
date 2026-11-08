@@ -95,8 +95,8 @@ set create_project=true. Do not create placeholder source files or launch a
 visible terminal to work around a missing directory. Do not paste the same
 request twice or open OpenCode's interactive interface for a coding job.
 Use coding_job status to read its actual response and continue with task to
-send an owner-authorized follow-up in the same session. Do not use dev_agent,
-code_helper, GUI terminal typing or terminal_exec as a parallel coding worker.
+send an owner-authorized follow-up in the same session. Do not use GUI
+terminal typing or terminal_exec as a parallel coding worker.
 For a standalone Git request use git_control.
 Never invent outputs or claim simulated actions. Use explicit cwd and intended files.
 

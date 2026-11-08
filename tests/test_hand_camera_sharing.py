@@ -3,9 +3,9 @@ from unittest.mock import patch
 
 
 def test_explicit_camera_capture_reuses_hand_worker_without_opening_camera():
-    from actions.screen_processor import _capture_camera
+    from core.perception.screen_processor import _capture_camera
     tracker=SimpleNamespace(state='ACTIVE',device=0,capture_frame=lambda:b'jpeg fixture')
-    with patch('core.gesture.controller.hands.tracker',tracker),patch('actions.screen_processor._load_config',return_value={}),patch('actions.screen_processor.cv2.VideoCapture') as camera:
+    with patch('core.gesture.controller.hands.tracker',tracker),patch('core.perception.screen_processor._load_config',return_value={}),patch('core.perception.screen_processor.cv2.VideoCapture') as camera:
         assert _capture_camera()==(b'jpeg fixture','image/jpeg')
         camera.assert_not_called()
 

@@ -105,7 +105,7 @@ _FALLBACK = (
 # Extra names that map to an area even when the tool name has no shared token.
 _CATEGORY_TOOLS: dict[str, set[str]] = {
     "app": {"open_app", "computer_control", "exit_app"},
-    "computer": {"computer_control", "computer_settings", "ghost_keyboard", "ui_runtime_guard"},
+    "computer": {"computer_control", "computer_settings", "ghost_keyboard"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler"},
     "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job"},
@@ -115,11 +115,11 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "memory": {"personal_profile", "conversation_history", "session_activity"},
     "time": {"reminder", "calendar_scheduler"},
     "media": {"media_controller", "video_player", "youtube_video"},
-    "vision": {"screen_processor", "display_perception", "hand_controls", "screen_peeler"},
+    "vision": {"display_perception", "hand_controls", "screen_peeler"},
     "web": {"web_search", "deep_research", "weather_report", "flight_finder"},
     "spatial": {"spatial_workspace"},
-    "coding": {"coding_job", "code_search", "code_helper", "dev_agent"},
-    "system": {"system_monitor", "system_diagnostics", "runtime_status", "runtime_logs"},
+    "coding": {"coding_job", "code_search"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
     "home": {"home_assistant", "printer_control"},

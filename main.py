@@ -82,10 +82,10 @@ from memory.memory_manager import (
 # Only tools that are tied to live-session state stay inline in this file
 # (screen_process, close_camera, save_memory, manage_monitor, shutdown_zaya,
 # system_status).
-from actions.screen_processor  import _capture_camera, _capture_screen
-from actions.system_monitor    import SystemMonitor, get_system_status
-from actions.proactive         import ProactiveEngine
-from actions.background_monitor import (
+from core.perception.screen_processor import _capture_camera, _capture_screen
+from services.system_monitor    import SystemMonitor, get_system_status
+from services.proactive         import ProactiveEngine
+from services.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
 from actions.web_search        import _news as _fetch_news_sync

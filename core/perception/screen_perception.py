@@ -38,7 +38,7 @@ class ScreenPerception:
         executor=None
         try:
             # Reuse the existing screen module's optional mss dependency.
-            from actions.screen_processor import mss
+            from .screen_processor import mss
             import numpy as np
             from .frame_diff import FrameDiff
             from .roi_tracker import foreground, cursor_region

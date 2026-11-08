@@ -240,7 +240,7 @@ def _camera(_arg: str = "", _cfg: dict | None = None) -> dict:
     """
     import time as _time
 
-    from actions.screen_processor import _capture_camera
+    from core.perception.screen_processor import _capture_camera
     try:
         data, mime = _capture_camera()
     except Exception as e:
@@ -334,7 +334,7 @@ def _system_card(_arg: str = "", _cfg: dict | None = None) -> dict:
     where the platform exposes nothing. Re-implementing any of that here would
     be a second, worse copy that drifts away from the first one."""
     try:
-        from actions.system_monitor import get_system_status
+        from services.system_monitor import get_system_status
     except Exception as e:
         raise RuntimeError(f"The hardware readout is unavailable ({e}).") from None
 
@@ -443,7 +443,7 @@ def away_alert() -> str | None:
     """
     global _monitor
     try:
-        from actions.system_monitor import SystemMonitor
+        from services.system_monitor import SystemMonitor
         if _monitor is None:
             _monitor = SystemMonitor()
         line = _monitor.check()
