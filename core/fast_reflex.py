@@ -202,6 +202,14 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "display_resolution",
     },
+    "HARDWARE_TEMPERATURE_QUERY": {
+        "phrases": [
+            "cpu temperature", "gpu temperature", "what is my gpu temperature",
+            "check temperature", "is my pc overheating", "hardware temperature",
+            "thermal status", "pc temperature", "how hot is my pc"
+        ],
+        "dynamic": "hardware_thermal",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -712,6 +720,21 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect display resolution right now, sir.")
+
+        if intent_data.get("dynamic") == "hardware_thermal":
+            try:
+                from actions.thermal_sentinel import _query_nvidia_smi, _query_cpu_telemetry
+                gpu = _query_nvidia_smi()
+                cpu = _query_cpu_telemetry()
+                cpu_ghz = round(cpu["current_frequency_mhz"] / 1000.0, 2)
+                if gpu.get("available"):
+                    ack = f"GPU is {gpu['condition']} at {gpu['temperature_c']}°C ({gpu['power_draw_w']}W). CPU is at {cpu_ghz} GHz, sir."
+                else:
+                    ack = f"CPU is at {cpu_ghz} GHz across {cpu['logical_cores']} threads ({cpu['average_load_percent']}% load), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data={"gpu": gpu, "cpu": cpu})
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect hardware thermals right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
