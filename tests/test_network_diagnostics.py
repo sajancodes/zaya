@@ -4,6 +4,7 @@ Created and developed by Sajan Rai for Zaya.
 from __future__ import annotations
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -174,3 +175,27 @@ def test_tool_router_maps_network_query():
     routed = router.route("check network latency and ping", declarations)
     names = [d["name"] for d in routed.declarations]
     assert "network_diagnostics" in names
+
+
+def test_dns_timeout_and_tcp_handshake_classification():
+    # 1. Test DNS timeout handling
+    with patch("actions.network_diagnostics.socket.gethostbyname", side_effect=lambda d: time.sleep(0.5) or "1.2.3.4"):
+        dns_res = _benchmark_dns(timeout=0.05)
+        for d, res in dns_res.items():
+            assert "timeout" in res["status"]
+            assert res["ip"] is None
+
+    # 2. Test TCP handshake classification when ICMP fails
+    with patch("subprocess.run", side_effect=Exception("ICMP blocked")), \
+         patch("actions.network_diagnostics._check_tcp_latency", return_value=18.5):
+        ping_res = _run_icmp_ping("1.1.1.1")
+        assert ping_res["reachable"] is True
+        assert ping_res["method"] == "TCP_handshake"
+        assert ping_res["packet_loss_pct"] is None
+
+        with with_trust(TRUST_LOCAL_OWNER):
+            raw = network_diagnostics({"action": "ping", "target": "1.1.1.1"})
+            res = json.loads(raw)
+            assert "TCP handshake to 1.1.1.1: 18.5ms" in res["summary"]
+            assert "packet loss not applicable" in res["summary"]
+

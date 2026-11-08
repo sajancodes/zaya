@@ -75,7 +75,7 @@ def _run_icmp_ping(target: str, count: int = 2, timeout_ms: int = 800) -> Dict[s
             "min_ms": tcp_ms,
             "max_ms": tcp_ms,
             "avg_ms": tcp_ms,
-            "packet_loss_pct": 0,
+            "packet_loss_pct": None,
             "method": "TCP_handshake",
         }
 
@@ -125,18 +125,32 @@ def _get_active_interfaces() -> List[Dict[str, Any]]:
     return interfaces
 
 
-def _benchmark_dns() -> Dict[str, Any]:
-    """Measure DNS resolution speed for core domains."""
+def _resolve_single_domain(domain: str) -> tuple[Optional[str], Optional[float], str]:
+    start = time.perf_counter()
+    try:
+        ip = socket.gethostbyname(domain)
+        elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
+        return ip, elapsed_ms, "ok"
+    except Exception as e:
+        return None, None, f"failed: {e}"
+
+
+def _benchmark_dns(timeout: float = 1.5) -> Dict[str, Any]:
+    """Measure DNS resolution speed for core domains with strict per-domain timeouts."""
+    import concurrent.futures
     test_domains = ["google.com", "cloudflare.com", "github.com", "microsoft.com"]
     results = {}
-    for domain in test_domains:
-        start = time.perf_counter()
-        try:
-            ip = socket.gethostbyname(domain)
-            elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
-            results[domain] = {"ip": ip, "latency_ms": elapsed_ms, "status": "ok"}
-        except Exception as e:
-            results[domain] = {"ip": None, "latency_ms": None, "status": f"failed: {e}"}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(test_domains)) as executor:
+        future_map = {executor.submit(_resolve_single_domain, d): d for d in test_domains}
+        for future, domain in future_map.items():
+            try:
+                ip, elapsed_ms, status = future.result(timeout=timeout)
+                results[domain] = {"ip": ip, "latency_ms": elapsed_ms, "status": status}
+            except concurrent.futures.TimeoutError:
+                results[domain] = {"ip": None, "latency_ms": None, "status": f"timeout (> {int(timeout * 1000)}ms)"}
+            except Exception as e:
+                results[domain] = {"ip": None, "latency_ms": None, "status": f"failed: {e}"}
     return results
 
 
@@ -195,11 +209,17 @@ def network_diagnostics(parameters: dict, **_kwargs) -> str:
     if action in ("ping", "latency"):
         res = _run_icmp_ping(target)
         if res.get("reachable"):
-            summary = (
-                f"Ping to {res['target']}: avg {res['avg_ms']}ms "
-                f"(min {res['min_ms']}ms / max {res['max_ms']}ms), "
-                f"packet loss {res['packet_loss_pct']}% via {res['method']}."
-            )
+            if res.get("method") == "ICMP":
+                summary = (
+                    f"Ping to {res['target']}: avg {res['avg_ms']}ms "
+                    f"(min {res['min_ms']}ms / max {res['max_ms']}ms), "
+                    f"packet loss {res['packet_loss_pct']}% via ICMP."
+                )
+            else:
+                summary = (
+                    f"TCP handshake to {res['target']}: {res['avg_ms']}ms "
+                    f"(ICMP ping unavailable or blocked; packet loss not applicable)."
+                )
         else:
             summary = f"Ping to {res['target']} failed: host unreachable (100% loss)."
         return json.dumps({"status": "success", "summary": summary, "data": res}, indent=2)
