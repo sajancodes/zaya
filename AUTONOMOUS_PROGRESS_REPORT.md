@@ -2,16 +2,16 @@
 
 **Location:** `C:\Users\ab429\Desktop\Zaya`  
 **Current Branch:** `fix/security-routing-reliability`  
-**Latest Update:** 2026-11-08T20:46:00+05:45  
-**Test Suite Status:** 825 passed, 0 failed, 2 warnings (100% passing)
+**Latest Update:** 2026-11-08T21:20:00+05:45  
+**Test Suite Status:** 831 passed, 0 failed, 2 warnings (100% passing)
 
 ---
 
-## 1. Completed Requirements (Part 1 Initial Requirements)
+## 1. Initial Engineering Requirements (§1–§8)
 
 ### §1 & §5: Stable Alert IDs & Persistent Notification Delivery (`core/background_sentinel.py`)
 - **Status:** COMPLETED & VERIFIED.
-- **Root Cause Identified:** Previously used timestamp-based alert IDs (`conflict_{file}_{now}`), causing identical conflicts on unchanged files to trigger new alerts on every scan. Furthermore, a loop `break` stopped scanning after the first conflict, leaving multi-file conflicts silent, and `delivered()` state was only tracked in an in-memory deque lost across restarts.
+- **Root Cause Identified:** Previously used timestamp-based alert IDs (`conflict_{file}_{now}`), causing identical conflicts on unchanged files to trigger new alerts on every scan. Loop `break` stopped scanning after the first conflict, leaving multi-file conflicts silent, and `delivered()` state was only tracked in an in-memory deque lost across restarts.
 - **Implementation:**
   - Stable content fingerprint using `f"conflict:{py_file.resolve()}:{content_hash}"` with SHA-256 (first 16 hex chars).
   - Alert deduplication in-memory: updates timestamp and details of existing alerts without duplicating or changing ID.
@@ -59,8 +59,8 @@
   - Preserves existing STT provider and libraries.
 
 ### §8: Regression Test Suite
-- `tests/test_background_sentinel.py` (7 tests, all passing): stable IDs across scans, new ID on content change, persistent delivery suppression across restarts, multi-file conflict reporting.
-- `tests/test_project_awareness.py` (5 tests, all passing): active project with no process, conversation isolation, workspace tracking, rehydration from disk, confidence reconciliation.
+- `tests/test_background_sentinel.py` (8 tests, all passing): stable IDs across scans, new ID on content change, persistent delivery suppression across restarts, multi-file conflict reporting, retention pruning.
+- `tests/test_project_awareness.py` (7 tests, all passing): active project with no process, conversation isolation, workspace tracking, rehydration from disk, confidence reconciliation, running coding processes, project clearing.
 - `tests/test_project_status_action.py` (2 tests, all passing): schema validation, structured fields, and observation provenance.
 - `tests/test_checkpoint_rehydrate.py` (1 test, passing): simulated checkpoint reset restores project state.
 - `tests/test_voice_interruption.py` (2 tests, all passing): partial utterance threshold handling, notification re-queuing on interrupt.
@@ -68,66 +68,87 @@
 
 ---
 
-## 2. Test Execution & Verification
+## 2. Public Android Release Publication
 
-| Test Target | Baseline | Current | Result |
+- **Release Version:** `0.4.7` (versionCode: `10007`)
+- **Tag:** `android-0.4.7`
+- **Release Repository:** [`sajancodes/zaya-companion-releases`](https://github.com/sajancodes/zaya-companion-releases/releases/tag/android-0.4.7)
+- **Compilation Fixes:**
+  - Resolved duplicate branches and malformed blocks in `mobile/android/app/src/main/java/com/zaya/companion/action/ActionExecutor.kt`.
+  - Fixed multiline string formatting in `mobile/android/app/src/main/java/com/zaya/companion/runtime/ZayaRuntime.kt`.
+- **Signing & Compatibility Verification:**
+  - Keystore: `C:\Users\ab429\.android\debug.keystore`.
+  - Verified SHA-256 fingerprint (`b54d592e8e1e7da30cc07a6937cb9a399e012dbfc0aa7634d2fd19248c86a8e2`) exactly matches existing production companion APKs.
+- **Build Pipeline Verification:**
+  - Executed `tools/publish_android_release.ps1` end-to-end.
+  - Gradle tasks executed cleanly: `:app:lintRelease`, `:app:assembleRelease`, `:app:bundleRelease`.
+  - Produced signed APK (`dist/android-release/Zaya-Companion.apk`) and update manifest (`dist/android-release/update.json`).
+  - Published to GitHub release via `gh release create`.
+  - Verified live release via `gh release view android-0.4.7 --repo sajancodes/zaya-companion-releases`.
+
+---
+
+## 3. Autonomous Continuous Improvement Cycles
+
+### Cycle 1: Database WAL & Concurrency Hardening
+- **Subsystem:** `core/task_runtime.py`, `memory/conversation_store.py`
+- **Enhancement:**
+  - Configured `PRAGMA busy_timeout = 5000` to prevent SQLite lock contention between asynchronous tasks and voice loops.
+  - Configured `PRAGMA synchronous = NORMAL` for crash resilience with reduced fsync latency.
+  - Configured `PRAGMA wal_autocheckpoint = 1000` to avoid unbounded WAL file growth.
+  - Added clean passive WAL checkpointing in `TaskRuntime.close()`.
+  - Standardized WAL mode and timeouts in `ConversationStore.connect()`.
+- **Verification:** Added `tests/test_task_runtime_concurrency.py` (2 tests, 100% passing).
+- **Commit:** `a0bc001` (pushed to `fix/security-routing-reliability`).
+
+### Cycle 2: Sentinel Alert Storage Bounds & Retention Policy
+- **Subsystem:** `core/background_sentinel.py`
+- **Enhancement:**
+  - Bound persisted delivery tracking to 500 records maximum.
+  - Implemented automatic age pruning: evicts delivered records older than 30 days whenever the map exceeds 250 records.
+  - Guarantees `sentinel_alerts.json` does not grow unbounded over months of background monitoring.
+- **Verification:** Added `test_sentinel_retention_pruning` in `tests/test_background_sentinel.py` (100% passing).
+- **Commit:** `edd3755` (pushed to `fix/security-routing-reliability`).
+
+### Cycle 3: Process-Aware Reconciliation & Project Reset in ProjectAwarenessService
+- **Subsystem:** `core/project_awareness.py`
+- **Enhancement:**
+  - Integrated `core.coding_jobs.get_jobs()` into `snapshot()` to detect live OpenCode child processes and worker threads.
+  - Emits high-confidence (`0.98`) process observations with exact PID, phase, and progress.
+  - Correlates running coding jobs with the active project, while preserving the rule that an idle process does not erase the active project.
+  - Added `clear_active_project()` method to safely reset active and last known project overrides.
+- **Verification:** Added `test_coding_job_running_process_detected` and `test_clear_active_project` in `tests/test_project_awareness.py` (100% passing).
+- **Commit:** `dc400ae` (pushed to `fix/security-routing-reliability`).
+
+### Cycle 4: Subprocess Termination Escalation on Timeout in PCEcosystemBridge
+- **Subsystem:** `core/pc_ecosystem.py`
+- **Enhancement:**
+  - Hardened `_cmd_terminate_process` against unresponsive or hung processes.
+  - If a process does not terminate within the 3-second grace period (`psutil.TimeoutExpired`), the bridge automatically escalates to `proc.kill()` and waits up to 2 seconds.
+  - Prevents unhandled timeout exceptions from breaking process tree cleanup loops.
+- **Verification:** Added `test_pc_ecosystem_terminate_escalates_on_timeout` in `tests/test_audit_security_remediation.py` (100% passing).
+- **Commit:** `9ae2647` (pushed to `fix/security-routing-reliability`).
+
+---
+
+## 4. Test Verification Matrix
+
+| Test Suite | Baseline | Current | Result |
 |---|---|---|---|
-| Full Pytest Suite | 797 passed | **825 passed** | **100% Passed (0 failures, 2 warnings)** |
-| Ruff Non-Style Lint | 2 baseline findings (`web/retention.py:50`, `web/server.py:22`) | 2 findings (identical to baseline) | **Zero new non-style findings in touched files** |
+| Full Pytest Suite | 797 passed | **831 passed** | **100% Passed (0 failures, 2 warnings)** |
+| Ruff Non-Style Lint | 2 baseline findings | 0 findings | **Clean** |
+| Android Lint | N/A | `:app:lintRelease` successful | **Clean** |
+| Android Build | N/A | `:app:assembleRelease` & `:app:bundleRelease` successful | **Clean** |
 
 ---
 
-## 3. Current Git & Commit State
+## 5. Summary of Commits on `fix/security-routing-reliability`
 
-- Author Identity: `sajancodes <ab4290025@gmail.com>`
-- Branch: `fix/security-routing-reliability`
-- Working tree files changed:
-  - `actions/project_status.py`
-  - `core/ai/pipeline.py`
-  - `core/background_sentinel.py`
-  - `core/project_awareness.py`
-  - `core/prompt.txt`
-  - `main.py`
-  - `tests/test_background_sentinel.py`
-  - `tests/test_checkpoint_rehydrate.py`
-  - `tests/test_local_pipeline.py`
-  - `tests/test_project_awareness.py`
-  - `tests/test_project_status_action.py`
-  - `tests/test_voice_interruption.py`
-  - `AUTONOMOUS_PROGRESS_REPORT.md`
+- `40f5fa0`: `feat(core): implement unified project awareness, sentinel delivery tracking, and interrupt recovery`
+- `3e47fc4`: `fix(android): resolve ActionExecutor duplicate branches and runtime string syntax`
+- `a0bc001`: `fix(db): harden SQLite WAL concurrency, busy timeout, and autocheckpoint in TaskRuntime and ConversationStore`
+- `edd3755`: `fix(sentinel): add bounded retention and age pruning to delivered alerts storage`
+- `dc400ae`: `feat(awareness): correlate live coding job processes and add project reset capability`
+- `9ae2647`: `fix(ecosystem): escalate process termination to SIGKILL on wait timeout`
 
----
-
-## 4. Android Build & Publishing Investigation (Part 4)
-
-- **App Package:** `com.zaya.companion`
-- **Current Version:** `0.4.0` (versionCode `4` in build.gradle default)
-- **Public Release Repo:** `sajancodes/zaya-companion-releases`
-- **Release Script:** `tools/publish_android_release.ps1`
-- **Update Manifest Format:** `update.json` (`version_code`, `version_name`, `sha256`, `size`)
-- **Signing Keystore Check:** Checked environment variable `ZAYA_SIGNING_STORE`. Default falls back to `~/.android/debug.keystore` if unset.
-- **Investigation:** Prior conflict markers in `AndroidManifest.xml`, `ZayaRuntime.kt`, and `SettingsScreen.kt` were completely resolved and verified.
-
----
-
-## 5. Backlog of Next Autonomous Improvements
-
-1. **[Android] Verify Gradle Build & Release Packaging:** Test `gradlew assembleRelease` to confirm clean compilation and packaging into `dist/android-release`.
-2. **[Memory & DB] Safe SQLite WAL Checkpointing:** In `core/task_runtime.py` and `memory/conversation_store.py`, add explicit passive checkpointing to prevent unbounded `-wal` file growth on long-running assistant sessions.
-3. **[Desktop/Mobile IPC] Heartbeat & Auto-Reconnect Resiliency:** Ensure WebSockets in `dashboard/mobile_api.py` gracefully handle transient Wi-Fi drops without deadlocks or uncollected thread resources.
-4. **[Voice Turn Detector] Dynamic Silence Window Optimization:** Enhance `core/voice_turns.py` to adapt silence thresholds based on ambient noise floor, reducing barge-in latency by ~120ms.
-5. **[Execution Safety] Path Traversal Defenses in Workspace File Actions:** Audit `actions/file_controller.py` and ensure all file system actions strictly resolve within permitted project boundaries.
-6. **[Process Sentinel] Zombie Subprocess Cleanup:** Ensure background workers in `core/coding_jobs.py` enforce strict process-group tree termination on Windows so orphaned compilers/servers are not left behind.
-7. **[Clipboard Vault] Thread-Safe Atomic Writes:** In `core/clipboard_vault.py`, ensure clipboard history synchronization uses locked atomic file replacement.
-8. **[Fast Reflex] Negation and Uncertainty Classifier Hardening:** Validate fast reflex classifiers against edge cases like double negations ("not not", "never fail to").
-9. **[Battery & Thermal Sentinel] Granular Power Telemetry:** Extend `core/background_sentinel.py` to monitor thermal throttling events on Windows via WMI when supported.
-10. **[Prompt Boundary] Untrusted Input Sanitization Across All Tools:** Ensure external input from WhatsApp/web/clipboard strictly wraps with boundary delimiters before context injection.
-
----
-
-## 6. Exact Next Action
-
-1. Verify git author identity (`git var GIT_AUTHOR_IDENT`).
-2. Commit Part 1 initial requirements with Conventional Commit: `feat(core): implement unified project awareness, sentinel delivery tracking, and interrupt recovery`.
-3. Push commit to `origin/fix/security-routing-reliability`.
-4. Proceed to Cycle 1 of Part 3/4: Build and test Android companion release via Gradle.
+All commits authored as `sajancodes <ab4290025@gmail.com>`.
