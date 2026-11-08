@@ -87,11 +87,6 @@ class ActionExecutor(
 
         return@withContext when (action) {
             is AndroidAction.SetFlashlight -> executeFlashlight(action.enabled)
-            is AndroidAction.SetVolume -> {
-                if (hardwareController.setMediaVolume(action.percent.coerceIn(0,100)))
-                    ActionResult.success("Phone media volume adjusted.")
-                else ActionResult.failure("Could not change phone volume.")
-            }
             is AndroidAction.GetFlashlightState -> executeGetFlashlightState()
             is AndroidAction.OpenSystemSettings -> executeOpenSettings(action.setting, action.packageName)
             is AndroidAction.ControlMedia -> executeControlMedia(action.action)
@@ -345,11 +340,6 @@ class ActionExecutor(
     private fun executeInitiateCall(action: AndroidAction.InitiateCall): ActionResult {
         if (action.app == "whatsapp") return executeWhatsappCall(action)
         if (action.app != "phone") return ActionResult.unsupported("Unsupported calling app.")
-        if (!action.confirmed) {
-            val targetLabel = if (action.queryOrNumber.all { it.isDigit() || it in "+-() " }) {
-                action.queryOrNumber
-            } else {
-                when (val lookup = contactManager.lookupContact(action.queryOrNumber)) {
         val query = action.queryOrNumber.trim()
         if (query.isBlank()) {
             return ActionResult.failure("Call recipient or phone number cannot be blank.", error = "malformed_parameters")
@@ -490,7 +480,6 @@ class ActionExecutor(
     private fun executeGetIncomingCallState(): ActionResult {
         if (!registry.hasPermission(Manifest.permission.READ_PHONE_STATE))
             return ActionResult.permissionRequired(Manifest.permission.READ_PHONE_STATE, "Allow phone state access to read incoming calls.")
-    private fun executeGetIncomingCallState(): ActionResult {
         val info = callManager.getIncomingCallInfo()
         return if (info.isRinging) {
             val caller = info.callerName ?: info.incomingNumber ?: "a private or unknown caller"

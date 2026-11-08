@@ -766,9 +766,7 @@ class ZayaRuntime(
                 else "You have no saved personal preferences yet."
             } else {
                 val lines = list.take(5).map { "• ${it.key}: ${it.value} (${it.category.displayName})" }
-                "Saved preferences:
-" + lines.joinToString("
-")
+                "Saved preferences:\n\n" + lines.joinToString("\n\n")
             }
         }
         return null
