@@ -104,6 +104,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "driver": {"driver", "drivers", "device", "devices", "pnputil", "hardware", "pnp", "peripheral", "peripherals"},
     "usb": {"usb", "pendrive", "flashdrive", "thumbdrive", "dongle", "removable", "port", "hub"},
     "firewall": {"firewall", "advfirewall", "inbound", "outbound", "rules", "block", "allow", "netsh"},
+    "boot": {"boot", "uptime", "reboot", "restart", "shutdown", "wake", "sleep", "standby"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -138,11 +139,11 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
-    "power": {"power_sentinel", "computer_settings"},
+    "power": {"power_sentinel", "computer_settings", "boot_sentinel"},
     "env": {"env_sentinel"},
     "thermal": {"thermal_sentinel"},
     "service": {"service_sentinel"},
@@ -154,6 +155,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "driver": {"driver_sentinel"},
     "usb": {"usb_sentinel"},
     "firewall": {"firewall_sentinel"},
+    "boot": {"boot_sentinel"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},

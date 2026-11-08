@@ -300,6 +300,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "firewall_status",
     },
+    "SYSTEM_UPTIME_QUERY": {
+        "phrases": [
+            "system uptime", "how long has my pc been on", "when did my pc boot",
+            "uptime", "last reboot", "pc uptime", "how long has the computer been running"
+        ],
+        "dynamic": "system_uptime",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -934,6 +941,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows Firewall status right now, sir.")
+
+        if intent_data.get("dynamic") == "system_uptime":
+            try:
+                from actions.boot_sentinel import get_system_uptime
+                data = get_system_uptime()
+                ack = f"System has been running for {data['uptime_formatted']}, sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect system uptime right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
