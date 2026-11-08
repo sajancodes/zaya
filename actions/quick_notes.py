@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
@@ -21,22 +22,83 @@ def _get_db_path() -> Path:
     return base / "quick_notes.db"
 
 
+def _extract_tags(content: str, existing_tags: str = "") -> str:
+    """Extracts hashtags (#idea, #shopping) from content and merges with existing tags."""
+    found = set()
+    for tag in re.findall(r"#([a-zA-Z0-9_\-]+)", content):
+        clean = tag.strip().lower()
+        if clean:
+            found.add(clean)
+    if existing_tags:
+        for t in existing_tags.split(","):
+            clean = t.strip().lstrip("#").lower()
+            if clean:
+                found.add(clean)
+    return ", ".join(sorted(found))
+
+
 def _init_db(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                tags TEXT DEFAULT '',
-                pinned INTEGER DEFAULT 0
+    """Initialize database with corruption detection and auto-recovery."""
+    is_corrupt = False
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.execute("PRAGMA quick_check")
+            row = cur.fetchone()
+            if not row or row[0] != "ok":
+                is_corrupt = True
+            else:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS notes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        tags TEXT DEFAULT '',
+                        pinned INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_created ON notes(created_at)")
+                conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        is_corrupt = True
+
+    if is_corrupt:
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            corrupt_backup = db_path.with_suffix(f".corrupt_{timestamp}.bak")
+            if db_path.exists():
+                if corrupt_backup.exists():
+                    corrupt_backup.unlink()
+                db_path.replace(corrupt_backup)
+        except Exception:
+            try:
+                db_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tags TEXT DEFAULT '',
+                    pinned INTEGER DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_created ON notes(created_at)")
-        conn.commit()
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_created ON notes(created_at)")
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def quick_notes(parameters: dict, **_kwargs) -> str:
@@ -61,7 +123,8 @@ def quick_notes(parameters: dict, **_kwargs) -> str:
             first_line = content.split("\n")[0].strip()
             title = first_line[:60] if len(first_line) > 60 else first_line
 
-        tags = str(parameters.get("tags") or "").strip()
+        raw_tags = str(parameters.get("tags") or "").strip()
+        tags = _extract_tags(content, raw_tags)
         pinned = 1 if parameters.get("pinned") in (True, 1, "true", "yes") else 0
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %I:%M %p")
 
@@ -78,8 +141,58 @@ def quick_notes(parameters: dict, **_kwargs) -> str:
             "action": "create",
             "note_id": note_id,
             "title": title,
+            "tags": tags,
             "created_at": now_str,
             "summary": f"Saved note #{note_id}: '{title}', sir."
+        }, indent=2)
+
+    # 2. Update Note
+    if action in ("update", "edit", "modify"):
+        raw_id = parameters.get("note_id") or parameters.get("id")
+        try:
+            note_id = int(raw_id)
+            if note_id <= 0:
+                raise ValueError()
+        except (TypeError, ValueError):
+            return json.dumps({
+                "status": "error",
+                "message": f"Valid positive integer 'note_id' is required to update a note (got '{raw_id}')."
+            }, indent=2)
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+            if not row:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Note #{note_id} not found."
+                }, indent=2)
+
+            new_content = parameters.get("content") or parameters.get("note") or parameters.get("text")
+            new_title = parameters.get("title")
+            new_tags = parameters.get("tags")
+            new_pinned = parameters.get("pinned")
+
+            cur_content = str(new_content).strip() if new_content is not None else row["content"]
+            cur_title = str(new_title).strip() if new_title is not None else row["title"]
+            cur_tags = str(new_tags).strip() if new_tags is not None else row["tags"]
+            if new_content is not None and new_tags is None:
+                cur_tags = _extract_tags(cur_content, cur_tags)
+            cur_pinned = (1 if new_pinned in (True, 1, "true", "yes") else 0) if new_pinned is not None else row["pinned"]
+
+            conn.execute(
+                "UPDATE notes SET title = ?, content = ?, tags = ?, pinned = ? WHERE id = ?",
+                (cur_title, cur_content, cur_tags, cur_pinned, note_id)
+            )
+            conn.commit()
+
+        return json.dumps({
+            "status": "success",
+            "action": "update",
+            "note_id": note_id,
+            "title": cur_title,
+            "tags": cur_tags,
+            "summary": f"Updated note #{note_id}: '{cur_title}', sir."
         }, indent=2)
 
     # 2. List Notes
@@ -153,17 +266,21 @@ def quick_notes(parameters: dict, **_kwargs) -> str:
             "summary": f"Found {len(results)} note(s) matching '{query}': {', '.join(summary_titles)}."
         }, indent=2)
 
-    # 4. Delete Note
+    # 5. Delete Note
     if action in ("delete", "remove"):
-        note_id = parameters.get("note_id") or parameters.get("id")
-        if not note_id:
+        raw_id = parameters.get("note_id") or parameters.get("id")
+        try:
+            note_id = int(raw_id)
+            if note_id <= 0:
+                raise ValueError()
+        except (TypeError, ValueError):
             return json.dumps({
                 "status": "error",
-                "message": "Parameter 'note_id' is required to delete a note."
+                "message": f"Valid positive integer 'note_id' is required to delete a note (got '{raw_id}')."
             }, indent=2)
 
         with sqlite3.connect(db_path) as conn:
-            cur = conn.execute("DELETE FROM notes WHERE id = ?", (int(note_id),))
+            cur = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
             deleted = cur.rowcount
             conn.commit()
 
@@ -182,7 +299,7 @@ def quick_notes(parameters: dict, **_kwargs) -> str:
 
     return json.dumps({
         "status": "error",
-        "message": f"Unsupported action '{action}'. Choose from: create, list, search, delete."
+        "message": f"Unsupported action '{action}'. Choose from: create, update, list, search, delete."
     }, indent=2)
 
 
@@ -190,15 +307,15 @@ TOOL = {
     "name": "quick_notes",
     "description": (
         "Quick Notes & Thought Capture: Fast local note-taking, idea logging, memo searching, and thought archiving. "
-        "Allows taking notes, retrieving recent notes, and searching by keyword or tags without external cloud services."
+        "Allows creating, updating, retrieving recent notes, and searching by keyword or tags without external cloud services."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "'create' to take a note; 'list' to show recent notes; 'search' to find notes by keyword; 'delete' to remove a note by ID.",
-                "enum": ["create", "list", "search", "delete"]
+                "description": "'create' to take a note; 'update' to edit a note; 'list' to show recent notes; 'search' to find notes by keyword; 'delete' to remove a note by ID.",
+                "enum": ["create", "update", "list", "search", "delete"]
             },
             "content": {
                 "type": "STRING",

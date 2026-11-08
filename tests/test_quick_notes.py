@@ -79,3 +79,57 @@ def test_quick_notes_empty_content(tmp_path):
         res = json.loads(raw)
         assert res["status"] == "error"
         assert "cannot be empty" in res["message"]
+
+
+def test_quick_notes_update_and_tags(tmp_path):
+    test_db = tmp_path / "test_notes.db"
+    with patch("actions.quick_notes._get_db_path", return_value=test_db), \
+         patch("core.execution_policy.require_owner"):
+
+        # 1. Create with hashtags in content
+        raw = quick_notes({
+            "action": "create",
+            "content": "Meeting with client at 3pm #client #urgent",
+        })
+        res = json.loads(raw)
+        assert res["status"] == "success"
+        note_id = res["note_id"]
+        assert "client" in res["tags"]
+        assert "urgent" in res["tags"]
+
+        # 2. Update note
+        raw_up = quick_notes({
+            "action": "update",
+            "note_id": note_id,
+            "content": "Meeting with client postponed to 5pm #client #postponed",
+            "title": "Client Meeting Updated",
+        })
+        res_up = json.loads(raw_up)
+        assert res_up["status"] == "success"
+        assert res_up["title"] == "Client Meeting Updated"
+        assert "postponed" in res_up["tags"]
+
+        # 3. Invalid note ID update
+        raw_err = quick_notes({"action": "update", "note_id": "invalid_id", "content": "x"})
+        res_err = json.loads(raw_err)
+        assert res_err["status"] == "error"
+
+        # 4. Invalid note ID delete
+        raw_del_err = quick_notes({"action": "delete", "note_id": -5})
+        res_del_err = json.loads(raw_del_err)
+        assert res_del_err["status"] == "error"
+
+
+def test_quick_notes_corruption_recovery(tmp_path):
+    test_db = tmp_path / "corrupt_notes.db"
+    # Write garbage into file to simulate database corruption
+    test_db.write_bytes(b"CORRUPTED_GARBAGE_DATA_1234567890\x00\xFF\xFE")
+
+    with patch("actions.quick_notes._get_db_path", return_value=test_db), \
+         patch("core.execution_policy.require_owner"):
+        # Initializing or querying should auto-recover cleanly without crashing
+        raw = quick_notes({"action": "create", "content": "Recovery note after corruption"})
+        res = json.loads(raw)
+        assert res["status"] == "success"
+        assert res["note_id"] == 1
+
