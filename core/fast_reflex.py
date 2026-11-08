@@ -307,6 +307,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "system_uptime",
     },
+    "DNS_HEALTH_QUERY": {
+        "phrases": [
+            "dns status", "check dns", "what is my dns", "dns servers",
+            "dns latency", "dns speed", "test dns", "check dns speed"
+        ],
+        "dynamic": "dns_health",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -951,6 +958,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect system uptime right now, sir.")
+
+        if intent_data.get("dynamic") == "dns_health":
+            try:
+                from actions.dns_sentinel import get_dns_health_summary
+                data = get_dns_health_summary()
+                ack = f"DNS Health: {data['health_rating']}. Primary DNS: {data['primary_dns_server']} ({data['average_latency_ms']} ms avg latency), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect DNS health right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

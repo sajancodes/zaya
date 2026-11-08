@@ -105,6 +105,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "usb": {"usb", "pendrive", "flashdrive", "thumbdrive", "dongle", "removable", "port", "hub"},
     "firewall": {"firewall", "advfirewall", "inbound", "outbound", "rules", "block", "allow", "netsh"},
     "boot": {"boot", "uptime", "reboot", "restart", "shutdown", "wake", "sleep", "standby"},
+    "dns": {"dns", "nameserver", "lookup", "resolve", "resolver", "domain", "hostname"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -134,12 +135,12 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "time": {"reminder", "calendar_scheduler", "focus_mode", "task_scheduler_sentinel"},
     "media": {"media_controller", "video_player", "audio_switcher", "ear_safety"},
     "vision": {"display_perception", "hand_controls", "screen_peeler", "display_sentinel"},
-    "web": {"web_search", "deep_research", "weather_report", "market_analytics", "map_navigator"},
+    "web": {"web_search", "deep_research", "weather_report", "market_analytics", "map_navigator", "dns_sentinel"},
     "finance": {"market_analytics"},
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel", "wifi_sentinel", "software_sentinel", "ear_safety", "event_log_sentinel", "task_scheduler_sentinel", "driver_sentinel", "usb_sentinel", "firewall_sentinel", "boot_sentinel", "dns_sentinel"},
     "storage": {"storage_sentinel", "usb_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -156,7 +157,8 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "usb": {"usb_sentinel"},
     "firewall": {"firewall_sentinel"},
     "boot": {"boot_sentinel"},
-    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel"},
+    "dns": {"dns_sentinel"},
+    "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel", "wifi_sentinel", "firewall_sentinel", "dns_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
     "home": {"home_assistant", "printer_control"},
