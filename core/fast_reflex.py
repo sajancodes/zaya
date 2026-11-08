@@ -131,6 +131,38 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "disk_space",
     },
+    "WINDOW_SNAP_LEFT": {
+        "phrases": [
+            "snap left", "snap window left", "window left", "snap active window left"
+        ],
+        "tool": "window_manager",
+        "args": {"action": "snap", "position": "left"},
+        "ack": "Window snapped to the left, sir.",
+    },
+    "WINDOW_SNAP_RIGHT": {
+        "phrases": [
+            "snap right", "snap window right", "window right", "snap active window right"
+        ],
+        "tool": "window_manager",
+        "args": {"action": "snap", "position": "right"},
+        "ack": "Window snapped to the right, sir.",
+    },
+    "WINDOW_CENTER": {
+        "phrases": [
+            "center window", "center active window", "center the window"
+        ],
+        "tool": "window_manager",
+        "args": {"action": "center"},
+        "ack": "Window centered, sir.",
+    },
+    "WINDOW_MAXIMIZE": {
+        "phrases": [
+            "maximize window", "maximize active window", "maximize the window"
+        ],
+        "tool": "window_manager",
+        "args": {"action": "maximize"},
+        "ack": "Window maximized, sir.",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -503,6 +535,22 @@ class FastReflexRouter:
             try:
                 from actions.open_app import open_app
                 res = open_app(args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "window_manager":
+            args = intent_data.get("args", {})
+            try:
+                from actions.window_manager import window_manager
+                res = window_manager(args)
             except Exception as e:
                 res = str(e)
             return FastReflexResult(

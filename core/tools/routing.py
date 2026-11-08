@@ -58,7 +58,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
             "brave", "discord", "steam", "vscode", "notepad", "calculator", "explorer"},
     "computer": {"click", "double", "right", "type", "press", "key", "hotkey", "keyboard",
                  "mouse", "cursor", "scroll", "drag", "window", "minimize", "maximize",
-                 "focus", "foreground", "desktop", "screen"},
+                 "focus", "foreground", "desktop", "screen", "snap", "tile", "center"},
     "browser": {"browser", "tab", "website", "url", "page", "navigate", "reload",
                 "playwright", "dom", "download", "bookmark"},
     "files": {"file", "files", "folder", "directory", "path", "read", "write", "create",
@@ -106,8 +106,8 @@ _FALLBACK = (
 
 # Extra names that map to an area even when the tool name has no shared token.
 _CATEGORY_TOOLS: dict[str, set[str]] = {
-    "app": {"open_app", "computer_control", "exit_app"},
-    "computer": {"computer_control", "computer_settings", "ghost_keyboard"},
+    "app": {"open_app", "computer_control", "exit_app", "window_manager"},
+    "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel"},
     "terminal": {"terminal_exec", "process_terminate", "runtime_logs", "coding_job", "process_sentinel"},
