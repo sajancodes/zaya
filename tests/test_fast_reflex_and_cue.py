@@ -159,3 +159,40 @@ def test_cue_explicit_cancel():
     matched_cue, params = cm.evaluate(text="cancel")
     assert matched_cue is None
     assert cm.has_armed_cue() is False
+
+
+def test_fast_reflex_battery_and_health():
+    from unittest.mock import patch, MagicMock
+    router = FastReflexRouter()
+
+    intent, score = router.match("what is my battery")
+    assert intent == "BATTERY_QUERY"
+    assert score >= 0.88
+
+    intent, score = router.match("check cpu usage")
+    assert intent == "SYSTEM_HEALTH_QUERY"
+    assert score >= 0.88
+
+    # Test execution
+    mock_batt = MagicMock(percent=82, power_plugged=True, secsleft=-2)
+    with patch("psutil.sensors_battery", return_value=mock_batt):
+        res = router.handle("battery status")
+        assert res is not None
+        assert res.matched is True
+        assert "82%" in res.ack
+        assert "charging" in res.ack
+
+    mock_status = {
+        "cpu_percent": 24.5,
+        "ram_percent": 48.0,
+        "ram_used_gb": 7.5,
+        "ram_total_gb": 16.0,
+        "uptime": "2h 10m",
+    }
+    with patch("services.system_monitor.get_system_status", return_value=mock_status):
+        res = router.handle("system health")
+        assert res is not None
+        assert res.matched is True
+        assert "24.5%" in res.ack
+        assert "48.0%" in res.ack
+

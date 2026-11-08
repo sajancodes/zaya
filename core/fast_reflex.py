@@ -75,6 +75,21 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         "phrases": ["what date is it", "what's today's date", "today's date", "what is today's date", "what day is today"],
         "dynamic": "date",
     },
+    "BATTERY_QUERY": {
+        "phrases": [
+            "battery", "what is my battery", "what's my battery", "battery status",
+            "check battery", "battery level", "how much battery", "battery percentage"
+        ],
+        "dynamic": "battery",
+    },
+    "SYSTEM_HEALTH_QUERY": {
+        "phrases": [
+            "cpu usage", "check cpu usage", "ram usage", "check ram usage",
+            "system health", "system status", "hardware status", "check cpu", "check ram",
+            "check system health"
+        ],
+        "dynamic": "system_health",
+    },
     "POWER_PERFORMANCE": {
         "phrases": [
             "performance mode", "switch to performance mode", "enable performance mode",
@@ -275,6 +290,40 @@ class FastReflexRouter:
                 ack=f"Today is {today_str}, sir.",
                 data={"date": today_str},
             )
+
+        if intent_data.get("dynamic") == "battery":
+            try:
+                import psutil
+                batt = psutil.sensors_battery()
+                if batt is not None:
+                    pct = int(batt.percent)
+                    if batt.power_plugged:
+                        ack = f"Battery is at {pct}% and charging, sir." if pct < 100 else "Battery is fully charged at 100%, sir."
+                    else:
+                        ack = f"Battery is at {pct}%, sir."
+                    return FastReflexResult(
+                        matched=True,
+                        intent=intent_name,
+                        ack=ack,
+                        data={"percent": pct, "plugged": bool(batt.power_plugged)},
+                    )
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Battery sensor is unavailable, sir.")
+
+        if intent_data.get("dynamic") == "system_health":
+            try:
+                from services.system_monitor import get_system_status
+                st = get_system_status()
+                cpu = st.get("cpu_percent", 0)
+                ram_pct = st.get("ram_percent", 0)
+                ram_used = st.get("ram_used_gb", 0)
+                ram_tot = st.get("ram_total_gb", 0)
+                ack = f"CPU is at {cpu}%, RAM is at {ram_pct}% ({ram_used} GB of {ram_tot} GB used), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=st)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="System metrics are currently unavailable, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

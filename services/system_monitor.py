@@ -125,15 +125,30 @@ def get_system_status() -> dict:
     uptime_h    = int(uptime_secs // 3600)
     uptime_m    = int((uptime_secs % 3600) // 60)
 
+    batt_info = None
+    try:
+        batt = psutil.sensors_battery()
+        if batt is not None:
+            batt_info = {
+                "percent": int(batt.percent),
+                "power_plugged": bool(batt.power_plugged),
+                "secs_left": int(batt.secsleft) if batt.secsleft > 0 else None,
+            }
+    except Exception:
+        pass
+
     return {
-        "cpu_percent":   round(cpu, 1),
-        "ram_percent":   round(ram.percent, 1),
-        "ram_used_gb":   round(ram.used   / 1024 ** 3, 1),
-        "ram_total_gb":  round(ram.total  / 1024 ** 3, 1),
-        "cpu_temp_c":    round(temp, 1) if temp > 0 else None,
-        "gpu_percent":   round(gpu,  1) if gpu  >= 0 else None,
-        "uptime":        f"{uptime_h}h {uptime_m}m",
-        "process_count": len(psutil.pids()),
+        "cpu_percent":      round(cpu, 1),
+        "ram_percent":      round(ram.percent, 1),
+        "ram_used_gb":      round(ram.used   / 1024 ** 3, 1),
+        "ram_total_gb":     round(ram.total  / 1024 ** 3, 1),
+        "cpu_temp_c":       round(temp, 1) if temp > 0 else None,
+        "gpu_percent":      round(gpu,  1) if gpu  >= 0 else None,
+        "uptime":           f"{uptime_h}h {uptime_m}m",
+        "process_count":    len(psutil.pids()),
+        "battery":          batt_info,
+        "battery_percent":  batt_info["percent"] if batt_info else None,
+        "battery_plugged":  batt_info["power_plugged"] if batt_info else None,
     }
 
 
