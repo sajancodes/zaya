@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import MagicMock
+import pytest
 
 from core.voice_turns import VoiceTurns
 
@@ -52,3 +53,43 @@ def test_interruption_during_notification_delivery_requeues():
 
     assert assistant._notification_interrupted is True
     assert assistant._notification_active is False
+
+
+def test_notification_delivery_waits_for_playback_or_interrupt():
+    async def _run():
+        class MockAssistant:
+            def __init__(self):
+                self._notification_active = False
+                self._notification_interrupted = False
+                self._is_speaking = False
+                self.audio_in_queue = asyncio.Queue()
+                self.delivered_called = False
+
+            async def _deliver_owner_notice(self, item, coding=False, mode=''):
+                self._notification_active = True
+                self._is_speaking = True
+                await self.audio_in_queue.put(b"audio_chunk")
+                return True
+
+            def interrupt(self, reason="barge_in"):
+                if self._notification_active:
+                    self._notification_interrupted = True
+                self._notification_active = False
+                self._is_speaking = False
+                while not self.audio_in_queue.empty():
+                    self.audio_in_queue.get_nowait()
+
+        assistant = MockAssistant()
+        item = {"id": "alert_123", "summary": "Port dropped"}
+
+        # Delivery started
+        await assistant._deliver_owner_notice(item)
+        assert assistant._notification_active is True
+        assert not assistant.audio_in_queue.empty()
+
+        # Mid-speech barge in triggers interrupt
+        assistant.interrupt()
+        assert assistant._notification_interrupted is True
+        assert assistant.audio_in_queue.empty()
+
+    asyncio.run(_run())

@@ -82,7 +82,14 @@ class ProjectAwarenessService:
                     "updated_at": time.time(),
                 }
                 temp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-                temp.replace(self._persisted_path)
+                for attempt in range(3):
+                    try:
+                        temp.replace(self._persisted_path)
+                        break
+                    except (PermissionError, OSError):
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.02)
             except Exception as e:
                 logger.debug("Failed to save project_state.json: %s", e)
 
@@ -199,7 +206,7 @@ class ProjectAwarenessService:
                         # Sort by last_seen descending
                         sorted_records = sorted(
                             records.values(),
-                            key=lambda r: float(r.get("last_seen", 0.0)),
+                            key=lambda r: (float(r.get("last_seen", 0.0)), str(r.get("name", ""))),
                             reverse=True,
                         )
                         for rec in sorted_records:

@@ -119,7 +119,14 @@ class BackgroundSentinel:
                     "delivered": self._delivered,
                 }
                 temp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-                temp.replace(self._store_path)
+                for attempt in range(3):
+                    try:
+                        temp.replace(self._store_path)
+                        break
+                    except (PermissionError, OSError):
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.02)
             except Exception as e:
                 logger.debug("Failed to write sentinel delivery store: %s", e)
 
@@ -159,32 +166,33 @@ class BackgroundSentinel:
                 except Exception:
                     pass
 
-        # Detect transition from open -> closed
-        dropped = self._open_ports - currently_open
-        for port in dropped:
-            if (now - self._port_cooldowns.get(port, 0)) > 60.0:
-                self._port_cooldowns[port] = now
-                summary = f"Dev server on port {port} has terminated unexpectedly."
-                try:
-                    from core.passive_screen_watcher import passive_screen_watcher
-                    ctx = passive_screen_watcher._current_context
-                    if ctx and ctx.is_recent(30.0) and ctx.has_error:
-                        summary += f" Recent error: {ctx.detected_error[:120]}"
-                except Exception:
-                    pass
+        with self._lock:
+            # Detect transition from open -> closed
+            dropped = self._open_ports - currently_open
+            for port in dropped:
+                if (now - self._port_cooldowns.get(port, 0)) > 60.0:
+                    self._port_cooldowns[port] = now
+                    summary = f"Dev server on port {port} has terminated unexpectedly."
+                    try:
+                        from core.passive_screen_watcher import passive_screen_watcher
+                        ctx = passive_screen_watcher._current_context
+                        if ctx and ctx.is_recent(30.0) and ctx.has_error:
+                            summary += f" Recent error: {ctx.detected_error[:120]}"
+                    except Exception:
+                        pass
 
-                alert = SentinelAlert(
-                    id=f"port:{port}:{int(now)}",
-                    category="server",
-                    summary=summary,
-                    details={"port": port, "state": "dropped"},
-                    severity="high",
-                    timestamp=now,
-                )
-                upserted = self._upsert_alert(alert)
-                new_alerts.append(upserted)
+                    alert = SentinelAlert(
+                        id=f"port:{port}:{int(now)}",
+                        category="server",
+                        summary=summary,
+                        details={"port": port, "state": "dropped"},
+                        severity="high",
+                        timestamp=now,
+                    )
+                    upserted = self._upsert_alert(alert)
+                    new_alerts.append(upserted)
 
-        self._open_ports = currently_open
+            self._open_ports = currently_open
         return new_alerts
 
     def check_battery(self) -> SentinelAlert | None:
@@ -251,7 +259,7 @@ class BackgroundSentinel:
                         files_scanned += 1
                         content_bytes = file_path.read_bytes()
                         if b"<<<<<<< HEAD" in content_bytes and b">>>>>>>" in content_bytes:
-                            content_hash = hashlib.sha256(content_bytes).hexdigest()[:16]
+                            content_hash = hashlib.sha256(content_bytes).hexdigest()
                             alert_id = f"conflict:{file_path.resolve()}:{content_hash}"
                             alert = SentinelAlert(
                                 id=alert_id,

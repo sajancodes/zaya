@@ -109,16 +109,31 @@ def _root_matches(processes):
 def _terminate_windows(processes):
     errors = []
     for proc in _root_matches(processes):
+        killed = False
         try:
             result = subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True, text=True, timeout=8,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            if result.returncode != 0 and psutil.pid_exists(proc.pid):
+            if result.returncode == 0 or not psutil.pid_exists(proc.pid):
+                killed = True
+            else:
                 errors.append((result.stderr or result.stdout or f"PID {proc.pid}").strip())
         except Exception as exc:  # noqa: BLE001
             errors.append(str(exc))
+
+        # Direct process tree fallback if taskkill failed or timed out
+        if not killed and psutil.pid_exists(proc.pid):
+            try:
+                for child in proc.children(recursive=True):
+                    try:
+                        child.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+                errors.append(str(exc))
     return errors
 
 

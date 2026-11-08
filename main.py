@@ -1722,6 +1722,11 @@ class ZayaLive:
                                                                mode=delivery_mode):
                             print(f"[Zaya:Notification] Notice delivery rejected/deferred: item_id='{item.get('id', '')}', timestamp={time.time()}")
                             continue
+
+                        # Wait for notification playback to finish on the speaker or be interrupted mid-speech
+                        while (getattr(self, '_notification_active', False) or self._is_speaking or (self.audio_in_queue and not self.audio_in_queue.empty())) and not getattr(self, '_notification_interrupted', False):
+                            await asyncio.sleep(0.05)
+
                         if getattr(self, '_notification_interrupted', False):
                             print(f"[Zaya:Notification] Notice delivery was interrupted mid-speech; re-queuing: item_id='{item.get('id', '')}', timestamp={time.time()}")
                             self._notification_interrupted = False
