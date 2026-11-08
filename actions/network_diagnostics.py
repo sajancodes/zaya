@@ -135,22 +135,57 @@ def _resolve_single_domain(domain: str) -> tuple[Optional[str], Optional[float],
         return None, None, f"failed: {e}"
 
 
-def _benchmark_dns(timeout: float = 1.5) -> Dict[str, Any]:
-    """Measure DNS resolution speed for core domains with strict per-domain timeouts."""
-    import concurrent.futures
-    test_domains = ["google.com", "cloudflare.com", "github.com", "microsoft.com"]
-    results = {}
+def _benchmark_dns(timeout: float = 1.5, overall_deadline: Optional[float] = None) -> Dict[str, Any]:
+    """Measure DNS resolution speed for core domains with strictly bounded deadlines."""
+    import threading
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(test_domains)) as executor:
-        future_map = {executor.submit(_resolve_single_domain, d): d for d in test_domains}
-        for future, domain in future_map.items():
-            try:
-                ip, elapsed_ms, status = future.result(timeout=timeout)
-                results[domain] = {"ip": ip, "latency_ms": elapsed_ms, "status": status}
-            except concurrent.futures.TimeoutError:
-                results[domain] = {"ip": None, "latency_ms": None, "status": f"timeout (> {int(timeout * 1000)}ms)"}
-            except Exception as e:
-                results[domain] = {"ip": None, "latency_ms": None, "status": f"failed: {e}"}
+    test_domains = ["google.com", "cloudflare.com", "github.com", "microsoft.com"]
+    effective_timeout = overall_deadline if overall_deadline is not None else timeout
+    start_time = time.perf_counter()
+    deadline = start_time + effective_timeout
+
+    worker_results: Dict[str, tuple[Optional[str], Optional[float], str]] = {}
+    done_events: Dict[str, threading.Event] = {}
+
+    def _probe_worker(domain: str, event: threading.Event) -> None:
+        try:
+            res = _resolve_single_domain(domain)
+            worker_results[domain] = res
+        except Exception as e:
+            worker_results[domain] = (None, None, f"failed: {e}")
+        finally:
+            event.set()
+
+    # Launch daemon threads so they never delay process exit or block caller
+    for domain in test_domains:
+        evt = threading.Event()
+        done_events[domain] = evt
+        thread = threading.Thread(
+            target=_probe_worker,
+            args=(domain, evt),
+            daemon=True,
+            name=f"zaya-dns-probe-{domain}",
+        )
+        thread.start()
+
+    # Collect results respecting the overall deadline
+    results = {}
+    timeout_threshold_ms = int(effective_timeout * 1000)
+
+    for domain in test_domains:
+        remaining = max(0.0, deadline - time.perf_counter())
+        evt = done_events[domain]
+        finished = evt.wait(timeout=remaining)
+        if finished and domain in worker_results:
+            ip, latency_ms, status = worker_results[domain]
+            results[domain] = {"ip": ip, "latency_ms": latency_ms, "status": status}
+        else:
+            results[domain] = {
+                "ip": None,
+                "latency_ms": None,
+                "status": f"timeout (> {timeout_threshold_ms}ms)",
+            }
+
     return results
 
 
