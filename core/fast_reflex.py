@@ -218,6 +218,14 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "windows_services",
     },
+    "STARTUP_PROGRAMS_QUERY": {
+        "phrases": [
+            "startup programs", "check startup programs", "what runs on startup",
+            "startup apps", "list startup programs", "boot programs",
+            "auto run programs"
+        ],
+        "dynamic": "startup_programs",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -753,6 +761,16 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect Windows services right now, sir.")
+
+        if intent_data.get("dynamic") == "startup_programs":
+            try:
+                from actions.startup_sentinel import _get_all_startup_entries
+                data = _get_all_startup_entries()
+                ack = f"Found {data['total_count']} auto-run startup programs ({data['dead_count']} orphaned targets), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect startup programs right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")

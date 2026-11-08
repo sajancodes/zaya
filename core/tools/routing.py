@@ -97,6 +97,7 @@ _CATEGORY_WORDS: dict[str, set[str]] = {
     "env": {"env", "environment", "path", "variable", "variables", "toolchain", "sdk", "compiler"},
     "thermal": {"temp", "temperature", "thermals", "gpu", "celsius", "overheating", "overheat", "fan", "wattage", "vram"},
     "service": {"service", "services", "daemon", "daemons", "wsl", "docker", "spooler", "svchost"},
+    "startup": {"startup", "boot", "autorun", "autostart", "login"},
 }
 
 # Tool names that are useful as a low-confidence fallback. They are cheap and
@@ -112,7 +113,7 @@ _FALLBACK = (
 
 # Extra names that map to an area even when the tool name has no shared token.
 _CATEGORY_TOOLS: dict[str, set[str]] = {
-    "app": {"open_app", "computer_control", "exit_app", "window_manager"},
+    "app": {"open_app", "computer_control", "exit_app", "window_manager", "startup_sentinel"},
     "computer": {"computer_control", "computer_settings", "ghost_keyboard", "window_manager", "audio_switcher", "bluetooth_sentinel"},
     "browser": {"browser_control", "web_customizer"},
     "files": {"file_controller", "file_processor", "doc_generator", "screen_peeler", "storage_sentinel"},
@@ -131,7 +132,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "travel": {"map_navigator"},
     "spatial": {"spatial_workspace"},
     "coding": {"coding_job", "code_search", "port_sentinel", "repo_sentinel", "env_sentinel"},
-    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel"},
+    "system": {"system_diagnostics", "runtime_status", "runtime_logs", "network_diagnostics", "process_sentinel", "storage_sentinel", "bluetooth_sentinel", "focus_mode", "power_sentinel", "env_sentinel", "display_sentinel", "thermal_sentinel", "service_sentinel", "startup_sentinel"},
     "storage": {"storage_sentinel"},
     "bluetooth": {"bluetooth_sentinel"},
     "focus": {"focus_mode"},
@@ -139,6 +140,7 @@ _CATEGORY_TOOLS: dict[str, set[str]] = {
     "env": {"env_sentinel"},
     "thermal": {"thermal_sentinel"},
     "service": {"service_sentinel"},
+    "startup": {"startup_sentinel"},
     "network": {"network_diagnostics", "system_diagnostics", "port_tunnel", "port_sentinel"},
     "mission": {"mission_control"},
     "whatsapp": {"whatsapp"},
