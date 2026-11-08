@@ -2,8 +2,8 @@
 
 **Location:** `C:\Users\ab429\Desktop\Zaya`  
 **Current Branch:** `fix/security-routing-reliability`  
-**Latest Update:** 2026-11-08T21:20:00+05:45  
-**Test Suite Status:** 831 passed, 0 failed, 2 warnings (100% passing)
+**Latest Update:** 2026-11-08T22:40:00+05:45  
+**Test Suite Status:** 838 passed, 0 failed, 2 warnings (100% passing)
 
 ---
 
@@ -13,9 +13,9 @@
 - **Status:** COMPLETED & VERIFIED.
 - **Root Cause Identified:** Previously used timestamp-based alert IDs (`conflict_{file}_{now}`), causing identical conflicts on unchanged files to trigger new alerts on every scan. Loop `break` stopped scanning after the first conflict, leaving multi-file conflicts silent, and `delivered()` state was only tracked in an in-memory deque lost across restarts.
 - **Implementation:**
-  - Stable content fingerprint using `f"conflict:{py_file.resolve()}:{content_hash}"` with SHA-256 (first 16 hex chars).
+  - Stable content fingerprint using full SHA-256 (`f"conflict:{py_file.resolve()}:{content_hash}"`).
   - Alert deduplication in-memory: updates timestamp and details of existing alerts without duplicating or changing ID.
-  - Persistent delivery tracking stored in `mutable_path(Path(...) / "memory" / "sentinel_alerts.json")` using atomic tempfile replacement.
+  - Persistent delivery tracking stored in `mutable_path(Path(...) / "memory" / "sentinel_alerts.json")` using atomic tempfile replacement with retry backoff.
   - Full workspace scanning (removed early `break`) across `.py`, `.kt`, `.xml`, `.java`, `.ts`, `.json`, etc.
   - Safe exclusions: `.git`, `.venv*`, `node_modules`, `__pycache__`, `dist`, `build`.
   - Resource limits: max 500 files, max 1MB per file.
@@ -31,7 +31,7 @@
   - Conversation history is strictly quarantined as `stale=True, kind="history", confidence=0.3` and never dictates active project.
   - Empty task list does NOT indicate "no project active".
   - Persistent state saved to `mutable_path(Path(...) / "memory" / "project_state.json")`.
-  - APIs implemented: `snapshot()`, `active_project()`, `set_active_project()`, `rehydrate()`.
+  - APIs implemented: `snapshot()`, `active_project()`, `set_active_project()`, `clear_active_project()`, `rehydrate()`.
 
 ### §3: Observation Provenance & LLM Prompt Guidance (`actions/project_status.py`, `core/prompt.txt`)
 - **Status:** COMPLETED & VERIFIED.
@@ -63,8 +63,8 @@
 - `tests/test_project_awareness.py` (7 tests, all passing): active project with no process, conversation isolation, workspace tracking, rehydration from disk, confidence reconciliation, running coding processes, project clearing.
 - `tests/test_project_status_action.py` (2 tests, all passing): schema validation, structured fields, and observation provenance.
 - `tests/test_checkpoint_rehydrate.py` (1 test, passing): simulated checkpoint reset restores project state.
-- `tests/test_voice_interruption.py` (2 tests, all passing): partial utterance threshold handling, notification re-queuing on interrupt.
-- `tests/test_local_pipeline.py` (added language fallback test, all 6 tests passing).
+- `tests/test_voice_interruption.py` (3 tests, all passing): partial utterance threshold handling, notification re-queuing on interrupt, playback synchronization.
+- `tests/test_local_pipeline.py` (all 6 tests passing).
 
 ---
 
@@ -88,57 +88,91 @@
 
 ---
 
-## 3. Autonomous Continuous Improvement Cycles
+## 3. Phase 2 Independent Production Readiness Audit
 
-### Cycle 1: Database WAL & Concurrency Hardening
-- **Subsystem:** `core/task_runtime.py`, `memory/conversation_store.py`
-- **Enhancement:**
-  - Configured `PRAGMA busy_timeout = 5000` to prevent SQLite lock contention between asynchronous tasks and voice loops.
-  - Configured `PRAGMA synchronous = NORMAL` for crash resilience with reduced fsync latency.
-  - Configured `PRAGMA wal_autocheckpoint = 1000` to avoid unbounded WAL file growth.
-  - Added clean passive WAL checkpointing in `TaskRuntime.close()`.
-  - Standardized WAL mode and timeouts in `ConversationStore.connect()`.
-- **Verification:** Added `tests/test_task_runtime_concurrency.py` (2 tests, 100% passing).
-- **Commit:** `a0bc001` (pushed to `fix/security-routing-reliability`).
+### Priority 1: Android Release Signing Security & debug.keystore Audit
+- **Audit Findings:**
+  1. Historical releases v0.4.0–v0.4.6 were signed with the local debug certificate (`C=US, O=Android, CN=Android Debug`, SHA-256 `b54d592e...`).
+  2. Android OS enforces signature identity on package upgrades (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), and `AppUpdates.kt` (`verifySigner`) strictly asserts that `apkContentsSigners` match the installed certificate.
+  3. Previously, neither `prepare_android_release.py` nor `publish_android_release.ps1` programmatically checked the certificate fingerprint before publishing. If built on a different machine or without `debug.keystore`, an incompatible build would be released, permanently bricking in-app updates for existing users.
+- **Remediation:**
+  - Added pure-Python APK Signing Block v2 parser in `tools/prepare_android_release.py` to extract and verify the primary signing certificate fingerprint against `EXPECTED_SIGNER_SHA256 = "b54d592e8e1e7da30cc07a6937cb9a399e012dbfc0aa7634d2fd19248c86a8e2"`.
+  - Added upfront keystore certificate check in `tools/publish_android_release.ps1`.
+  - Added regression test suite in `tests/test_android_release_integrity.py`.
 
-### Cycle 2: Sentinel Alert Storage Bounds & Retention Policy
-- **Subsystem:** `core/background_sentinel.py`
-- **Enhancement:**
-  - Bound persisted delivery tracking to 500 records maximum.
-  - Implemented automatic age pruning: evicts delivered records older than 30 days whenever the map exceeds 250 records.
-  - Guarantees `sentinel_alerts.json` does not grow unbounded over months of background monitoring.
-- **Verification:** Added `test_sentinel_retention_pruning` in `tests/test_background_sentinel.py` (100% passing).
-- **Commit:** `edd3755` (pushed to `fix/security-routing-reliability`).
+### Priority 2: In-App Update Lifecycle Verification
+- **Audit Findings:**
+  - Verified `AppUpdates.kt` state machine:
+    1. `check()` queries `update.json` from `sajancodes/zaya-companion-releases/releases/latest/download/update.json`.
+    2. Compares `version_code > installedVersion()`.
+    3. `download()` streams APK, validates total byte count against `manifest.size`.
+    4. Computes SHA-256 and calls `manifest.verify()`.
+    5. Calls `verifySigner()` checking `apkContentsSigners` against installed package info.
+    6. `install()` checks `canRequestPackageInstalls()`, opens permission settings if needed, then issues `ACTION_VIEW` intent with `FileProvider` URI and `FLAG_GRANT_READ_URI_PERMISSION`.
+  - Verified `android-0.4.7` published artifacts: SHA-256 `21aa3efb...` matches `update.json` and size `3369567` bytes.
 
-### Cycle 3: Process-Aware Reconciliation & Project Reset in ProjectAwarenessService
-- **Subsystem:** `core/project_awareness.py`
-- **Enhancement:**
-  - Integrated `core.coding_jobs.get_jobs()` into `snapshot()` to detect live OpenCode child processes and worker threads.
-  - Emits high-confidence (`0.98`) process observations with exact PID, phase, and progress.
-  - Correlates running coding jobs with the active project, while preserving the rule that an idle process does not erase the active project.
-  - Added `clear_active_project()` method to safely reset active and last known project overrides.
-- **Verification:** Added `test_coding_job_running_process_detected` and `test_clear_active_project` in `tests/test_project_awareness.py` (100% passing).
-- **Commit:** `dc400ae` (pushed to `fix/security-routing-reliability`).
+### Priority 3: BackgroundSentinel Durability & Concurrency
+- **Audit Findings:**
+  1. `check_ports()` accessed `_open_ports` and `_port_cooldowns` outside of `self._lock`, creating a potential race condition between background asyncio tasks and foreground queries.
+  2. `_save_delivered()` did not retry on transient file locks during `temp.replace()`.
+  3. Git conflict alert IDs used truncated 16-character SHA-256 hashes.
+- **Remediation:**
+  - Wrapped `_open_ports` and `_port_cooldowns` updates in `with self._lock:` in `check_ports()`.
+  - Added 3-attempt backoff retry for atomic `temp.replace(self._store_path)`.
+  - Upgraded git conflict fingerprint to full 64-character SHA-256 hash.
 
-### Cycle 4: Subprocess Termination Escalation on Timeout in PCEcosystemBridge
-- **Subsystem:** `core/pc_ecosystem.py`
-- **Enhancement:**
-  - Hardened `_cmd_terminate_process` against unresponsive or hung processes.
-  - If a process does not terminate within the 3-second grace period (`psutil.TimeoutExpired`), the bridge automatically escalates to `proc.kill()` and waits up to 2 seconds.
-  - Prevents unhandled timeout exceptions from breaking process tree cleanup loops.
-- **Verification:** Added `test_pc_ecosystem_terminate_escalates_on_timeout` in `tests/test_audit_security_remediation.py` (100% passing).
-- **Commit:** `9ae2647` (pushed to `fix/security-routing-reliability`).
+### Priority 4: SQLite WAL Durability & Concurrency
+- **Audit Findings:**
+  - `TaskRuntime` and `ConversationStore` now enforce `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, and `PRAGMA wal_autocheckpoint = 1000`.
+  - Added passive WAL checkpointing in `TaskRuntime.close()`.
+  - Verified across multiple concurrent threads in `tests/test_task_runtime_concurrency.py`.
+
+### Priority 5: Subprocess Termination & Orphan Prevention
+- **Audit Findings:**
+  1. In `actions/process_terminate.py`, `_terminate_windows` attempted `taskkill /PID <pid> /T /F`, but if taskkill failed, it returned without terminating the process or its child tree.
+  2. `PCEcosystemBridge._cmd_terminate_process` waited 3 seconds for `proc.terminate()`, raising unhandled `TimeoutExpired` if a process was frozen.
+- **Remediation:**
+  - In `actions/process_terminate.py`, added direct fallback to `psutil.Process.children(recursive=True)` and `proc.kill()` if `taskkill` exits non-zero.
+  - In `core/pc_ecosystem.py`, escalated to `proc.kill()` on `psutil.TimeoutExpired`.
+  - Added regression tests in `tests/test_process_terminate.py` and `tests/test_audit_security_remediation.py`.
+
+### Priority 6: Voice Interruption & Notification Coordination Race Condition
+- **Audit Findings:**
+  - In `main.py` `_operator_notifications`, calling `await self._deliver_owner_notice(item)` enqueued audio into `self.audio_in_queue` and returned immediately.
+  - The loop immediately executed `delivered(item)` while the audio chunks were still queued/playing.
+  - If the owner interrupted during speech playback, the alert was already marked delivered and could never be re-queued.
+- **Remediation:**
+  - Added playback completion synchronization: `_operator_notifications` awaits audio playback completion (`_notification_active or _is_speaking or not audio_in_queue.empty()`) while watching for barge-in interrupts.
+  - If interrupted mid-speech, the notice is re-queued without being marked delivered.
+  - Added regression test in `tests/test_voice_interruption.py`.
+
+### Priority 7: Project Awareness Determinism Across Restarts & Workspaces
+- **Audit Findings:**
+  - Multiple registered projects in `project_index` sharing identical timestamps could resolve non-deterministically.
+- **Remediation:**
+  - Added composite key sorting `(last_seen, name)` for fully deterministic tie-breaking.
+  - Added 3-attempt atomic replace retry in `_save_to_disk()`.
+  - Added `clear_active_project()` and correlated active coding jobs in `snapshot()`.
+
+### Priority 8: Desktop-to-Android Sync & Authentication
+- **Audit Findings:**
+  - Audited `dashboard/mobile_api.py`:
+    - All endpoints require valid device token (`_device_from_request`).
+    - Bounded payloads (`MAX_WS_FRAME`, `MAX_UPLOAD_MB = 500`).
+    - Device revocation disconnects sessions immediately.
+    - Remote commands enforce single-use approval tokens and risk classification.
 
 ---
 
 ## 4. Test Verification Matrix
 
-| Test Suite | Baseline | Current | Result |
+| Test Suite | Baseline | Post-Audit | Status |
 |---|---|---|---|
-| Full Pytest Suite | 797 passed | **831 passed** | **100% Passed (0 failures, 2 warnings)** |
+| Full Pytest Suite | 797 passed | **838 passed** | **100% Passed (0 failures, 2 warnings)** |
 | Ruff Non-Style Lint | 2 baseline findings | 0 findings | **Clean** |
 | Android Lint | N/A | `:app:lintRelease` successful | **Clean** |
 | Android Build | N/A | `:app:assembleRelease` & `:app:bundleRelease` successful | **Clean** |
+| Android Release Verification | N/A | APK v2 Signer `b54d592e...` verified | **Verified** |
 
 ---
 
@@ -150,5 +184,7 @@
 - `edd3755`: `fix(sentinel): add bounded retention and age pruning to delivered alerts storage`
 - `dc400ae`: `feat(awareness): correlate live coding job processes and add project reset capability`
 - `9ae2647`: `fix(ecosystem): escalate process termination to SIGKILL on wait timeout`
+- `40f59e6`: `docs: update autonomous engineering progress report with release 0.4.7 and cycles 1-4`
+- `2517638`: `fix(audit): resolve release signing verification, notification race, process fallback, and concurrency`
 
 All commits authored as `sajancodes <ab4290025@gmail.com>`.
