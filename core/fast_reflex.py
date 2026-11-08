@@ -348,6 +348,13 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         ],
         "dynamic": "mic_unmute",
     },
+    "PROTOCOL_HANDLER_QUERY": {
+        "phrases": [
+            "check protocol handlers", "what protocols are registered", "protocol handlers",
+            "check registered protocols", "url protocols", "deep link handlers"
+        ],
+        "dynamic": "protocol_handlers",
+    },
     "FOCUS_MODE_START": {
         "phrases": [
             "start focus mode", "turn on focus mode", "activate focus mode",
@@ -1057,6 +1064,17 @@ class FastReflexRouter:
             except Exception:
                 pass
             return FastReflexResult(matched=True, intent=intent_name, ack="Unable to unmute microphone right now, sir.")
+
+        if intent_data.get("dynamic") == "protocol_handlers":
+            try:
+                from actions.protocol_sentinel import get_protocol_summary
+                data = get_protocol_summary()
+                apps_preview = ", ".join(data["popular_apps_sample"][:5]) if data["popular_apps_sample"] else "Standard handlers"
+                ack = f"Found {data['total_protocols_registered']} registered URL protocols ({apps_preview}), sir."
+                return FastReflexResult(matched=True, intent=intent_name, ack=ack, data=data)
+            except Exception:
+                pass
+            return FastReflexResult(matched=True, intent=intent_name, ack="Unable to inspect protocol handlers right now, sir.")
 
         # Media key dispatch
         media_key = intent_data.get("media_key")
