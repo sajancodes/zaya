@@ -540,7 +540,7 @@ includes them.
 **Zaya is created and developed by Sajan Rai.** Source and ongoing development
 are maintained under [sajancodes/zaya](https://github.com/sajancodes/zaya).
 
-The project builds on **Mark LV by FatihMakes**. Original attribution and the
-**CC BY-NC 4.0** license remain in [LICENSE](LICENSE). Gemini, Qt, Playwright,
-Hermes, and other dependencies retain their respective credits and terms.
-See [CREDITS.md](CREDITS.md) for the project attribution.
+The project is released under the **MIT License**. Foundational concepts build on
+**Mark LV by FatihMakes** (original attribution and CC BY-NC 4.0 preserved in [LICENSE](LICENSE)).
+Gemini, Qt, Playwright, Hermes, and other dependencies retain their respective credits and terms.
+See [CREDITS.md](CREDITS.md) for full project attribution.
