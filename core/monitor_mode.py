@@ -260,7 +260,21 @@ def _default_capture() -> Optional[bytes]:
 
 
 def _default_analyse(png_bytes: bytes, task: str) -> dict:
-    """Analyse a screenshot using OCR; AI vision is added when available."""
+    """Analyse a screenshot using Gemini Robotics ER-2 when available, with OCR fallback."""
+    try:
+        from core.robotics_monitor import get_robotics_screen_monitor
+        monitor = get_robotics_screen_monitor()
+        obs = monitor.analyze_frame(png_bytes, task=task)
+        if obs and obs.summary:
+            return {
+                "summary": obs.summary,
+                "needs_attention": obs.needs_attention,
+                "action_taken": obs.action_suggestion,
+                "raw_ocr": obs.raw_response,
+            }
+    except Exception as exc:
+        logger.debug("[MonitorMode] Robotics analysis fallback: %s", exc)
+
     from actions.screen_peeler import _ocr_via_powershell
 
     ocr_text = _ocr_via_powershell(png_bytes)
