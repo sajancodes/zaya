@@ -1,0 +1,98 @@
+ZAYA DEV WORKLOG & TEST PROMPTS (from cycle 1 to cycle 80)
+rough notes jotted down quick - dont lose this
+
+total cycles done: 80 cycles
+tests passing: 966 unit tests, 0 failed
+actions active: 129 tools loaded in action registry
+
+=== EARLY CYCLES (1 - 20) CORE FOUNDATION & STABILITY ===
+- fixed the annoying loop where sentinel kept spamming duplicate alerts on unchanged files (hashed sha256 now)
+- unified project awareness so zaya dosent forget what project we are working on when switched windows
+- fixed audio interupt so when someone talks while she announces notifs it dosent break
+- hardcoded strict english so she dosent randomly reply in spanish when mic hears weird background noise or "ya"
+- whatsapp integration and remote dashboard connection
+- presence detection with windows idle timers (away vs present)
+- personal memory brain for long term preferences and facts
+- fast file controller and semantic recall
+TEST PROMPTS:
+* "who am i and what project are we working on right now?"
+* "check whatsapp messages from today"
+* "set presence to away for 2 hours"
+* "what do you remember about my setup?"
+
+=== CYCLES (21 - 44) DESKTOP CONTROL, VISION & SYSTEM SENTINELS ===
+- computer settings and native volume/power control without crashing if pyautogui is missing
+- browser control with brave/chrome fallback stubs so playwright dont crash whole loader
+- port sentinel & wormhole tunnels for local ports
+- screen peeler and display perception to read screen text and ui buttons
+- hand gesture tracker (sharing camera frame cleanly without opencv re-init crash)
+- voiceprint guard with speaker verification
+- firewall, dns, usb, bluetooth, and service sentinels
+- double clap toggle for quick mic mute
+TEST PROMPTS:
+* "open brave and go to github.com"
+* "what is currently showing on my screen?"
+* "scan open network ports on this machine"
+* "turn volume up to 70 percent"
+* "check usb devices connected right now"
+
+=== CYCLES (45 - 60) REASONING, DIALOG & PROACTIVE AGENTS ===
+- deep research agent for multi-step scraping and summarization
+- metacognition circuit breaker (stops tool loops if an action fails 3 times in a row)
+- proactive foresight engine: predicts what user wants before they ask
+- isolated scratchpad evaluator for quick python snippets
+- mixed-initiative dialog coordinator to handle pauses and clarifying questions
+- spatial multi-window layout manager (snapping windows into 2x2 or dev layouts)
+TEST PROMPTS:
+* "do a deep research on local open source llm benchmarks"
+* "run scratch code: print([x**2 for x in range(10)])"
+* "organize my workspace windows into dev mode"
+* "check metacognition tool failure stats"
+
+=== CYCLES (61 - 67) SURVEILLANCE, VISIBLE OPENCODE & PLATFORM ===
+- cycle 61: monitor mode! periodically watches screen every N mins when owner is away and acts on changes
+- cycle 62: visible opencode terminal mode so you actually see the command running in real visible console window instead of invisible background headless process, plus dynamic task modification
+- cycle 63: intelligent model fallback ladder (gemini 2.5 flash -> pro -> local ollama -> groq fallback with latency scoring)
+- cycle 64: runtime self knowledge capability registry so zaya knows what mic/cam/os she actually has
+- cycle 65: cross platform os adapters (win32, linux x11/wayland stubs, macos)
+- cycle 66: small model efficiency compressor (cuts down token bloat for 7b/8b models)
+- cycle 67: flight finder & air travel scraper
+TEST PROMPTS:
+* "start monitor mode: watch for build errors every 3 minutes while i am away"
+* "run opencode in visible terminal: create a simple react counter component"
+* "show capability registry and active providers"
+* "check model routing health and fallback ladder"
+* "find flights from kathmandu to tokyo next month"
+
+=== CYCLES (68 - 73) AUTONOMOUS WORKERS, UI & EDGE ===
+- cycle 68: habit learning engine - automatically detects daily routines (like opening brave at 9am)
+- cycle 69: offline edge engine - fast zero-latency local fallback execution when internet drops
+- cycle 70: visual ui graph & click anchors - detects buttons/inputs on screen as actionable coordinates
+- cycle 71: predictive workspace prefetcher - pre-caches files, git status, and diagnostics before user asks
+- cycle 72: parallel subagent swarm - spawns background micro-workers for heavy concurrent jobs
+- cycle 73: generative dashboard cards - interactive json cards for system status and alerts
+TEST PROMPTS:
+* "what daily habits have you observed so far?"
+* "
+test offline edge mode: toggle night light or check local time"
+* "locate the search bar on screen and give me click anchors"
+* "dispatch a subagent swarm to scan workspace git status and run tests in parallel"
+* "show me a generative card for system health"
+
+=== CYCLES (74 - 80) ADVANCED SENSING, BRAIN & SECURITY ===
+- cycle 74: toolsmith engine - zaya can dynamically write and compile brand new python tools on the fly into actions/custom
+- cycle 75: acoustic scene classifier - detects ambient sounds (door knock, keyboard clatter, dog bark, siren)
+- cycle 76: memory consolidation & dream cycle - runs during idle night time, cleans duplicates and condenses memories
+- cycle 77: predictive energy kinetics - calculates battery drain speed and predicts shutdown time under load
+- cycle 78: voiceprint anti-spoofing - analyzes raw audio pcm for speaker replay attacks & synthetic ai vocoders
+- cycle 79: concept association mesh - knowledge graph linking projects, tools, people, files with relational paths
+- cycle 80: multi-modal av fusion attention gate - fuses face gaze, speech activity, and keyboard idle to decide if she should speak aloud or stay quiet
+TEST PROMPTS:
+* "synthesize a new tool called 'hex_converter' that converts text to hex"
+* "what ambient sounds are you hearing in this room?"
+* "run dream cycle memory consolidation"
+* "estimate battery drain kinetics and remaining run time"
+* "check voice anti-spoofing liveness status"
+* "query concept mesh: how is 'zaya' linked to 'python' and 'gemini'?"
+* "find path in concept mesh from 'subagent_swarm' to 'github'"
+* "check my attention state: are you allowed to speak right now?"
