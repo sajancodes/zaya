@@ -232,6 +232,16 @@
 - **Commit:** `bf224e8`
 - **Verification:** 5 unit tests passing. Verifies RMS energy computation, noise floor tracking, speech cadence classification (brisk, deliberate, normal), and persistence.
 
+### Cycle 61: Screen Surveillance Monitor Mode
+- **Capability:** Periodic screen-capture surveillance engine with intelligent visual/OCR analysis. Captures screen at configurable intervals (default 5 min), analyzes situation against expectations, logs observations, and proactively alerts the owner if errors, blockers, or completion events occur while the owner is away.
+- **Components:** `core/monitor_mode.py`, `actions/monitor_mode_action.py`, `tests/test_monitor_mode.py`.
+- **Verification:** 17 unit tests passing. Verifies session lifecycle, interval clamping, alert triggers, auto-expiry on max duration, and action dispatch.
+
+### Cycle 62: Visible OpenCode Terminal & Dynamic Task Modification
+- **Capability:** Launches OpenCode sessions in a real-time visible console terminal (`tools/opencode_live_terminal.py`) so the owner can watch actual code generation, tool execution, and testing live. Supports dynamic on-the-fly task steering and prompt modification as the task gets started or the first prompt completes via `CodingJobs.modify()` and the `modify` action.
+- **Components:** `core/coding_jobs.py`, `actions/coding_job.py`, `tools/opencode_live_terminal.py`, `tests/test_opencode_visible_terminal.py`.
+- **Verification:** 9 unit tests passing. Verifies live event streaming, visible console invocation, dynamic task modification during active/completed passes, and owner trust enforcement.
+
 ---
 
 ## 5. Test Verification Matrix
