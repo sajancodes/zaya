@@ -32,6 +32,34 @@ STORE_PATH = mutable_path(Path(__file__).resolve().parent.parent / 'memory' / 'c
 ACTIVE = {'starting', 'planning', 'working', 'reviewing'}
 _HIDDEN = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
            if os.name == 'nt' else {'start_new_session': True})
+_VISIBLE = ({'creationflags': subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == 'nt' else {'start_new_session': True})
+
+def _stream_write(job_id: str, text: str) -> None:
+    try:
+        from tools.opencode_live_terminal import get_stream_path
+        sp = get_stream_path(job_id)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        with open(sp, "a", encoding="utf-8", errors="replace") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
+
+
+def _launch_visible_terminal(job_id: str, project: str) -> None:
+    if os.name != 'nt':
+        return
+    viewer_py = Path(__file__).resolve().parent.parent / 'tools' / 'opencode_live_terminal.py'
+    title = f"Zaya OpenCode Live - {Path(project).name}"
+    cmd = f'title {title} & python "{viewer_py}" --job "{job_id}"'
+    try:
+        subprocess.Popen(
+            ['cmd.exe', '/c', 'start', title, 'cmd.exe', '/k', cmd],
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+    except Exception:
+        pass
+
 
 
 @dataclass
@@ -59,6 +87,8 @@ class CodingJob:
     observations: list[dict] = field(default_factory=list)
     review: str = ''
     purpose: str = 'coding'
+    visible: bool = False
+    pending_modifications: list[str] = field(default_factory=list)
 
     def public(self):
         return audit.redact(asdict(self))
@@ -200,7 +230,7 @@ class CodingJobs:
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError('I am already working on a coding request. Ask me to stop it first.')
 
-    def start(self, project, goal, *, agent='', model='', create_project=False, purpose='coding'):
+    def start(self, project, goal, *, agent='', model='', create_project=False, purpose='coding', visible=False):
         require_owner()
         if not goal.strip():
             raise ValueError('Tell me what you want done in the project.')
@@ -210,7 +240,7 @@ class CodingJobs:
             # "auto"/"default" mean installed CLI settings, not model IDs.
             agent = '' if agent.strip().lower() in {'auto', 'default'} else agent.strip()
             model = '' if model.strip().lower() in {'auto', 'default'} else model.strip()
-            job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model, purpose=purpose)
+            job = CodingJob(uuid.uuid4().hex[:12], str(project), goal, agent=agent, model=model, purpose=purpose, visible=bool(visible))
             self._jobs[job.id] = job
             self._begin(job)
         return job
@@ -237,6 +267,25 @@ class CodingJobs:
             self._begin(job)
         return job
 
+    def modify(self, task: str):
+        require_owner()
+        task = task.strip()
+        if not task:
+            raise ValueError('Tell me what you want to modify or change in the task.')
+        with self._lock:
+            job = self.latest()
+            if job is None:
+                raise ValueError('There is no coding session to modify.')
+            job.pending_modifications.append(task)
+            job.goal += '\nOwner modification: ' + task
+            if job.visible:
+                _stream_write(job.id, f"\n[OWNER MODIFICATION] {task}")
+            if job.phase in {'paused', 'waiting_owner', 'completed'}:
+                self._available()
+                self._begin(job)
+            self._save()
+        return job
+
     def _begin(self, job):
         self._stop.clear()
         self._notices.clear()
@@ -252,6 +301,11 @@ class CodingJobs:
         self.runtime.transition(task.id, 'executing', active_step='opencode')
         self._save()
         log_line({'job': job.id, 'phase': 'planning', 'cwd': job.project, 'purpose': job.purpose}, source='opencode')
+        if job.visible:
+            _stream_write(job.id, f"=== Zaya OpenCode Session {job.id} ===")
+            _stream_write(job.id, f"Project: {job.project}")
+            _stream_write(job.id, f"Goal: {job.goal}")
+            _launch_visible_terminal(job.id, job.project)
         self._thread = threading.Thread(target=self._run, args=(job,), name='zaya-coding', daemon=True)
         self._thread.start()
 
@@ -314,17 +368,25 @@ class CodingJobs:
                     job.phase, job.progress = 'completed', 'reviewed against the request brief'
                     self._notice("OpenCode returned a result that passed the brief review. I have the reported changes and check results ready.", kind='complete')
                     break
-                if job.review != 'continue' or number == MAX_PASSES:
-                    job.phase = 'waiting_owner'
-                    job.progress = 'needs owner input or further review'
-                    job.error = ('The automatic review limit was reached; I have kept the remaining work.'
-                                 if job.review == 'continue' else
-                                 'The review needs owner input or could not be completed reliably.')
-                    self._notice("I've kept the result, sir. I need your input before taking this further.", kind='blocked')
-                    break
-                if not job.session_id:
-                    raise RuntimeError('OpenCode returned no session ID for a safe follow-up.')
-                job.prompt = followup_prompt(brief, review)
+                if job.pending_modifications:
+                    mods = "\n".join(f"- {m}" for m in job.pending_modifications)
+                    job.pending_modifications.clear()
+                    if job.visible:
+                        _stream_write(job.id, f"[ADAPTING] Applying owner modifications to pass {number + 1}:\n{mods}")
+                    job.prompt = (followup_prompt(brief, review) if review.get('decision') == 'continue' else
+                                  f"Zaya owner updated instructions for this session:\n{mods}\nPlease adapt work accordingly.")
+                else:
+                    if job.review != 'continue' or number == MAX_PASSES:
+                        job.phase = 'waiting_owner'
+                        job.progress = 'needs owner input or further review'
+                        job.error = ('The automatic review limit was reached; I have kept the remaining work.'
+                                     if job.review == 'continue' else
+                                     'The review needs owner input or could not be completed reliably.')
+                        self._notice("I've kept the result, sir. I need your input before taking this further.", kind='blocked')
+                        break
+                    if not job.session_id:
+                        raise RuntimeError('OpenCode returned no session ID for a safe follow-up.')
+                    job.prompt = followup_prompt(brief, review)
         except Exception as error:
             job.phase, job.error = 'failed', audit.redact(str(error))[:2000]
             job.progress = 'could not finish'
@@ -360,9 +422,10 @@ class CodingJobs:
         try:
             if self._stop.is_set():
                 return
+            popen_flags = _VISIBLE if job.visible else _HIDDEN
             process = subprocess.Popen(argv, cwd=job.project, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                       encoding='utf-8', errors='replace', bufsize=1, **_HIDDEN)
+                                       encoding='utf-8', errors='replace', bufsize=1, **popen_flags)
             with self._lock:
                 self._process = process
             log_line({'job': job.id, 'pid': process.pid, 'executable': str(info.path),
@@ -395,6 +458,13 @@ class CodingJobs:
                           'command': event.command, 'exit_code': event.exit_code,
                           'text': event.text, 'error': event.error}, source='opencode')
                 tally.add(event)
+                if job.visible:
+                    if event.kind == 'tool' and event.status in {'completed', 'error'}:
+                        _stream_write(job.id, f"[TOOL {event.status.upper()}] {event.tool}: {event.command or event.path or ''}")
+                    elif event.kind == 'text' and event.text:
+                        _stream_write(job.id, f"[OUTPUT] {event.text.strip()}")
+                    elif event.kind == 'error':
+                        _stream_write(job.id, f"[ERROR] {event.error}")
                 if event.session_id:
                     job.session_id = event.session_id
                 if event.kind == 'text':
