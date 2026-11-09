@@ -1102,19 +1102,22 @@ class ZayaLive:
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
         # already knows the respectful register of whatever language it is in.
-        _addr = (f"ADDRESS: The owner's name is '{_user_name}'. Use sir naturally in English and the ordinary respectful equivalent in his current language."
+        _addr = (f"ADDRESS: The owner's name is '{_user_name}'. Always speak and respond in English by default and address the owner as 'sir'. Do not switch languages unless explicitly commanded (e.g. 'talk in Nepali')."
                  if _user_name
-                 else 'ADDRESS: Address the user with the ordinary respectful form '
-                      'for a superior in the language you are currently speaking — '
-                      '"sir" in English, its everyday equivalent in any other '
-                      'language. Never an archaic or aristocratic form, and never '
-                      'the form from a different language than the one you are '
-                      'speaking in this sentence.')
+                 else "ADDRESS: Always speak and respond in English by default and address the owner as 'sir'. Do not switch languages unless explicitly commanded.")
         identity_ctx = (
             f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
             f"{_addr}\n\n"
+        )
+        lang_policy_ctx = (
+            "[LANGUAGE REQUIREMENT — STRICT ENGLISH BY DEFAULT]\n"
+            "1. You MUST ALWAYS speak and respond in ENGLISH by default.\n"
+            "2. Even if the user speaks in another language (e.g. Spanish, French, Nepali, Hindi), quotes a foreign phrase, says a single foreign word, or speech recognition misrecognizes speech into another language (such as '¿Ya?'), you MUST STILL SPEAK AND RESPOND ENTIRELY IN ENGLISH.\n"
+            "3. NEVER switch languages automatically based on user input language or audio transcription.\n"
+            "4. The ONLY EXCEPTION is if the owner explicitly instructs you to switch languages (e.g. 'talk in Nepali', 'speak in Spanish', 'reply in French', 'switch language to Nepali'). Only then may you speak in that requested language.\n"
+            "5. Always address the owner as 'sir' in English.\n\n"
         )
 
         # Everything the model is told about *itself* is derived here, not
@@ -1138,7 +1141,7 @@ class ZayaLive:
         })
 
         from core.security.untrusted_content import boundary_prompt
-        parts = [time_ctx, identity_ctx, boundary_prompt()]
+        parts = [time_ctx, identity_ctx, lang_policy_ctx, boundary_prompt()]
         from core.zayabar_config import emotion_tones
         parts.append('[VOICE AND FACE DELIVERY]\nUse the same selected emotion for your face and your Nika voice.\n' +
                      '\n'.join(f'{emotion}: {tone}' for emotion, tone in emotion_tones().items()))
@@ -2449,12 +2452,8 @@ class ZayaLive:
             return
 
         # ── Phase 1: instant greeting ─────────────────────────────────────────
-        # The briefing fires before the user has said anything, so the
-        # remembered language is the only signal there is. It is a starting
-        # point, not a setting: the moment they reply, their language wins.
-        lang_clause = (f" Speak this greeting in {lang}, then follow the "
-                       f"user's own language from their first reply onward."
-                       if lang else "")
+        # Speak in English by default. Never switch languages unless explicitly commanded.
+        lang_clause = " Speak in English. Always remain in English unless the owner explicitly commands you to speak another language."
         name_clause = f" Address the user as {name}." if name else ""
 
         p1 = (
@@ -2475,9 +2474,7 @@ class ZayaLive:
         # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
         async def _deliver_news():
             try:
-                lang_str = (f" Speak in {lang} unless the user has since "
-                            f"spoken another language, in which case use theirs."
-                            if lang else "")
+                lang_str = " Speak in English. Always remain in English unless the owner explicitly commands you to speak another language."
 
                 # Wait for news fetch (already running) and Phase 1 turn-complete
                 # in parallel — whichever takes longer determines the wait time
@@ -2618,7 +2615,7 @@ class ZayaLive:
                         for alert in alerts:
                             msg = (
                                 f"{alert}\n\n"
-                                f"Inform the user about this development naturally in {lang}. "
+                                "Inform the user about this development naturally in English. "
                                 "One brief sentence only."
                             )
                             await self.session.send_client_content(
