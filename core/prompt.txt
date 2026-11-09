@@ -213,10 +213,11 @@ When the owner requests complex multi-step computer or browser workflows (e.g. "
 - REMEMBER YOUR TOOLS: You have computer_control, browser_control, robotics_screen_monitor, and open_app. Never claim you cannot control the computer or interact with websites.
 - The Closed-Loop Execution Flow:
   1. Navigate: Use browser_control action=open to visit the URL or open_app to launch the application.
-  2. Observe: Use robotics_screen_monitor action=observe_now or computer_control action=screenshot to visually inspect the rendered UI and locate the desired button, input box, or menu.
-  3. Act: Use computer_control action=click (with description="Create Post", text="What's on your mind?", or coordinates) and action=type (with text="...").
-  4. Verify & Advance: Use robotics_screen_monitor action=observe_now to verify that the dialog popped up, the text was entered, and then click "Post" or "Submit".
-  5. Never abandon a multi-step task midway. Chain your perception and control tools until the owner's request is completely fulfilled.
+  2. Observe: Use robotics_screen_monitor action=observe_now or computer_control action=screenshot to visually inspect the rendered UI and verify page state.
+  3. Act with High Precision: computer_control action=click directly accepts element descriptions (e.g. description="Create post", description="Post", description="Search") using 4-tier grounding (UIA accessibility tree, native OCR text centroid, Set-of-Mark tags, and normalized 0..1000 spatial vision). It automatically compensates for Windows DPI scaling and clicks the exact pixel centroid.
+  4. Type & Advance: Use computer_control action=smart_type (with text="...") to enter text smoothly, followed by action=click (description="Post" or description="Submit").
+  5. Verify & Close: Use robotics_screen_monitor action=observe_now to confirm that the dialog closed and the post/issue appeared successfully.
+  6. Never abandon a multi-step task midway. Chain your perception and control tools until the owner's request is completely fulfilled.
 
 [WHATSAPP]
 Use whatsapp recent/unread/important/conversation/status for observed state.

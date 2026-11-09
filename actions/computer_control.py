@@ -16,7 +16,93 @@ else:
     _WIN_HIDE: dict = {}
 import time
 import random
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# ── DPI Awareness & Coordinate Space Normalization ───────────────────────────
+def _enable_dpi_awareness() -> None:
+    """Ensure process uses true per-monitor physical pixel metrics on Windows."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            try:
+                # Per-Monitor V2 DPI awareness context (-4)
+                ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+            except Exception:
+                try:
+                    # PROCESS_PER_MONITOR_DPI_AWARE = 2
+                    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+_enable_dpi_awareness()
+
+def get_screen_metrics() -> dict[str, Any]:
+    """Retrieve precise physical and logical screen dimensions and scaling factor."""
+    _enable_dpi_awareness()
+    primary_w, primary_h = 1920, 1080
+    if _PYAUTOGUI:
+        try:
+            sz = pyautogui.size()
+            primary_w, primary_h = int(sz.width), int(sz.height)
+        except Exception:
+            pass
+
+    logical_w, logical_h = primary_w, primary_h
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            sm_w = user32.GetSystemMetrics(0)
+            sm_h = user32.GetSystemMetrics(1)
+            if sm_w > 0 and sm_h > 0:
+                logical_w, logical_h = int(sm_w), int(sm_h)
+        except Exception:
+            pass
+
+    scale_x = float(primary_w) / float(max(1, logical_w))
+    scale_y = float(primary_h) / float(max(1, logical_h))
+
+    return {
+        "primary_w": primary_w,
+        "primary_h": primary_h,
+        "logical_w": logical_w,
+        "logical_h": logical_h,
+        "scale_x": scale_x,
+        "scale_y": scale_y,
+    }
+
+def to_logical_coords(x: float, y: float, source_w: int, source_h: int) -> tuple[int, int]:
+    """Transform coordinates from any source frame (e.g. 1000x1000 normalized,
+    screenshot physical pixels, or logical space) into precise cursor coordinates.
+    """
+    metrics = get_screen_metrics()
+    target_w = metrics["primary_w"]
+    target_h = metrics["primary_h"]
+
+    if source_w <= 0 or source_h <= 0:
+        return int(round(x)), int(round(y))
+
+    # Normalized [0..1000] per-mille coordinates (used by ER-2, GPT Operator, Claude Computer Use)
+    if source_w == 1000 and source_h == 1000:
+        mapped_x = int(round(float(x) * target_w / 1000.0))
+        mapped_y = int(round(float(y) * target_h / 1000.0))
+    elif source_w != target_w or source_h != target_h:
+        # Scale proportionally from screenshot dimensions to target cursor space
+        mapped_x = int(round(float(x) * target_w / float(source_w)))
+        mapped_y = int(round(float(y) * target_h / float(source_h)))
+    else:
+        mapped_x = int(round(x))
+        mapped_y = int(round(y))
+
+    # Clamp to valid screen bounds
+    clamped_x = max(0, min(target_w - 1, mapped_x))
+    clamped_y = max(0, min(target_h - 1, mapped_y))
+    return clamped_x, clamped_y
 
 try:
     import pyautogui
@@ -182,11 +268,46 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
+def _native_win32_click(x: int, y: int, button: str = "left", clicks: int = 1) -> bool:
+    """Ultra-low-latency native Windows cursor positioning and clicking via win32api."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        import win32api
+        import win32con
+
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.02)
+
+        down_flag = win32con.MOUSEEVENTF_LEFTDOWN if button == "left" else win32con.MOUSEEVENTF_RIGHTDOWN
+        up_flag = win32con.MOUSEEVENTF_LEFTUP if button == "left" else win32con.MOUSEEVENTF_RIGHTUP
+
+        for _ in range(clicks):
+            win32api.mouse_event(down_flag, x, y, 0, 0)
+            time.sleep(0.03)
+            win32api.mouse_event(up_flag, x, y, 0, 0)
+            if clicks > 1:
+                time.sleep(0.05)
+        return True
+    except Exception:
+        return False
+
+
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     _require_pyautogui()
     if x is not None and y is not None:
-        pyautogui.click(x, y, button=button, clicks=clicks)
-        return f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]"
+        target_x, target_y = int(round(x)), int(round(y))
+        try:
+            pyautogui.moveTo(target_x, target_y, duration=0.08)
+            time.sleep(0.04)
+        except Exception:
+            pass
+
+        if _native_win32_click(target_x, target_y, button=button, clicks=clicks):
+            return f"{'Double-c' if clicks == 2 else 'C'}licked ({target_x}, {target_y}) [{button}]"
+
+        pyautogui.click(target_x, target_y, button=button, clicks=clicks)
+        return f"{'Double-c' if clicks == 2 else 'C'}licked ({target_x}, {target_y}) [{button}]"
     pyautogui.click(button=button, clicks=clicks)
     return f"Clicked at current position [{button}]"
 
@@ -418,10 +539,143 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
                 # Ambiguous match among distinct controls — reject to avoid mis-clicking
                 return None
 
-        return top_point
+        return to_logical_coords(top_point[0], top_point[1], 0, 0)
     except Exception as e:
         print(f"[ComputerControl] UIA element search failed: {e}")
         return None
+
+
+def _find_via_ocr(description: str, screenshot_img: Any, shot_w: int, shot_h: int) -> tuple[int, int] | None:
+    """Tier 1: Windows Native Media OCR text extraction & exact bounding box centroid grounding."""
+    if platform.system() != "Windows" or not description:
+        return None
+
+    import tempfile
+    import os
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            tmp_path = tf.name
+
+        screenshot_img.save(tmp_path, format="PNG")
+
+        ps_script = """
+param([string]$ImagePath)
+try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | ? { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+    Function Await($winRtOp, $resultType) {
+        $asTask = $asTaskGeneric.MakeGenericMethod($resultType)
+        $netTask = $asTask.Invoke($null, @($winRtOp))
+        $netTask.Wait(-1) | Out-Null
+        return $netTask.Result
+    }
+
+    [Windows.Media.Ocr.OcrEngine, Windows.Foundation.UniversalApiContract, ContentType=WindowsRuntime] | Out-Null
+    [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation.UniversalApiContract, ContentType=WindowsRuntime] | Out-Null
+    [Windows.Storage.StorageFile, Windows.Foundation.UniversalApiContract, ContentType=WindowsRuntime] | Out-Null
+
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync((Resolve-Path $ImagePath).Path)) ([Windows.Storage.StorageFile])
+    $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    if ($null -eq $engine) {
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
+    }
+    $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+
+    $lines = @()
+    foreach ($l in $result.Lines) {
+        $words = @()
+        foreach ($w in $l.Words) {
+            $r = $w.BoundingRect
+            $words += @{ text = $w.Text; x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height }
+        }
+        $lines += @{ text = $l.Text; words = $words }
+    }
+    $lines | ConvertTo-Json -Depth 4
+} catch {
+    Write-Output "[]"
+}
+"""
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+            "-ImagePath",
+            tmp_path,
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=6, **_WIN_HIDE)
+        if res.returncode != 0 or not res.stdout.strip():
+            return None
+
+        raw_out = res.stdout.strip()
+        data = json.loads(raw_out)
+        lines = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+        if not lines:
+            return None
+
+        desc_clean = re.sub(r"[^\w\s]", "", description.lower()).strip()
+        tokens = [t for t in desc_clean.split() if len(t) > 1]
+        if not tokens:
+            tokens = [desc_clean]
+
+        best_match = None
+        best_score = 0.0
+
+        for line in lines:
+            l_text = line.get("text", "")
+            l_clean = re.sub(r"[^\w\s]", "", l_text.lower()).strip()
+            words = line.get("words", [])
+
+            # Exact or full substring match on line
+            if desc_clean and desc_clean in l_clean:
+                if words:
+                    min_x = min(w["x"] for w in words)
+                    min_y = min(w["y"] for w in words)
+                    max_x = max(w["x"] + w["w"] for w in words)
+                    max_y = max(w["y"] + w["h"] for w in words)
+                    center_x = (min_x + max_x) // 2
+                    center_y = (min_y + max_y) // 2
+                    return to_logical_coords(center_x, center_y, shot_w, shot_h)
+
+            # Match individual words and compute score
+            for w in words:
+                w_text = re.sub(r"[^\w\s]", "", w.get("text", "").lower()).strip()
+                if not w_text:
+                    continue
+                score = 0.0
+                if w_text == desc_clean:
+                    score = 1.0
+                elif any(t == w_text for t in tokens):
+                    score = 0.85
+                elif any(t in w_text or w_text in t for t in tokens if len(t) >= 3):
+                    score = 0.65
+
+                if score > best_score:
+                    best_score = score
+                    cx = w["x"] + w["w"] // 2
+                    cy = w["y"] + w["h"] // 2
+                    best_match = (cx, cy)
+
+        if best_match and best_score >= 0.65:
+            return to_logical_coords(best_match[0], best_match[1], shot_w, shot_h)
+
+    except Exception as e:
+        logger.debug("[ComputerControl] Windows Media OCR failed: %s", e)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    return None
 
 
 def _detect_visual_candidates(screenshot_img: Any, w: int, h: int, max_candidates: int = 50) -> list[dict]:
@@ -589,7 +843,7 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
                 if isinstance(parsed, dict) and "id" in parsed:
                     val = parsed["id"]
                     if isinstance(val, int) and val in marks:
-                        return marks[val]
+                        return to_logical_coords(marks[val][0], marks[val][1], w, h)
                     if val is None:
                         return None
             except Exception:
@@ -600,7 +854,7 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
             if match:
                 mark_id = int(match.group(1))
                 if mark_id in marks:
-                    return marks[mark_id]
+                    return to_logical_coords(marks[mark_id][0], marks[mark_id][1], w, h)
     except Exception as e:
         print(f"[ComputerControl] SoM element search failed: {e}")
 
@@ -608,54 +862,112 @@ def _find_via_som(description: str, screenshot_img: Any, w: int, h: int) -> tupl
 
 
 def _find_via_coordinates(description: str, screenshot_bytes: bytes, w: int, h: int) -> tuple[int, int] | None:
-    """Tier C: Direct raw screenshot coordinate estimation via Gemini."""
+    """Tier 3: SOTA normalized [0..1000] visual spatial grounding via ER-2 / Gemini Vision."""
     try:
-        from google.genai import types as gtypes
         from core import gemini
 
         prompt = (
-            f"This is a screenshot of a {w}×{h} pixel screen. "
-            f"Locate the UI element described as: '{description}'. "
-            f"Reply with ONLY the center coordinates as: x,y "
-            f"If the element is not visible, reply: NOT_FOUND"
+            f"You are an expert GUI grounding agent. Analyze the provided screenshot ({w}x{h} px) "
+            f"and locate the UI element: '{description}'.\n"
+            f"Reply with ONLY a JSON object in this format:\n"
+            f'{{"point": [y, x], "label": "{description}"}}\n'
+            f"where y and x are integers normalized to 0-1000 (0 is top/left, 1000 is bottom/right).\n"
+            f'If not visible on screen, reply: {{"point": null}}'
         )
 
-        resp = gemini.call(
-            [gtypes.Part.from_bytes(data=screenshot_bytes, mime_type="image/png"), prompt],
-            tier=gemini.FAST,
-            timeout_ms=20_000,
-        )
-        if resp is None:
+        try:
+            from google.genai import types as gtypes
+            content_part = gtypes.Part.from_bytes(data=screenshot_bytes, mime_type="image/png")
+        except ImportError:
+            import base64
+            content_part = {
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(screenshot_bytes).decode("ascii"),
+                }
+            }
+
+        resp = None
+        for tier in ("models/gemini-robotics-er-2-streaming-preview", gemini.SMART, gemini.FAST):
+            try:
+                resp = gemini.call(
+                    [content_part, prompt],
+                    tier=tier,
+                    timeout_ms=18_000,
+                )
+                if resp and resp.text:
+                    break
+            except Exception:
+                continue
+
+        if resp is None or not resp.text:
             return None
 
-        text = (resp.text or "").strip()
-        if "NOT_FOUND" in text.upper():
+        text = resp.text.strip()
+        if "null" in text.lower() and '"point": null' in text.lower():
             return None
 
-        match = re.search(r"(\d+)\s*,\s*(\d+)", text)
-        if match:
-            return int(match.group(1)), int(match.group(2))
+        # 1. Parse JSON format {"point": [y, x]} or {"box_2d": [ymin, xmin, ymax, xmax]}
+        try:
+            clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+            data = json.loads(clean_json)
+            if isinstance(data, dict):
+                pt = data.get("point")
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2 and pt[0] is not None and pt[1] is not None:
+                    norm_y, norm_x = float(pt[0]), float(pt[1])
+                    return to_logical_coords(norm_x, norm_y, 1000, 1000)
+
+                box = data.get("box_2d") or data.get("bbox")
+                if isinstance(box, (list, tuple)) and len(box) >= 4:
+                    ymin, xmin, ymax, xmax = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+                    norm_y = (ymin + ymax) / 2.0
+                    norm_x = (xmin + xmax) / 2.0
+                    return to_logical_coords(norm_x, norm_y, 1000, 1000)
+        except Exception:
+            pass
+
+        # 2. Regex fallback for point [y, x] in normalized 0..1000
+        pt_match = re.search(r'"point"\s*:\s*\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]', text)
+        if pt_match:
+            norm_y, norm_x = float(pt_match.group(1)), float(pt_match.group(2))
+            return to_logical_coords(norm_x, norm_y, 1000, 1000)
+
+        # 3. Regex fallback for box_2d [ymin, xmin, ymax, xmax]
+        box_match = re.search(r'\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]', text)
+        if box_match:
+            ymin, xmin, ymax, xmax = (float(box_match.group(i)) for i in range(1, 5))
+            norm_y = (ymin + ymax) / 2.0
+            norm_x = (xmin + xmax) / 2.0
+            return to_logical_coords(norm_x, norm_y, 1000, 1000)
+
+        # 4. Fallback for raw x,y
+        match_raw = re.search(r"(\d+)\s*,\s*(\d+)", text)
+        if match_raw:
+            raw_x, raw_y = int(match_raw.group(1)), int(match_raw.group(2))
+            return to_logical_coords(raw_x, raw_y, w, h)
+
     except Exception as e:
-        print(f"[ComputerControl] Coordinate fallback failed: {e}")
+        logger.debug("[ComputerControl] Coordinate fallback failed: %s", e)
 
     return None
 
 
 def _screen_find(description: str) -> tuple[int, int] | None:
-    """Robust 3-tier UI element grounding:
-    Tier A: Accessibility tree inspection (pywinauto UIA).
-    Tier B: Set-of-Mark (SoM) visual candidate tagging with structured LLM detection.
-    Tier C: Direct coordinate estimation fallback.
+    """High-precision 4-tier UI element grounding:
+    Tier 0: Accessibility tree inspection (pywinauto UIA).
+    Tier 1: Windows Native Media OCR text bounding box centroid grounding.
+    Tier 2: Set-of-Mark (SoM) visual candidate tagging with structured LLM detection.
+    Tier 3: SOTA normalized [0..1000] visual spatial prediction (ER-2 / Gemini Vision).
     """
     if not description:
         return None
 
-    # Tier A: UIA accessibility inspection
+    # Tier 0: UIA accessibility inspection
     coords = _find_via_uia(description)
     if coords is not None:
         return coords
 
-    # Capture screen for visual tiers
+    # Capture screen for visual & OCR tiers
     try:
         _require_pyautogui()
         img = pyautogui.screenshot()
@@ -671,12 +983,17 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         print(f"[ComputerControl] Screenshot capture failed: {e}")
         return None
 
-    # Tier B: Set-of-Mark visual tagging
+    # Tier 1: Windows Native OCR exact text grounding
+    coords = _find_via_ocr(description, img, shot_w, shot_h)
+    if coords is not None:
+        return coords
+
+    # Tier 2: Set-of-Mark visual tagging
     coords = _find_via_som(description, img, shot_w, shot_h)
     if coords is not None:
         return coords
 
-    # Tier C: Raw screenshot coordinate prediction
+    # Tier 3: SOTA normalized visual spatial prediction
     return _find_via_coordinates(description, screenshot_bytes, shot_w, shot_h)
 
 
@@ -709,10 +1026,10 @@ def computer_control(
     Actions:
       type          — type text at cursor
       smart_type    — clear field + type (clipboard-backed)
-      click         — left click
-      double_click  — double left click
-      right_click   — right click
-      move          — move mouse
+      click         — left click (auto-resolves description if x/y omitted)
+      double_click  — double left click (auto-resolves description if x/y omitted)
+      right_click   — right click (auto-resolves description if x/y omitted)
+      move          — move mouse (auto-resolves description if x/y omitted)
       drag          — click-drag between two points
       hotkey        — key combination
       press         — single key
@@ -750,16 +1067,63 @@ def computer_control(
                 clear_first=params.get("clear_first", True),
             )
 
+        # Smart coordinate auto-resolution when description/text/target is provided
+        def _resolve_target_coords(param_dict: dict) -> tuple[int, int] | None:
+            raw_x = param_dict.get("x")
+            raw_y = param_dict.get("y")
+            if raw_x is not None and raw_y is not None:
+                try:
+                    return int(raw_x), int(raw_y)
+                except (ValueError, TypeError):
+                    pass
+
+            target_desc = (
+                param_dict.get("description")
+                or param_dict.get("text")
+                or param_dict.get("label")
+                or param_dict.get("target")
+                or param_dict.get("element")
+            )
+            if target_desc:
+                coords = _screen_find(str(target_desc))
+                if coords:
+                    return coords
+            return None
+
         if action in ("click", "left_click"):
-            return _click(params.get("x"), params.get("y"), "left", 1)
+            target = _resolve_target_coords(params)
+            if target:
+                return _click(target[0], target[1], "left", 1)
+            desc = params.get("description") or params.get("label") or params.get("element")
+            if desc:
+                return f"Element not found on screen: '{desc}'"
+            return _click(None, None, "left", 1)
 
         if action == "double_click":
-            return _click(params.get("x"), params.get("y"), "left", 2)
+            target = _resolve_target_coords(params)
+            if target:
+                return _click(target[0], target[1], "left", 2)
+            desc = params.get("description") or params.get("label") or params.get("element")
+            if desc:
+                return f"Element not found on screen: '{desc}'"
+            return _click(None, None, "left", 2)
 
         if action == "right_click":
-            return _click(params.get("x"), params.get("y"), "right", 1)
+            target = _resolve_target_coords(params)
+            if target:
+                return _click(target[0], target[1], "right", 1)
+            desc = params.get("description") or params.get("label") or params.get("element")
+            if desc:
+                return f"Element not found on screen: '{desc}'"
+            return _click(None, None, "right", 1)
 
         if action == "move":
+            target = _resolve_target_coords(params)
+            if target:
+                return _move(target[0], target[1])
+            desc = params.get("description") or params.get("label") or params.get("element")
+            if desc:
+                return f"Element not found on screen: '{desc}'"
             return _move(int(params.get("x", 0)), int(params.get("y", 0)))
 
         if action == "drag":
@@ -842,10 +1206,13 @@ def computer_control(
 TOOL = {
     "name": "computer_control",
     "description": (
-        "Direct computer and browser control for multi-step GUI automation: type, click, "
-        "hotkeys, scroll, move mouse, screenshots, find and click UI elements on screen. "
-        "Essential for tasks like navigating to Facebook/web apps, drafting and publishing posts, "
-        "clicking buttons, filling forms, and managing desktop windows alongside robotics_screen_monitor."
+        "High-precision computer and browser control for multi-step GUI automation: type, click, "
+        "hotkeys, scroll, move mouse, screenshots, and pixel-perfect element finding and clicking. "
+        "Supports natural-language target descriptions (e.g., 'Create post', 'Share', 'Search') with "
+        "4-tier grounding (UIA accessibility tree, native OCR text centroid, Set-of-Mark tagging, "
+        "and normalized [0..1000] spatial vision). Essential for executing multi-step tasks such as "
+        "navigating web apps, drafting and publishing posts, filling forms, and managing desktop windows "
+        "in synergy with robotics_screen_monitor."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -892,7 +1259,7 @@ TOOL = {
             },
             "description": {
                 "type": "STRING",
-                "description": "Element description for screen_find/screen_click"
+                "description": "Element description for screen_find/screen_click/click/move (e.g. 'Create post', 'Share')"
             },
             "type": {
                 "type": "STRING",
