@@ -242,6 +242,31 @@
 - **Components:** `core/coding_jobs.py`, `actions/coding_job.py`, `tools/opencode_live_terminal.py`, `tests/test_opencode_visible_terminal.py`.
 - **Verification:** 9 unit tests passing. Verifies live event streaming, visible console invocation, dynamic task modification during active/completed passes, and owner trust enforcement.
 
+### Cycle 63: Intelligent Model Fallback & Dynamic Routing Engine
+- **Capability:** Capability-aware, latency-measured, and cost-optimized multi-provider model routing. Dynamically evaluates task complexity against model capability profiles (Gemini 2.5 Flash/Pro, Groq Llama 3.3 70B, Local Ollama, OpenAI). Handles rate limits (429 exponential backoff), server overload (503), authentication failures, and timeouts with transparent justification logs.
+- **Components:** `core/model_router.py`, `actions/model_routing_action.py`, `tests/test_model_router.py`.
+- **Verification:** 10 unit tests passing. Verifies complexity targeting, vision filtering, cooldown backoff, auth error persistence, and automatic recovery ladder.
+
+### Cycle 64: Runtime Self-Knowledge & Centralized Capability Registry
+- **Capability:** Dynamically probes OS privilege tier, display count, microphone, speaker, camera presence, active AI providers, local Ollama connectivity, and optional library status (`mss`, `sounddevice`, `cv2`, `playwright`, `pyautogui`, `numpy`). Provides honest explanations of operational boundaries and missing dependencies before execution rather than inventing capabilities.
+- **Components:** `core/capability_registry.py`, `actions/capability_action.py`, `tests/test_capability_registry.py`.
+- **Verification:** 9 unit tests passing. Verifies hardware probing safety, snapshot caching, dependency mapping, honest limitation explanations, and tool checks.
+
+### Cycle 65: Cross-Platform Desktop OS Abstraction & Platform Adapters
+- **Capability:** Clean polymorphic platform abstraction isolating OS-specific features behind unified interfaces (`PlatformAdapter`). Implements `WindowsAdapter` (Win32 ctypes, PowerShell, taskkill /F /T), `MacOSAdapter` (osascript AppleScript banners, screencapture, pkill -P), and `LinuxAdapter` (X11 wmctrl/scrot vs Wayland grim/notify-send with sandbox security isolation).
+- **Components:** `core/platform/base.py`, `core/platform/windows.py`, `core/platform/macos.py`, `core/platform/linux.py`, `core/platform/factory.py`, `core/platform/__init__.py`, `tests/test_platform_adapters.py`.
+- **Verification:** 6 unit tests passing. Verifies factory selection, power status inspection, Wayland environment detection, and notification command generation.
+
+### Cycle 66: Small-Model Efficiency & Tool Budget Optimizer
+- **Capability:** Empowers smaller local models (1B-8B local Ollama, Groq Llama 3.1 8B) to run without context exhaustion or tool-calling hallucinations. Features dynamic intent-based tool pruning (selecting 3-6 relevant tools from 50+), ultra-lean schema minification, model-tier tool budgets (5 for SLMs, 12 for medium LLMs, 40 for frontier cloud), and context history compression.
+- **Components:** `core/small_model_optimizer.py`, `tests/test_small_model_optimizer.py`.
+- **Verification:** 4 unit tests passing. Verifies tool budget allocations, schema boilerplate stripping, intent-based ranking, and context window compression.
+
+### Cycle 67: Commercial Air Travel Intelligence & Flight Finder
+- **Capability:** Real-world commercial air travel discovery utility. Resolves cities and airports to 3-letter IATA codes, explores flight schedules, layovers, durations, and pricing across major global airline hubs (Nepal Airlines, Qatar Airways, Emirates, British Airways, Delta, Singapore Airlines), with multi-passenger and cabin class scaling.
+- **Components:** `core/flight_finder.py`, `actions/flight_search.py`, `tests/test_flight_finder.py`.
+- **Verification:** 7 unit tests passing. Verifies IATA code resolution, flight schedule discovery, cabin price multipliers, and markdown summary generation.
+
 ---
 
 ## 5. Test Verification Matrix
