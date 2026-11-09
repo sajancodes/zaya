@@ -121,3 +121,7 @@ updates/
 
 memory/sentinel_alerts.json
 memory/sentinel_alerts.tmp
+
+# ── Dynamic Toolsmith runtime files ──────────────────────────────────────────
+actions/custom/*
+!actions/custom/.gitkeep

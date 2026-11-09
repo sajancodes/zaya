@@ -212,7 +212,11 @@ def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
     for key in _CTX_KEYS:
         if has_var_kw or key in sig.parameters:
             kwargs[key] = ctx.get(key)
-    return fn(parameters=parameters, **kwargs)
+    if "parameters" in sig.parameters or has_var_kw:
+        return fn(parameters=parameters, **kwargs)
+    elif sig.parameters:
+        return fn(parameters, **kwargs)
+    return fn(**kwargs)
 
 
 def _validate(module_or_tool, filename: str) -> ActionRecord:
