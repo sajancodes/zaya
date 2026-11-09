@@ -351,3 +351,8 @@ def get_action_registry(actions_dir: Path | None = None) -> ActionRegistry:
                 actions_dir = Path(__file__).resolve().parent.parent / "actions"
         _global_registry = discover_actions(actions_dir, logger=lambda _: None)
     return _global_registry
+
+
+def execute_tool(name: str, parameters: dict, ctx: dict | None = None) -> str:
+    """Convenience top-level execution helper for any discovered action."""
+    return get_action_registry().run(name, parameters, ctx)
