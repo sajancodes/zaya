@@ -290,6 +290,12 @@ Examples:
         action="store_true",
         help="Check Python version, directories, and assets without installing.",
     )
+    parser.add_argument(
+        "--start",
+        "--boot",
+        action="store_true",
+        help="Launch Zaya immediately after setup finishes.",
+    )
 
     args = parser.parse_args()
 
@@ -345,6 +351,18 @@ Examples:
     print("       • Enable optical hands or 3D workspace in Settings > Hand controls.")
     print("       • Pair native Android companion from Settings > Remote Control.")
     print("\nCreated and developed by Sajan Rai — https://github.com/sajancodes")
+
+    # 8. First Boot Launch
+    if args.start:
+        print("\n🚀 Initiating Zaya First Boot...")
+        main_py = HERE / "main.py"
+        if not main_py.exists():
+            print("❌ main.py not found in project directory.")
+            return
+        try:
+            subprocess.run([sys.executable, str(main_py)], cwd=str(HERE))
+        except KeyboardInterrupt:
+            print("\nZaya session stopped by user.")
 
 
 if __name__ == "__main__":
