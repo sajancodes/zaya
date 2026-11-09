@@ -1,7 +1,8 @@
 import json
+import pytest
+pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-import pytest
 from core.spatial.spatial_session import SpatialSession
 from core.spatial.spatial_protocol import envelope
 from core.spatial.procedural_geometry import generate

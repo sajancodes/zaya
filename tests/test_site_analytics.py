@@ -15,6 +15,7 @@ def backend(request, monkeypatch, tmp_path):
     monkeypatch.setenv('ZAYA_DATABASE_BACKEND', request.param)
     monkeypatch.setenv('ZAYA_DB_PATH', str(tmp_path / 'analytics.db'))
     if request.param == 'firebase':
+        pytest.importorskip('google.cloud.firestore', reason='google-cloud-firestore not installed')
         from google.cloud import firestore
         from web import firebase_store
         documents = {}
@@ -98,6 +99,7 @@ def test_api_requires_admin_and_limits_public_payloads(monkeypatch, tmp_path):
     monkeypatch.delenv('VERCEL', raising=False)
     monkeypatch.setenv('ZAYA_DATABASE_BACKEND', 'sqlite')
     monkeypatch.setenv('ZAYA_DB_PATH', str(tmp_path / 'analytics.db'))
+    pytest.importorskip('fastapi', reason='fastapi not installed')
     from fastapi.testclient import TestClient
     from web import server
     monkeypatch.setattr(server, 'is_admin_enabled', lambda: True)

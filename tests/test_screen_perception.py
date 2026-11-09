@@ -1,4 +1,6 @@
-import numpy as np
+import pytest
+np = pytest.importorskip("numpy", reason="numpy not installed")
+cv2 = pytest.importorskip("cv2", reason="opencv not installed")
 from core.perception.frame_diff import FrameDiff
 
 

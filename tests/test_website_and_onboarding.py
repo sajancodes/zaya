@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
 from core.onboarding.wizard import probe_provider_connection

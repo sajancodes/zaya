@@ -1,3 +1,4 @@
+import pytest
 """Daily reporting survives restarts, retries, updates and UTC rollover."""
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -61,6 +62,7 @@ def test_sqlite_daily_receipts_do_not_duplicate_installations(tmp_path, monkeypa
 
 
 def test_beta_downloads_are_counted_and_outages_do_not_block(monkeypatch):
+    pytest.importorskip('fastapi', reason='fastapi not installed')
     from fastapi.testclient import TestClient
     from web import server
     calls = []

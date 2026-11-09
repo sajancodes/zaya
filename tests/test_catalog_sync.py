@@ -38,6 +38,7 @@ def test_missing_manifest_fails_catalog_promotion(monkeypatch):
 
 
 def test_sync_endpoint_never_accepts_an_admin_cookie_as_release_identity(monkeypatch):
+    pytest.importorskip('fastapi', reason='fastapi not installed')
     from fastapi.testclient import TestClient
     from web.server import app
     response = TestClient(app).post('/api/internal/releases/sync', json={'tag':'v0.5.0'},

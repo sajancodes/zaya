@@ -1,3 +1,5 @@
+import pytest
+pytest.importorskip('cv2', reason='cv2 not installed')
 from core.gesture.hand_tracker import HandTracker
 import pytest
 import time

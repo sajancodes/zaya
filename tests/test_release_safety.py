@@ -9,6 +9,7 @@ from web.release_validation import validate_release
 
 
 def test_shared_quota_outage_returns_safe_503(monkeypatch):
+    pytest.importorskip('fastapi', reason='fastapi not installed')
     from fastapi.testclient import TestClient
     from web import server
     from web.shared_limits import RateLimitUnavailable
@@ -37,6 +38,7 @@ def test_update_health_is_opt_in_and_uses_only_allowed_fields(tmp_path, monkeypa
 
 
 def test_update_api_rejects_arbitrary_error_content():
+    pytest.importorskip('fastapi', reason='fastapi not installed')
     from fastapi.testclient import TestClient
     from web.server import app
     payload = {'installation_id':'12345678-1234-4123-8123-123456789abc', 'event_id':'12345678-1234-4123-8123-123456789abd',

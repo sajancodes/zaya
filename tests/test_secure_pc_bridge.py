@@ -34,6 +34,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
+
 from core.device_registry import DeviceRegistry
 from core.pc_ecosystem import (
     PCEcosystemBridge,

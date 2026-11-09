@@ -6,6 +6,7 @@ import pytest
 
 
 def test_set_speaking_idempotent_does_not_extend_tail():
+    pytest.importorskip('sounddevice', reason='sounddevice not installed')
     from main import ZayaLive
 
     # Mock minimal ZayaLive attributes needed for set_speaking
@@ -49,6 +50,7 @@ def test_set_speaking_idempotent_does_not_extend_tail():
 
 
 def test_interrupt_clears_tail_until():
+    pytest.importorskip('sounddevice', reason='sounddevice not installed')
     from main import ZayaLive
 
     inst = object.__new__(ZayaLive)
@@ -111,6 +113,7 @@ def test_quota_failure_ignores_client_inactivity():
 
 
 def test_run_tool_batch_catches_tool_exceptions():
+    pytest.importorskip('sounddevice', reason='sounddevice not installed')
     from main import ZayaLive
     from google.genai import types
 

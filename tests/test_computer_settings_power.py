@@ -1,4 +1,6 @@
 import pytest
+pytest.importorskip('pyautogui', reason='pyautogui not installed')
+import pytest
 import platform
 from actions.computer_settings import (
     get_power_mode,
