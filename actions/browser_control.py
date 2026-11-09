@@ -126,10 +126,8 @@ def _real_profile_dir(browser: str) -> str:
             print(f"[Browser] ✅ Real profile found for {browser}: {p}")
             return str(p)
 
-    fallback = home / ".zaya_profiles" / browser
-    fallback.mkdir(parents=True, exist_ok=True)
-    print(f"[Browser] ⚠️  Real profile not found for {browser}, using: {fallback}")
-    return str(fallback)
+    print(f"[Browser] ⚠️  Real profile not found for {browser}")
+    return None
 
 def _firefox_profile_dir() -> Optional[str]:
     home = Path.home()
@@ -438,7 +436,10 @@ def _open_native(url: str, browser_name: Optional[str], incognito: bool = False)
         if exe:
             try:
                 inc_flags = _incognito_flags(name) if incognito else []
-                launch_args = [exe] + inc_flags + ([url] if url else [])
+                extra_args = []
+                if not incognito and name in ("chrome", "brave", "edge", "vivaldi", "opera", "operagx"):
+                    extra_args = ["--remote-debugging-port=9222"]
+                launch_args = [exe] + extra_args + inc_flags + ([url] if url else [])
                 subprocess.Popen(
                     launch_args,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -592,15 +593,15 @@ class _BrowserSession:
 
     async def _launch_context(self):
         """
-        Launches the browser with the real user profile.
-        Does nothing if the context is already open.
+        Launches the browser with the real user profile or attaches via CDP.
+        Never creates or uses sandboxed profiles.
         """
         if self._context is not None:
             return
 
         if self._spec is None:
             raise RuntimeError(
-                f"'{self.browser_name}' bu platformda ({_OS}) desteklenmiyor."
+                f"'{self.browser_name}' is not supported on this platform ({_OS})."
             )
 
         engine_name = self._spec["engine"]
@@ -608,10 +609,22 @@ class _BrowserSession:
         channel     = self._spec["channel"]
         engine_obj  = getattr(self._pw, engine_name)
 
+        # 1. First, try attaching to already running browser via CDP (port 9222)
+        if engine_name == "chromium":
+            for port in (9222, 9223):
+                try:
+                    self._context = await engine_obj.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=1500)
+                    pages = [page for page in self._context.pages if not page.is_closed()]
+                    self._page = pages[0] if pages else await self._context.new_page()
+                    print(f"[Browser] [OK] Attached to running {self.browser_name} via CDP (port {port})")
+                    return
+                except Exception:
+                    pass
+
         if engine_name == "firefox":
-            profile = _firefox_profile_dir() or str(
-                Path.home() / ".zaya_profiles" / "firefox"
-            )
+            profile = _firefox_profile_dir()
+            if not profile:
+                raise RuntimeError("Could not find real Firefox profile.")
             kwargs: dict = {
                 "headless":    False,
                 "slow_mo":     0,
@@ -623,19 +636,17 @@ class _BrowserSession:
                 kwargs["executable_path"] = exe
             try:
                 self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
+                self._page = await self._adopt_page()
+                print(f"[Browser] [OK] Firefox launched with real profile")
+                return
             except Exception as e:
-                print(f"[Browser] Firefox real profile failed ({e}), using Zaya profile")
-                zaya_prof = str(Path.home() / ".zaya_profiles" / "firefox_zaya")
-                Path(zaya_prof).mkdir(parents=True, exist_ok=True)
-                self._context = await engine_obj.launch_persistent_context(zaya_prof, **kwargs)
-
-            self._page = await self._adopt_page()
-            print(f"[Browser] ✅ Firefox launched")
-            return
+                raise RuntimeError(
+                    f"Firefox is already running with your real profile. "
+                    f"Zaya will not launch a separate sandboxed browser. "
+                    f"Use computer_control on the active Firefox window."
+                ) from e
 
         if engine_name == "webkit":
-            safari_profile = str(Path.home() / ".zaya_profiles" / "safari")
-            Path(safari_profile).mkdir(parents=True, exist_ok=True)
             kwargs = {
                 "headless":    False,
                 "slow_mo":     0,
@@ -643,12 +654,14 @@ class _BrowserSession:
                 "no_viewport": True,
                 "timeout":     25_000,
             }
-            self._context = await engine_obj.launch_persistent_context(safari_profile, **kwargs)
+            self._context = await engine_obj.launch(**kwargs)
             self._page = await self._adopt_page()
-            print(f"[Browser] ✅ Safari launched")
+            print(f"[Browser] [OK] Safari launched")
             return
 
         profile = _real_profile_dir(self.browser_name)
+        if not profile:
+            raise RuntimeError(f"Could not locate the real user profile directory for {self.browser_name}.")
 
         kwargs = {
             "headless":    False,
@@ -658,6 +671,7 @@ class _BrowserSession:
             "timeout":     25_000,
             "args": [
                 "--start-maximized",
+                "--remote-debugging-port=9222",
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
                 "--disable-default-apps",
@@ -682,23 +696,15 @@ class _BrowserSession:
             print(f"[Browser] [OK] Launched [{label}] profile={profile}")
             return
         except Exception as e:
-            print(f"[Browser] [!] Real profile failed for {label}: {e}")
-
-        # The real profile could not be opened (browser already open / locked
-        # profile / newer Chrome versions block the real profile under
-        # automation). Fall back to a persistent Zaya automation profile —
-        # accounts logged in here once stay logged in on later sessions too.
-        zaya_profile = str(Path.home() / ".zaya_profiles" / self.browser_name)
-        Path(zaya_profile).mkdir(parents=True, exist_ok=True)
-        print(f"[Browser] Retrying with Zaya profile: {zaya_profile}")
-
-        try:
-            self._context = await engine_obj.launch_persistent_context(zaya_profile, **kwargs)
-            self._page = await self._adopt_page()
-            print(f"[Browser] [OK] Launched [{label}] with Zaya profile "
-                  f"(sign-ins persist across sessions)")
-        except Exception as e2:
-            raise RuntimeError(f"Could not launch {self.browser_name}: {e2}") from e2
+            err_str = str(e)
+            print(f"[Browser] [!] Real profile failed for {label}: {err_str}")
+            if "already in use" in err_str.lower() or "opening in existing browser session" in err_str.lower():
+                raise RuntimeError(
+                    f"'{self.browser_name}' is already running with your real logged-in profile. "
+                    f"Zaya will NOT open a sandboxed or separate profile. "
+                    f"Please control your open '{self.browser_name}' window directly using computer_control (clicks, typing, monitor mode)."
+                ) from e
+            raise RuntimeError(f"Could not launch {label} with real profile: {e}") from e
 
 
     async def _get_page(self) -> Page:
@@ -1052,6 +1058,8 @@ def browser_control(
     from memory.config_manager import load_api_keys
     params  = parameters or {}
     action  = params.get("action", "").lower().strip()
+    if action in ("open", "navigate"):
+        action = "go_to"
     browser = (params.get("browser") or load_api_keys().get('preferred_browser') or '').lower().strip() or None
     result  = "Unknown action."
 
@@ -1117,8 +1125,8 @@ def browser_control(
         _log(player, result)
         from core.tool_result import ToolResult
         opened = result.startswith('Opened')
-        from core import gui_verifier
-        gui_verifier.set_target_window(browser or "Browser")
+        from core import gui_verifier
+        gui_verifier.set_target_window(browser or "Browser")
         return ToolResult("unverified" if opened else 'failed', str(result),
                           {"requested_url": nav_url, "verified": False, 'mode': 'native', 'browser': browser or 'system_default',
                            'profile': 'regular browser profile', 'launch_requested': opened},
@@ -1195,7 +1203,7 @@ def _log(player, text: str):
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "browser_control",
-    "description": "Controls browsers. Ordinary open/search/new-tab requests use mode native (default), launching the installed browser with its regular profile and existing sign-ins, even if an automation session already exists. The saved preferred browser applies unless the owner specifies another. Native launch reports unverified destination; do not open automation merely to verify an ordinary open request. Use mode automation explicitly only for a requested interactive website task that needs Playwright click/type/read/form actions. Automation may use a separate signed-out profile; never claim it shares the owner's login. Always pass browser when the owner specifies it.",
+    "description": "Controls browsers. Opens and navigates the user's real installed browser with their regular logged-in profile and existing sign-ins (default mode: native). Supports actions: go_to (or open), search, new_tab, close_tab, switch, list_browsers, close. Zaya never launches sandboxed or separate blank browser profiles. For interacting with pages where the user is already logged in (such as Instagram DMs, Facebook, Twitter, WhatsApp Web), navigate using browser_control and use computer_control (clicks, typing, screen perception, monitor mode) directly on the active browser window.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

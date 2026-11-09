@@ -192,6 +192,25 @@ class TestGuiRegressionFailureReplay(unittest.TestCase):
             cx, cy = gui_verifier.to_logical_coords(1000, 1000, 1000, 1000)
             self.assertEqual((cx, cy), (1918, 1078))
 
+    def test_browser_control_action_open_alias(self):
+        """Action 'open' must be aliased to 'go_to' and not return unknown action."""
+        from actions.browser_control import browser_control
+        with patch("core.execution_policy.require_owner"), \
+             patch("actions.browser_control._open_native", return_value="Opened in brave: https://instagram.com"):
+            res = browser_control({"action": "open", "browser": "brave", "url": "https://instagram.com"})
+            self.assertNotEqual(res, "Unknown action.")
+            self.assertNotIn("Unknown browser action: 'open'", str(res))
+
+    def test_browser_control_never_creates_sandboxed_zaya_profiles(self):
+        """_real_profile_dir must return None if real profile is missing and never create .zaya_profiles."""
+        from pathlib import Path
+        from actions.browser_control import _real_profile_dir
+
+        with patch("pathlib.Path.exists", return_value=False):
+            prof = _real_profile_dir("brave")
+            self.assertIsNone(prof)
+            self.assertFalse(Path(Path.home() / ".zaya_profiles").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
