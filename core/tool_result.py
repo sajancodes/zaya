@@ -5,13 +5,14 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-STATUSES = {'success', 'failed', 'partial', 'waiting_confirmation', 'started', 'ambiguous'}
+STATUSES = {'success', 'failed', 'partial', 'unverified', 'waiting_confirmation', 'started', 'ambiguous'}
 
 # Semantic names used in prompts, telemetry and mission state. The wire names
 # stay stable so existing tools and stored tasks keep working.
 SEMANTIC_STATUS = {
     'success': 'SUCCESS',
     'partial': 'UNVERIFIED',
+    'unverified': 'UNVERIFIED',
     'failed': 'FAILED',
     'waiting_confirmation': 'ASK',
     'ambiguous': 'ASK',

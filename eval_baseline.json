@@ -1,0 +1,732 @@
+{
+  "total_tasks": 25,
+  "total_runs": 50,
+  "passed_runs": 48,
+  "success_rate": 96.0,
+  "results": [
+    {
+      "task_id": "click_by_description_ocr",
+      "name": "Click by Description (OCR)",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "ocr",
+      "error_px": 0.0,
+      "latency_ms": 249.75,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (457, 220) [left]",
+        "target": "Create post",
+        "gt_center": [
+          475,
+          220
+        ]
+      }
+    },
+    {
+      "task_id": "click_by_description_ocr",
+      "name": "Click by Description (OCR)",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "ocr",
+      "error_px": 0.0,
+      "latency_ms": 34.31,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (457, 220) [left]",
+        "target": "Create post",
+        "gt_center": [
+          475,
+          220
+        ]
+      }
+    },
+    {
+      "task_id": "click_by_coordinates",
+      "name": "Click by Coordinates",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "direct_coords",
+      "error_px": 0.0,
+      "latency_ms": 0.23,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (450, 220) [left]"
+      }
+    },
+    {
+      "task_id": "click_by_coordinates",
+      "name": "Click by Coordinates",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "direct_coords",
+      "error_px": 0.0,
+      "latency_ms": 0.14,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (450, 220) [left]"
+      }
+    },
+    {
+      "task_id": "double_click",
+      "name": "Double Click",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.12,
+      "error_message": "",
+      "evidence": {
+        "result": "Double-clicked (500, 300) [left]"
+      }
+    },
+    {
+      "task_id": "double_click",
+      "name": "Double Click",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.12,
+      "error_message": "",
+      "evidence": {
+        "result": "Double-clicked (500, 300) [left]"
+      }
+    },
+    {
+      "task_id": "right_click",
+      "name": "Right Click",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.12,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (600, 400) [right]"
+      }
+    },
+    {
+      "task_id": "right_click",
+      "name": "Right Click",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.1,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked (600, 400) [right]"
+      }
+    },
+    {
+      "task_id": "move_mouse",
+      "name": "Move Mouse",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.22,
+      "error_message": "",
+      "evidence": {
+        "result": "Mouse \u2192 (800, 500)"
+      }
+    },
+    {
+      "task_id": "move_mouse",
+      "name": "Move Mouse",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.19,
+      "error_message": "",
+      "evidence": {
+        "result": "Mouse \u2192 (800, 500)"
+      }
+    },
+    {
+      "task_id": "drag_mouse",
+      "name": "Drag Mouse",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.81,
+      "error_message": "",
+      "evidence": {
+        "result": "Dragged (100,100) \u2192 (400,400)"
+      }
+    },
+    {
+      "task_id": "drag_mouse",
+      "name": "Drag Mouse",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.34,
+      "error_message": "",
+      "evidence": {
+        "result": "Dragged (100,100) \u2192 (400,400)"
+      }
+    },
+    {
+      "task_id": "scroll_wheel",
+      "name": "Scroll Wheel",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.17,
+      "error_message": "",
+      "evidence": {
+        "result": "Scrolled down \u00d75"
+      }
+    },
+    {
+      "task_id": "scroll_wheel",
+      "name": "Scroll Wheel",
+      "category": "Mouse",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.16,
+      "error_message": "",
+      "evidence": {
+        "result": "Scrolled down \u00d75"
+      }
+    },
+    {
+      "task_id": "type_text",
+      "name": "Type Text",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 300.63,
+      "error_message": "",
+      "evidence": {
+        "result": "Typed: Hello Zaya!"
+      }
+    },
+    {
+      "task_id": "type_text",
+      "name": "Type Text",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 300.87,
+      "error_message": "",
+      "evidence": {
+        "result": "Typed: Hello Zaya!"
+      }
+    },
+    {
+      "task_id": "smart_type",
+      "name": "Smart Type",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 202.02,
+      "error_message": "",
+      "evidence": {
+        "result": "Smart-typed (clipboard): A quick brown fox jumps over the lazy dog."
+      }
+    },
+    {
+      "task_id": "smart_type",
+      "name": "Smart Type",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 202.51,
+      "error_message": "",
+      "evidence": {
+        "result": "Smart-typed (clipboard): A quick brown fox jumps over the lazy dog."
+      }
+    },
+    {
+      "task_id": "clear_field",
+      "name": "Clear Field",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 101.36,
+      "error_message": "",
+      "evidence": {
+        "result": "Field cleared"
+      }
+    },
+    {
+      "task_id": "clear_field",
+      "name": "Clear Field",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 101.62,
+      "error_message": "",
+      "evidence": {
+        "result": "Field cleared"
+      }
+    },
+    {
+      "task_id": "hotkey",
+      "name": "Hotkey Press",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.34,
+      "error_message": "",
+      "evidence": {
+        "result": "Hotkey: ctrl+shift+t"
+      }
+    },
+    {
+      "task_id": "hotkey",
+      "name": "Hotkey Press",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.23,
+      "error_message": "",
+      "evidence": {
+        "result": "Hotkey: ctrl+shift+t"
+      }
+    },
+    {
+      "task_id": "press_key",
+      "name": "Press Single Key",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.38,
+      "error_message": "",
+      "evidence": {
+        "result": "Pressed: enter"
+      }
+    },
+    {
+      "task_id": "press_key",
+      "name": "Press Single Key",
+      "category": "Keyboard",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.32,
+      "error_message": "",
+      "evidence": {
+        "result": "Pressed: enter"
+      }
+    },
+    {
+      "task_id": "clipboard_roundtrip",
+      "name": "Clipboard Roundtrip",
+      "category": "Clipboard",
+      "success": false,
+      "status": "failed",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 100.99,
+      "error_message": "",
+      "evidence": {
+        "copy": "Sample clipboard data",
+        "paste": "computer_control 'paste' failed: PyAutoGUI fail-safe triggered from mouse moving to a corner of the screen. To disable this fail-safe, set pyautogui.FAILSAFE to False. DISABLING FAIL-SAFE IS NOT RECOMMENDED."
+      }
+    },
+    {
+      "task_id": "clipboard_roundtrip",
+      "name": "Clipboard Roundtrip",
+      "category": "Clipboard",
+      "success": false,
+      "status": "failed",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 101.49,
+      "error_message": "",
+      "evidence": {
+        "copy": "Sample clipboard data",
+        "paste": "computer_control 'paste' failed: PyAutoGUI fail-safe triggered from mouse moving to a corner of the screen. To disable this fail-safe, set pyautogui.FAILSAFE to False. DISABLING FAIL-SAFE IS NOT RECOMMENDED."
+      }
+    },
+    {
+      "task_id": "screenshot_capture",
+      "name": "Screenshot Capture",
+      "category": "Screen",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 20.07,
+      "error_message": "",
+      "evidence": {
+        "result": "Screenshot saved: C:\\Users\\ab429\\Desktop\\zaya_screenshot.png"
+      }
+    },
+    {
+      "task_id": "screenshot_capture",
+      "name": "Screenshot Capture",
+      "category": "Screen",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 21.21,
+      "error_message": "",
+      "evidence": {
+        "result": "Screenshot saved: C:\\Users\\ab429\\Desktop\\zaya_screenshot.png"
+      }
+    },
+    {
+      "task_id": "screen_find_existing",
+      "name": "Screen Find Existing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "uia",
+      "error_px": 0.0,
+      "latency_ms": 0.3,
+      "error_message": "",
+      "evidence": {
+        "coords": "475,220"
+      }
+    },
+    {
+      "task_id": "screen_find_existing",
+      "name": "Screen Find Existing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "uia",
+      "error_px": 0.0,
+      "latency_ms": 0.14,
+      "error_message": "",
+      "evidence": {
+        "coords": "475,220"
+      }
+    },
+    {
+      "task_id": "screen_find_missing",
+      "name": "Screen Find Missing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 20.63,
+      "error_message": "",
+      "evidence": {
+        "result": "NOT_FOUND"
+      }
+    },
+    {
+      "task_id": "screen_find_missing",
+      "name": "Screen Find Missing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 19.44,
+      "error_message": "",
+      "evidence": {
+        "result": "NOT_FOUND"
+      }
+    },
+    {
+      "task_id": "screen_click_existing",
+      "name": "Screen Click Existing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 200.55,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked 'Post' at (890, 618)"
+      }
+    },
+    {
+      "task_id": "screen_click_existing",
+      "name": "Screen Click Existing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 201.06,
+      "error_message": "",
+      "evidence": {
+        "result": "Clicked 'Post' at (890, 618)"
+      }
+    },
+    {
+      "task_id": "screen_click_missing",
+      "name": "Screen Click Missing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.26,
+      "error_message": "",
+      "evidence": {
+        "result": "Element not found on screen: 'Missing button'"
+      }
+    },
+    {
+      "task_id": "screen_click_missing",
+      "name": "Screen Click Missing Element",
+      "category": "Grounding",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.13,
+      "error_message": "",
+      "evidence": {
+        "result": "Element not found on screen: 'Missing button'"
+      }
+    },
+    {
+      "task_id": "focus_window_match",
+      "name": "Focus Window Match",
+      "category": "Window",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 302.6,
+      "error_message": "",
+      "evidence": {
+        "result": "Focused window: Brave"
+      }
+    },
+    {
+      "task_id": "focus_window_match",
+      "name": "Focus Window Match",
+      "category": "Window",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 301.24,
+      "error_message": "",
+      "evidence": {
+        "result": "Focused window: Brave"
+      }
+    },
+    {
+      "task_id": "focus_window_missing",
+      "name": "Focus Window Missing",
+      "category": "Window",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 665.2,
+      "error_message": "",
+      "evidence": {
+        "result": "Focused window: NonexistentApp12345"
+      }
+    },
+    {
+      "task_id": "focus_window_missing",
+      "name": "Focus Window Missing",
+      "category": "Window",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 608.93,
+      "error_message": "",
+      "evidence": {
+        "result": "Focused window: NonexistentApp12345"
+      }
+    },
+    {
+      "task_id": "wait_seconds",
+      "name": "Wait Duration",
+      "category": "Timing",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.75,
+      "error_message": "",
+      "evidence": {
+        "result": "Waited 0.1s"
+      }
+    },
+    {
+      "task_id": "wait_seconds",
+      "name": "Wait Duration",
+      "category": "Timing",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.38,
+      "error_message": "",
+      "evidence": {
+        "result": "Waited 0.1s"
+      }
+    },
+    {
+      "task_id": "random_data_gen",
+      "name": "Random Data Generation",
+      "category": "Utility",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.04,
+      "error_message": "",
+      "evidence": {
+        "result": "Avery Moore"
+      }
+    },
+    {
+      "task_id": "random_data_gen",
+      "name": "Random Data Generation",
+      "category": "Utility",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.02,
+      "error_message": "",
+      "evidence": {
+        "result": "Harper Brown"
+      }
+    },
+    {
+      "task_id": "user_data_lookup",
+      "name": "User Profile Data",
+      "category": "Utility",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.62,
+      "error_message": "",
+      "evidence": {
+        "result": "Cameron Jackson"
+      }
+    },
+    {
+      "task_id": "user_data_lookup",
+      "name": "User Profile Data",
+      "category": "Utility",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.42,
+      "error_message": "",
+      "evidence": {
+        "result": "Blake Moore"
+      }
+    },
+    {
+      "task_id": "hidpi_coord_transform",
+      "name": "HiDPI Coordinate Normalization",
+      "category": "Coordinate",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.18,
+      "error_message": "",
+      "evidence": {
+        "mapped": [
+          1919,
+          1079
+        ]
+      }
+    },
+    {
+      "task_id": "hidpi_coord_transform",
+      "name": "HiDPI Coordinate Normalization",
+      "category": "Coordinate",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.13,
+      "error_message": "",
+      "evidence": {
+        "mapped": [
+          1919,
+          1079
+        ]
+      }
+    },
+    {
+      "task_id": "normalized_1000_transform",
+      "name": "Normalized [0..1000] Transform",
+      "category": "Coordinate",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.11,
+      "error_message": "",
+      "evidence": {
+        "mapped": [
+          960,
+          540
+        ]
+      }
+    },
+    {
+      "task_id": "normalized_1000_transform",
+      "name": "Normalized [0..1000] Transform",
+      "category": "Coordinate",
+      "success": true,
+      "status": "success",
+      "strategy_used": "none",
+      "error_px": 0.0,
+      "latency_ms": 0.09,
+      "error_message": "",
+      "evidence": {
+        "mapped": [
+          960,
+          540
+        ]
+      }
+    }
+  ]
+}

@@ -10,12 +10,19 @@ from core.robotics_monitor import get_robotics_screen_monitor
 
 
 def handle_robotics_screen_monitor(
-    action: str = "status",
+    action: Any = "status",
     task: str = "",
     interval_sec: float = 3.0,
     max_duration_sec: int = 14400,
+    **kwargs,
 ) -> str:
     """Continuous screen surveillance and spatial affordance analysis via Gemini Robotics ER-2."""
+    if isinstance(action, dict):
+        task = action.get("task", task)
+        interval_sec = action.get("interval_sec", interval_sec)
+        max_duration_sec = action.get("max_duration_sec", max_duration_sec)
+        action = action.get("action", "status")
+
     monitor = get_robotics_screen_monitor()
 
     if action == "status":

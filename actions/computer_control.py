@@ -244,27 +244,37 @@ def _user_profile() -> dict:
         pass
     return {}
 
-def _type(text: str, interval: float = 0.03) -> str:
+def _type(text: str, interval: float = 0.03, window: str | None = None) -> str:
     _require_pyautogui()
-    time.sleep(0.3)
+    from core import gui_verifier
+
+    allowed, guard_err = gui_verifier.guard_window_action("type", target_window=window)
+    if not allowed:
+        return guard_err or "Typing aborted: wrong active window."
+
+    time.sleep(0.1)
     pyautogui.typewrite(text, interval=interval)
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
-def _smart_type(text: str, clear_first: bool = True) -> str:
+def _smart_type(text: str, clear_first: bool = False, window: str | None = None) -> str:
     _require_pyautogui()
-    if clear_first:
-        _clear_field()
-        time.sleep(0.1)
+    from core import gui_verifier
 
-    if len(text) > 20 and _PYPERCLIP:
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
+    allowed, guard_err = gui_verifier.guard_window_action("smart_type", target_window=window)
+    if not allowed:
+        return guard_err or "Smart-typing aborted: wrong active window."
+
+    if clear_first:
+        _clear_field(window=window)
+        time.sleep(0.08)
+
+    # Safe clipboard paste preserving prior clipboard
+    paste_res = gui_verifier.safe_clipboard_paste(text)
+    if paste_res.get("success"):
         return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
 
-    pyautogui.typewrite(text, interval=0.04)
+    pyautogui.typewrite(text, interval=0.03)
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
@@ -354,14 +364,11 @@ def _clipboard_get() -> str:
 
 
 def _clipboard_paste(text: str) -> str:
-    if _PYPERCLIP:
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        _require_pyautogui()
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
+    from core import gui_verifier
+    res = gui_verifier.safe_clipboard_paste(text)
+    if res.get("success"):
         return f"Pasted: {text[:60]}{'…' if len(text) > 60 else ''}"
-    return "pyperclip not available"
+    return f"paste failed: {res.get('error', 'pyperclip not available')}"
 
 
 def _screenshot(save_path: str | None = None) -> str:
@@ -372,69 +379,33 @@ def _screenshot(save_path: str | None = None) -> str:
     return f"Screenshot saved: {path}"
 
 
-def _clear_field() -> str:
+def _clear_field(window: str | None = None) -> str:
     _require_pyautogui()
+    from core import gui_verifier
+
+    allowed, guard_err = gui_verifier.guard_window_action("clear_field", target_window=window)
+    if not allowed:
+        return guard_err or "Clear field aborted: wrong active window."
+
     select_key = "command" if _get_os() == "mac" else "ctrl"
     pyautogui.hotkey(select_key, "a")
-    time.sleep(0.1)
+    time.sleep(0.08)
     pyautogui.press("delete")
     return "Field cleared"
 
+
 def _focus_window(title: str) -> str:
-    os_name = _get_os()
+    from core import gui_verifier
+    res = gui_verifier.focus_window(title, timeout=3.0)
+    if res.get("success"):
+        return f"Focused window: {res.get('active_title', title)}"
+    return f"focus_window failed: {res.get('error', 'Window not found')}"
 
-    if os_name == "windows":
-        try:
-            literal = "'" + title.replace("'", "''") + "'"
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate({literal})'
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (Windows) failed: {e}"
+_GENERIC_TOKENS = {
+    "click", "press", "tap", "the", "a", "an", "on", "in", "at", "to", "for", "of", "and",
+    "button", "field", "input", "box", "icon", "text", "link", "menu", "tab", "item", "window", "element"
+}
 
-    if os_name == "mac":
-        script = ('on run argv\n'
-                  'tell application "System Events" to set frontmost of '
-                  '(first process whose name contains (item 1 of argv)) to true\n'
-                  'end run')
-        try:
-            subprocess.run(
-                ["osascript", "-e", script, title],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (macOS) failed: {e}"
-
-    if os_name == "linux":
-        try:
-            result = subprocess.run(
-                ["wmctrl", "-a", title],
-                capture_output=True, timeout=5,
-            )
-            if result.returncode == 0:
-                time.sleep(0.3)
-                return f"Focused window: {title}"
-        except FileNotFoundError:
-            pass
-        try:
-            result = subprocess.run(
-                ["xdotool", "search", "--name", title, "windowactivate"],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except FileNotFoundError:
-            return "focus_window (Linux) requires wmctrl or xdotool"
-        except Exception as e:
-            return f"focus_window (Linux) failed: {e}"
-
-    return f"focus_window: unknown OS '{os_name}'"
 
 def _find_via_uia(description: str) -> tuple[int, int] | None:
     """Tier A: Inspect active/visible window accessibility hierarchy using pywinauto UIA."""
@@ -489,26 +460,24 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
                         elif desc_lower == auto_id_l:
                             score = 0.95
                         elif desc_lower and (desc_lower in text_l or desc_lower in name_l):
-                            score = 0.8
+                            score = 0.85
                         elif desc_lower and ((text_l and text_l in desc_lower)
                                              or (name_l and name_l in desc_lower)):
-                            # The empty-string guard matters: "" in description
-                            # is always True, so every nameless control in the
-                            # tree used to score 0.7 and flood the candidate
-                            # list until the ambiguity check rejected the match.
-                            score = 0.7
+                            score = 0.75
                         elif desc_lower and auto_id_l and auto_id_l in desc_lower:
-                            score = 0.65
+                            score = 0.70
                         else:
-                            # Token overlap
-                            tokens = [t for t in re.split(r"\W+", desc_lower) if len(t) > 2]
+                            # Token overlap with stopword and generic token filtering
+                            raw_tokens = [t for t in re.split(r"\W+", desc_lower) if len(t) > 1]
+                            filtered_tokens = [t for t in raw_tokens if t not in _GENERIC_TOKENS]
+                            tokens = filtered_tokens or raw_tokens
                             if tokens:
                                 combined = f"{text_l} {c_type.lower()} {auto_id_l} {name_l}"
                                 overlap = sum(1 for t in tokens if t in combined)
                                 if overlap > 0:
-                                    score = 0.4 + 0.3 * (overlap / len(tokens))
+                                    score = 0.4 + 0.4 * (overlap / len(tokens))
 
-                        if score > 0.4:
+                        if score > 0.65:
                             # Bonuses for enabled/visible and interactive controls
                             try:
                                 if ctrl.is_enabled():
@@ -952,29 +921,89 @@ def _find_via_coordinates(description: str, screenshot_bytes: bytes, w: int, h: 
     return None
 
 
+def _zoom_refine(point: tuple[int, int], description: str, screenshot_img: Any, shot_w: int, shot_h: int) -> tuple[int, int]:
+    """Refine a candidate point by cropping ~300x300 around it and checking alignment with vision model."""
+    try:
+        from core import gemini
+        cx, cy = point
+        crop_size = 300
+        x1 = max(0, min(shot_w - crop_size, cx - crop_size // 2))
+        y1 = max(0, min(shot_h - crop_size, cy - crop_size // 2))
+        x2 = min(shot_w, x1 + crop_size)
+        y2 = min(shot_h, y1 + crop_size)
+
+        crop_img = screenshot_img.crop((x1, y1, x2, y2))
+        buf = io.BytesIO()
+        crop_img.save(buf, format="PNG")
+        crop_bytes = buf.getvalue()
+
+        try:
+            from google.genai import types as gtypes
+            crop_part = gtypes.Part.from_bytes(data=crop_bytes, mime_type="image/png")
+        except ImportError:
+            import base64
+            crop_part = {
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(crop_bytes).decode("ascii"),
+                }
+            }
+
+        prompt = (
+            f"This is a zoomed-in 300x300 patch around an estimated target for: '{description}'.\n"
+            f"The candidate center is at local coordinate (150, 150).\n"
+            f"If the center point is directly on the intended element, reply with: {{\"centered\": true}}\n"
+            f"If offset, return the corrected local point within this 300x300 patch: {{\"point\": [local_y, local_x]}} (0-300).\n"
+            f"Return ONLY JSON."
+        )
+
+        resp = gemini.call([crop_part, prompt], tier=gemini.FAST, timeout_ms=8_000)
+        if resp and resp.text:
+            text = resp.text.strip()
+            if '"centered": true' in text.lower():
+                return point
+            match = re.search(r'"point"\s*:\s*\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]', text)
+            if match:
+                local_y = float(match.group(1))
+                local_x = float(match.group(2))
+                refined_x = int(x1 + local_x)
+                refined_y = int(y1 + local_y)
+                return refined_x, refined_y
+    except Exception as e:
+        logger.debug("[ComputerControl] Zoom-refine failed: %s", e)
+
+    return point
+
+
 def _screen_find(description: str) -> tuple[int, int] | None:
-    """High-precision 4-tier UI element grounding:
+    """High-precision 4-tier UI element grounding with OpenCV locator caching:
     Tier 0: Accessibility tree inspection (pywinauto UIA).
     Tier 1: Windows Native Media OCR text bounding box centroid grounding.
     Tier 2: Set-of-Mark (SoM) visual candidate tagging with structured LLM detection.
-    Tier 3: SOTA normalized [0..1000] visual spatial prediction (ER-2 / Gemini Vision).
+    Tier 3: SOTA normalized [0..1000] visual spatial prediction with zoom-refinement.
     """
     if not description:
         return None
 
+    from core import gui_verifier
+    active_info = gui_verifier.get_active_window_info()
+    active_title = active_info.get("title", "")
+
+    # Fast path: Check locator cache with OpenCV template validation
+    cached_pt = gui_verifier.get_cached_locator(description, active_title)
+    if cached_pt is not None:
+        return cached_pt
+
     # Tier 0: UIA accessibility inspection
     coords = _find_via_uia(description)
     if coords is not None:
+        gui_verifier.set_cached_locator(description, active_title, coords)
         return coords
 
     # Capture screen for visual & OCR tiers
     try:
         _require_pyautogui()
         img = pyautogui.screenshot()
-        # pyautogui.screenshot() captures the whole virtual desktop, which on
-        # a multi-monitor setup is larger than pyautogui.size() (the primary
-        # monitor). Every coordinate the accessibility tree reports is in
-        # virtual-desktop space, so the visual tiers must use the same space.
         shot_w, shot_h = img.size
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -986,15 +1015,23 @@ def _screen_find(description: str) -> tuple[int, int] | None:
     # Tier 1: Windows Native OCR exact text grounding
     coords = _find_via_ocr(description, img, shot_w, shot_h)
     if coords is not None:
+        gui_verifier.set_cached_locator(description, active_title, coords, img)
         return coords
 
     # Tier 2: Set-of-Mark visual tagging
     coords = _find_via_som(description, img, shot_w, shot_h)
     if coords is not None:
+        gui_verifier.set_cached_locator(description, active_title, coords, img)
         return coords
 
     # Tier 3: SOTA normalized visual spatial prediction
-    return _find_via_coordinates(description, screenshot_bytes, shot_w, shot_h)
+    coords = _find_via_coordinates(description, screenshot_bytes, shot_w, shot_h)
+    if coords is not None:
+        coords = _zoom_refine(coords, description, img, shot_w, shot_h)
+        gui_verifier.set_cached_locator(description, active_title, coords, img)
+        return coords
+
+    return None
 
 
 def computer_control(
@@ -1018,35 +1055,42 @@ def computer_control(
       seconds       : wait duration
       title         : window title fragment for focus_window
       description   : natural-language element description for screen_find/click
+      window        : expected target window title (guards against typing into wrong app)
+      expect        : expected post-condition text or UI state to verify after action
       type          : data type for random_data
       field         : memory field name for user_data
-      clear_first   : bool, clear field before typing (default: true)
+      clear_first   : bool, clear field before typing (default: false for safety)
       path          : save path for screenshot (must be inside home dir)
 
     Actions:
-      type          — type text at cursor
-      smart_type    — clear field + type (clipboard-backed)
-      click         — left click (auto-resolves description if x/y omitted)
-      double_click  — double left click (auto-resolves description if x/y omitted)
-      right_click   — right click (auto-resolves description if x/y omitted)
-      move          — move mouse (auto-resolves description if x/y omitted)
-      drag          — click-drag between two points
-      hotkey        — key combination
-      press         — single key
-      scroll        — scroll the wheel
-      copy          — read clipboard
-      paste         — write + paste clipboard
-      screenshot    — capture screen (safe path only)
-      wait          — sleep N seconds
-      clear_field   — select-all + delete
-      focus_window  — bring window to foreground
-      screen_find   — AI element finder (returns x,y)
-      screen_click  — AI element finder + click
-      random_data   — generate fake form data
-      user_data     — pull real data from memory
+      type                — type text at cursor (target window guarded)
+      smart_type          — clear field + type via clipboard (target window guarded, preserves user clipboard)
+      click               — left click (auto-resolves description if x/y omitted, target window guarded)
+      double_click        — double left click
+      right_click         — right click
+      move                — move mouse
+      drag                — click-drag between two points
+      hotkey              — key combination
+      press               — single key
+      scroll              — scroll the wheel
+      copy                — read clipboard
+      paste               — write + paste clipboard (preserves user clipboard)
+      screenshot          — capture screen (safe path only)
+      wait                — sleep N seconds
+      clear_field         — select-all + delete (target window guarded)
+      focus_window        — bring window to foreground and verify focus
+      screen_find         — AI element finder (returns x,y)
+      screen_click        — AI element finder + click
+      wait_for            — poll until target element appears or timeout hits
+      prepare_environment — maximize target window & log display geometry
+      verify_window       — verify active foreground window matches target
+      random_data         — generate fake form data
+      user_data           — pull real data from memory
     """
     params = parameters or {}
     action = params.get("action", "").lower().strip()
+    target_win = params.get("window")
+    expect_condition = params.get("expect")
 
     if not action:
         return "No action specified for computer_control."
@@ -1056,15 +1100,17 @@ def computer_control(
 
     print(f"[ComputerControl] ▶ {action}  {params}")
 
-    try:
+    from core import gui_verifier
 
+    def _execute_body() -> str:
         if action == "type":
-            return _type(params.get("text", ""))
+            return _type(params.get("text", ""), window=target_win)
 
         if action == "smart_type":
             return _smart_type(
                 params.get("text", ""),
-                clear_first=params.get("clear_first", True),
+                clear_first=bool(params.get("clear_first", False)),
+                window=target_win,
             )
 
         # Smart coordinate auto-resolution when description/text/target is provided
@@ -1091,6 +1137,11 @@ def computer_control(
             return None
 
         if action in ("click", "left_click"):
+            # Target window guard
+            allowed, g_err = gui_verifier.guard_window_action("click", target_window=target_win)
+            if not allowed:
+                return g_err or "Click aborted: wrong active window."
+
             target = _resolve_target_coords(params)
             if target:
                 return _click(target[0], target[1], "left", 1)
@@ -1100,6 +1151,10 @@ def computer_control(
             return _click(None, None, "left", 1)
 
         if action == "double_click":
+            allowed, g_err = gui_verifier.guard_window_action("double_click", target_window=target_win)
+            if not allowed:
+                return g_err or "Double-click aborted: wrong active window."
+
             target = _resolve_target_coords(params)
             if target:
                 return _click(target[0], target[1], "left", 2)
@@ -1109,6 +1164,10 @@ def computer_control(
             return _click(None, None, "left", 2)
 
         if action == "right_click":
+            allowed, g_err = gui_verifier.guard_window_action("right_click", target_window=target_win)
+            if not allowed:
+                return g_err or "Right-click aborted: wrong active window."
+
             target = _resolve_target_coords(params)
             if target:
                 return _click(target[0], target[1], "right", 1)
@@ -1160,13 +1219,50 @@ def computer_control(
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
+            allowed, g_err = gui_verifier.guard_window_action("screen_click", target_window=target_win)
+            if not allowed:
+                return g_err or "Screen-click aborted: wrong active window."
+
             desc   = params.get("description", "")
             coords = _screen_find(desc)
             if coords:
-                time.sleep(0.2)
+                time.sleep(0.1)
                 _click(x=coords[0], y=coords[1])
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
+
+        if action == "wait_for":
+            query = params.get("description") or params.get("text") or params.get("target") or ""
+            timeout = float(params.get("seconds") or params.get("timeout") or 8.0)
+            t_start = time.time()
+            while time.time() - t_start < timeout:
+                coords = _screen_find(query)
+                if coords:
+                    return f"Element '{query}' appeared on screen at {coords[0]},{coords[1]}."
+                time.sleep(0.4)
+            return f"wait_for timed out after {timeout}s: '{query}' did not appear."
+
+        if action == "prepare_environment":
+            if target_win:
+                gui_verifier.focus_window(target_win)
+            if platform.system() == "Windows":
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetForegroundWindow()
+                    user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+                except Exception:
+                    pass
+            active = gui_verifier.get_active_window_info()
+            return f"Environment prepared: target '{active.get('title')}' focused and maximized."
+
+        if action == "verify_window":
+            info = gui_verifier.get_active_window_info()
+            expected = target_win or params.get("title")
+            is_match, current_title, _ = gui_verifier.verify_active_target(expected)
+            if is_match:
+                return f"Active window verified: '{current_title}'."
+            return f"Window mismatch: active is '{current_title}', expected '{expected}'."
 
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
@@ -1175,7 +1271,7 @@ def computer_control(
             return f"Waited {secs}s"
 
         if action == "clear_field":
-            return _clear_field()
+            return _clear_field(window=target_win)
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
@@ -1197,6 +1293,20 @@ def computer_control(
 
         return f"Unknown action: '{action}'"
 
+    try:
+        if expect_condition:
+            # Wrap execution under verified act-and-verify loop
+            verify_res = gui_verifier.act_and_verify(
+                action,
+                _execute_body,
+                expect=expect_condition,
+                target_window=target_win,
+                timeout=float(params.get("timeout") or params.get("seconds") or 8.0),
+            )
+            return verify_res.get("summary", json.dumps(verify_res))
+
+        return _execute_body()
+
     except Exception as e:
         print(f"[ComputerControl] ❌ {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
@@ -1210,16 +1320,16 @@ TOOL = {
         "hotkeys, scroll, move mouse, screenshots, and pixel-perfect element finding and clicking. "
         "Supports natural-language target descriptions (e.g., 'Create post', 'Share', 'Search') with "
         "4-tier grounding (UIA accessibility tree, native OCR text centroid, Set-of-Mark tagging, "
-        "and normalized [0..1000] spatial vision). Essential for executing multi-step tasks such as "
-        "navigating web apps, drafting and publishing posts, filling forms, and managing desktop windows "
-        "in synergy with robotics_screen_monitor."
+        "and normalized [0..1000] spatial vision). Includes target window guarding (window parameter) "
+        "to prevent typing into the wrong application, safe clipboard preserving, and act-and-verify loops (expect parameter). "
+        "For browser automation, prefer browser_control which controls DOM elements directly."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | random_data | user_data"
+                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | wait_for | prepare_environment | verify_window | random_data | user_data"
             },
             "text": {
                 "type": "STRING",
@@ -1255,11 +1365,19 @@ TOOL = {
             },
             "title": {
                 "type": "STRING",
-                "description": "Window title for focus_window"
+                "description": "Window title for focus_window / verify_window"
+            },
+            "window": {
+                "type": "STRING",
+                "description": "Expected target window title (e.g. 'Brave', 'Facebook'). Aborts if active window does not match, protecting other applications."
+            },
+            "expect": {
+                "type": "STRING",
+                "description": "Expected UI state or text to verify on screen after performing the action (e.g. 'What's on your mind?', 'Post created')."
             },
             "description": {
                 "type": "STRING",
-                "description": "Element description for screen_find/screen_click/click/move (e.g. 'Create post', 'Share')"
+                "description": "Element description for screen_find/screen_click/click/move/wait_for (e.g. 'Create post', 'Share')"
             },
             "type": {
                 "type": "STRING",
@@ -1271,7 +1389,7 @@ TOOL = {
             },
             "clear_first": {
                 "type": "BOOLEAN",
-                "description": "Clear field before typing (default: true)"
+                "description": "Clear field before typing (default: false for safety)"
             },
             "path": {
                 "type": "STRING",

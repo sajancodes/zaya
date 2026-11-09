@@ -202,19 +202,38 @@ class ActionRegistry:
             return f"Tool '{name}' failed: {e}"
 
 
-def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
+def _call_handler(fn: Callable, parameters: dict, ctx: dict | None = None) -> str:
     """Invoke the handler passing only the context kwargs it actually declares
-    (or all of them if it has **kwargs), so each action's existing signature
-    works unchanged."""
+    (or all of them if it has **kwargs), unpacking dictionary parameters
+    when the handler specifies named arguments."""
+    ctx = ctx or {}
     sig = inspect.signature(fn)
     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
     kwargs = {}
     for key in _CTX_KEYS:
         if has_var_kw or key in sig.parameters:
             kwargs[key] = ctx.get(key)
-    if "parameters" in sig.parameters or has_var_kw:
+
+    if "parameters" in sig.parameters:
         return fn(parameters=parameters, **kwargs)
-    elif sig.parameters:
+    if "params" in sig.parameters:
+        return fn(params=parameters, **kwargs)
+    if has_var_kw:
+        call_kwargs = dict(parameters) if isinstance(parameters, dict) else {"parameters": parameters}
+        call_kwargs.update(kwargs)
+        return fn(**call_kwargs)
+
+    # Check if parameters dictionary keys overlap with handler's declared parameter names
+    if isinstance(parameters, dict):
+        matching_args = {}
+        for p_name in sig.parameters:
+            if p_name in parameters:
+                matching_args[p_name] = parameters[p_name]
+        if matching_args:
+            matching_args.update(kwargs)
+            return fn(**matching_args)
+
+    if sig.parameters:
         return fn(parameters, **kwargs)
     return fn(**kwargs)
 

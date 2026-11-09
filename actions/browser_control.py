@@ -1117,7 +1117,9 @@ def browser_control(
         _log(player, result)
         from core.tool_result import ToolResult
         opened = result.startswith('Opened')
-        return ToolResult("partial" if opened else 'failed', str(result),
+        from core import gui_verifier
+        gui_verifier.set_target_window(browser or "Browser")
+        return ToolResult("unverified" if opened else 'failed', str(result),
                           {"requested_url": nav_url, "verified": False, 'mode': 'native', 'browser': browser or 'system_default',
                            'profile': 'regular browser profile', 'launch_requested': opened},
                           [{"browser_launch_requested": opened}], side_effect=opened)

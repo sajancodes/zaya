@@ -256,15 +256,22 @@ def window_manager(parameters: dict, **_kwargs) -> str:
 
     # 6. Focus / Bring to Foreground
     if action in ("focus", "activate"):
-        if not target_hwnd:
-            return json.dumps({"status": "error", "message": f"Window '{target_title}' not found."}, indent=2)
-        try:
-            ctypes.windll.user32.ShowWindow(target_hwnd, SW_RESTORE)
-            ctypes.windll.user32.SetForegroundWindow(target_hwnd)
-            title = _get_window_title(target_hwnd) or "Target window"
-            return json.dumps({"status": "success", "summary": f"Brought '{title}' to foreground.", "data": {"hwnd": target_hwnd}}, indent=2)
-        except Exception as e:
-            return json.dumps({"status": "error", "message": f"Failed to focus window: {e}"}, indent=2)
+        query = target_title or (_get_window_title(target_hwnd) if target_hwnd else "")
+        if not query:
+            return json.dumps({"status": "error", "message": "No window title or query specified to focus."}, indent=2)
+        from core import gui_verifier
+        res = gui_verifier.focus_window(query, timeout=3.0)
+        if res.get("success"):
+            return json.dumps({
+                "status": "success",
+                "summary": f"Brought '{res.get('active_title', query)}' to foreground.",
+                "data": res,
+            }, indent=2)
+        return json.dumps({
+            "status": "error",
+            "message": res.get("error", f"Failed to focus '{query}'."),
+            "data": res,
+        }, indent=2)
 
     # 7. Tile Windows
     if action == "tile":

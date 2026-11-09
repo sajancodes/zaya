@@ -194,16 +194,28 @@ class RoboticsScreenMonitorEngine:
 
             from core import gemini
 
-            # Call with Robotics ER-2 model as primary tier
-            resp = gemini.call(
-                [img_part, prompt],
-                tier=self.model_id,
-                timeout_ms=25_000,
-            )
-            if resp and resp.text:
-                raw_text = resp.text.strip()
+            # Call with SMART vision model ladder (fallback from live/robotics tier)
+            tiers_to_try = [gemini.SMART, gemini.FAST]
+            if self.model_id not in (gemini.SMART, gemini.FAST):
+                tiers_to_try.insert(0, self.model_id)
+
+            resp = None
+            for tier in tiers_to_try:
+                try:
+                    resp = gemini.call(
+                        [img_part, prompt],
+                        tier=tier,
+                        timeout_ms=25_000,
+                    )
+                    if resp and resp.text:
+                        model_used = str(tier)
+                        raw_text = resp.text.strip()
+                        break
+                except Exception as call_err:
+                    logger.debug("[RoboticsMonitor] Tier %s failed: %s", tier, call_err)
+                    continue
         except Exception as e:
-            logger.warning("[RoboticsMonitor] Model call to %s failed: %s", self.model_id, e)
+            logger.warning("[RoboticsMonitor] Frame analysis failed: %s", e)
 
         # Parse JSON from response
         parsed: Dict[str, Any] = {}
