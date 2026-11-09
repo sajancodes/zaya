@@ -121,6 +121,8 @@ updates/
 
 memory/sentinel_alerts.json
 memory/sentinel_alerts.tmp
+memory/concept_mesh.json
+memory/concept_mesh.tmp
 
 # ── Dynamic Toolsmith runtime files ──────────────────────────────────────────
 actions/custom/*
