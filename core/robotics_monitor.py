@@ -194,18 +194,17 @@ class RoboticsScreenMonitorEngine:
 
             from core import gemini
 
-            # Call with SMART vision model ladder (fallback from live/robotics tier)
-            tiers_to_try = [gemini.SMART, gemini.FAST]
-            if self.model_id not in (gemini.SMART, gemini.FAST):
-                tiers_to_try.insert(0, self.model_id)
-
+            # Call vision model ladder (gemini.call redirects streaming-only models cleanly)
+            tiers_to_try = [self.model_id, gemini.SMART, gemini.FAST]
+            if self.model_id in (gemini.SMART, gemini.FAST):
+                tiers_to_try = [gemini.SMART, gemini.FAST]
             resp = None
             for tier in tiers_to_try:
                 try:
                     resp = gemini.call(
                         [img_part, prompt],
                         tier=tier,
-                        timeout_ms=25_000,
+                        timeout_ms=8_000,
                     )
                     if resp and resp.text:
                         model_used = str(tier)

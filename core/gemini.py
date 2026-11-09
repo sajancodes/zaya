@@ -505,9 +505,18 @@ def call(contents, tier: str = FAST, config=None,
     # is tried first, with the reasoning ladder behind it. So a user's choice is
     # honoured, and a user's choice that is having an outage still degrades to
     # something that answers instead of to nothing.
+    _STREAMING_ONLY = {
+        "models/gemini-robotics-er-2-streaming-preview",
+        "gemini-robotics-er-2-streaming-preview",
+        "models/gemini-3.8-live",
+        "gemini-3.8-live",
+    }
     ladder = _LADDERS.get(tier)
     if ladder is None:
-        ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
+        if tier in _STREAMING_ONLY:
+            ladder = _LADDERS[SMART]
+        else:
+            ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
 
     from core.gemini_keys import pool, KeysCooling
     from core.audit import redact

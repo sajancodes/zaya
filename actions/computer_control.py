@@ -461,10 +461,10 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
                             score = 0.95
                         elif desc_lower and (desc_lower in text_l or desc_lower in name_l):
                             score = 0.85
-                        elif desc_lower and ((text_l and text_l in desc_lower)
-                                             or (name_l and name_l in desc_lower)):
-                            score = 0.75
-                        elif desc_lower and auto_id_l and auto_id_l in desc_lower:
+                        elif desc_lower and ((text_l and text_l in desc_lower and len(text_l) >= 0.75 * len(desc_lower))
+                                             or (name_l and name_l in desc_lower and len(name_l) >= 0.75 * len(desc_lower))):
+                            score = 0.80
+                        elif desc_lower and auto_id_l and auto_id_l in desc_lower and len(auto_id_l) >= 0.75 * len(desc_lower):
                             score = 0.70
                         else:
                             # Token overlap with stopword and generic token filtering
@@ -474,8 +474,12 @@ def _find_via_uia(description: str) -> tuple[int, int] | None:
                             if tokens:
                                 combined = f"{text_l} {c_type.lower()} {auto_id_l} {name_l}"
                                 overlap = sum(1 for t in tokens if t in combined)
-                                if overlap > 0:
-                                    score = 0.4 + 0.4 * (overlap / len(tokens))
+                                if overlap == len(tokens):
+                                    score = 0.85
+                                elif len(tokens) >= 2 and (overlap / len(tokens)) >= 0.75:
+                                    score = 0.70
+                                else:
+                                    score = 0.20
 
                         if score > 0.65:
                             # Bonuses for enabled/visible and interactive controls
@@ -857,12 +861,12 @@ def _find_via_coordinates(description: str, screenshot_bytes: bytes, w: int, h: 
             }
 
         resp = None
-        for tier in ("models/gemini-robotics-er-2-streaming-preview", gemini.SMART, gemini.FAST):
+        for tier in (gemini.SMART, gemini.FAST):
             try:
                 resp = gemini.call(
                     [content_part, prompt],
                     tier=tier,
-                    timeout_ms=18_000,
+                    timeout_ms=8_000,
                 )
                 if resp and resp.text:
                     break
@@ -1270,6 +1274,25 @@ def computer_control(
             time.sleep(secs)
             return f"Waited {secs}s"
 
+        if action == "sequence":
+            steps = params.get("steps") or []
+            if not isinstance(steps, list) or not steps:
+                return "sequence requires a 'steps' list of action dictionaries."
+            results = []
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+                step_act = step.get("action", "")
+                if target_win and not step.get("window"):
+                    step["window"] = target_win
+                print(f"[ComputerControl] ▶ sequence step {i+1}/{len(steps)}: {step_act}")
+                step_res = computer_control(step, player=player)
+                results.append(f"Step {i+1} ({step_act}): {step_res}")
+                if "ABORTED" in step_res or "failed" in step_res.lower() or "not found" in step_res.lower():
+                    return f"Sequence stopped at step {i+1} ({step_act}): {step_res}"
+                time.sleep(0.12)
+            return "Sequence completed successfully: " + "; ".join(results)
+
         if action == "clear_field":
             return _clear_field(window=target_win)
 
@@ -1329,7 +1352,12 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | wait_for | prepare_environment | verify_window | random_data | user_data"
+                "description": "sequence | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | wait_for | prepare_environment | verify_window | random_data | user_data"
+            },
+            "steps": {
+                "type": "ARRAY",
+                "description": "List of action dictionaries to execute in sequence without round-trip delays (for action='sequence')",
+                "items": {"type": "OBJECT"}
             },
             "text": {
                 "type": "STRING",

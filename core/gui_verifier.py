@@ -215,8 +215,25 @@ def verify_active_target(expected_window: Optional[str] = None) -> Tuple[bool, s
         # If no target specified, match is trivially true
         return True, current_title, info
 
-    # Match if target is substring of active title or active title is substring of target
+    # 1. Direct or substring match
     if target in current_lower or (len(current_lower) > 3 and current_lower in target):
+        return True, current_title, info
+
+    # 2. Token-based matching (handles title changes like 'Instagram - Brave' -> 'Instagram • Messages - Brave')
+    target_tokens = set(t for t in re.split(r"\W+", target) if len(t) > 2)
+    current_tokens = set(t for t in re.split(r"\W+", current_lower) if len(t) > 2)
+
+    app_tokens = {"brave", "chrome", "firefox", "edge", "opera", "code", "terminal", "powershell"}
+    common_apps = target_tokens & app_tokens
+    if common_apps and (common_apps & current_tokens):
+        content_target = target_tokens - app_tokens
+        content_current = current_tokens - app_tokens
+        if not content_target or (content_target & content_current):
+            set_target_window(current_title)
+            return True, current_title, info
+
+    if target_tokens and (len(target_tokens & current_tokens) / len(target_tokens)) >= 0.5:
+        set_target_window(current_title)
         return True, current_title, info
 
     return False, current_title, info
@@ -241,8 +258,19 @@ def focus_window(title: str, timeout: float = 3.0) -> Dict[str, Any]:
             matching_hwnd = None
             matched_title = ""
 
+            clean_tokens = set(t for t in re.split(r"\W+", clean_title) if len(t) > 2)
             for w in windows:
-                if clean_title in w["title"].lower():
+                w_title_lower = w["title"].lower()
+                if clean_title in w_title_lower:
+                    matching_hwnd = w["hwnd"]
+                    matched_title = w["title"]
+                    break
+                w_tokens = set(t for t in re.split(r"\W+", w_title_lower) if len(t) > 2)
+                if clean_tokens and clean_tokens.issubset(w_tokens):
+                    matching_hwnd = w["hwnd"]
+                    matched_title = w["title"]
+                    break
+                if clean_tokens and (len(clean_tokens & w_tokens) / len(clean_tokens)) >= 0.6:
                     matching_hwnd = w["hwnd"]
                     matched_title = w["title"]
                     break
@@ -628,6 +656,8 @@ def act_and_verify(
 
     # 5. Expectation supplied: Poll screen for post-condition verification
     clean_expect = expect.strip().lower()
+    is_negative = clean_expect.startswith("!")
+    target_text = clean_expect[1:].strip() if is_negative else clean_expect
     start_poll = time.time()
     last_observation = ""
 
@@ -639,40 +669,53 @@ def act_and_verify(
         except Exception:
             continue
 
-        # Check OCR first for exact text expectation (e.g. "Create post", "What's on your mind?")
-        from actions.computer_control import _find_via_ocr
+        from actions.computer_control import _find_via_ocr, _find_via_uia
         w, h = cur_img.size
-        ocr_hit = _find_via_ocr(clean_expect, cur_img, w, h)
-        if ocr_hit is not None:
-            return {
-                "status": "success",
-                "success": True,
-                "summary": f"Action '{action_name}' succeeded: verified post-condition '{expect}' at {ocr_hit}.",
-                "evidence": {
-                    "action": action_name,
-                    "expect": expect,
-                    "verified_via": "ocr",
-                    "hit_coords": ocr_hit,
-                    "elapsed_sec": round(time.time() - start_poll, 2),
-                },
-            }
+        ocr_hit = _find_via_ocr(target_text, cur_img, w, h)
+        uia_hit = _find_via_uia(target_text)
+        found = (ocr_hit is not None) or (uia_hit is not None)
 
-        # Check UIA tree
-        from actions.computer_control import _find_via_uia
-        uia_hit = _find_via_uia(clean_expect)
-        if uia_hit is not None:
-            return {
-                "status": "success",
-                "success": True,
-                "summary": f"Action '{action_name}' succeeded: verified post-condition '{expect}' in UI tree.",
-                "evidence": {
-                    "action": action_name,
-                    "expect": expect,
-                    "verified_via": "uia",
-                    "hit_coords": uia_hit,
-                    "elapsed_sec": round(time.time() - start_poll, 2),
-                },
-            }
+        if is_negative:
+            # We want the element / modal to be DISMISSED / GONE
+            if not found:
+                return {
+                    "status": "success",
+                    "success": True,
+                    "summary": f"Action '{action_name}' succeeded: verified dismissal of '{target_text}'.",
+                    "evidence": {
+                        "action": action_name,
+                        "dismissed": target_text,
+                        "elapsed_sec": round(time.time() - start_poll, 2),
+                    },
+                }
+        else:
+            if ocr_hit is not None:
+                return {
+                    "status": "success",
+                    "success": True,
+                    "summary": f"Action '{action_name}' succeeded: verified post-condition '{expect}' at {ocr_hit}.",
+                    "evidence": {
+                        "action": action_name,
+                        "expect": expect,
+                        "verified_via": "ocr",
+                        "hit_coords": ocr_hit,
+                        "elapsed_sec": round(time.time() - start_poll, 2),
+                    },
+                }
+
+            if uia_hit is not None:
+                return {
+                    "status": "success",
+                    "success": True,
+                    "summary": f"Action '{action_name}' succeeded: verified post-condition '{expect}' in UI tree.",
+                    "evidence": {
+                        "action": action_name,
+                        "expect": expect,
+                        "verified_via": "uia",
+                        "hit_coords": uia_hit,
+                        "elapsed_sec": round(time.time() - start_poll, 2),
+                    },
+                }
 
     # Expectation was NOT verified within timeout
     return {
