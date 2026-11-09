@@ -38,7 +38,8 @@ def capture_screen_region(region: Optional[List[int]] = None) -> Optional[bytes]
         return None
 
     try:
-        with mss.mss() as sct:
+        mss_cls = getattr(mss, 'MSS', getattr(mss, 'mss', None))
+        with mss_cls() as sct:
             monitors = sct.monitors
             target = monitors[1] if len(monitors) > 1 else monitors[0]
 
