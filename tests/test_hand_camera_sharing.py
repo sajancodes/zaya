@@ -1,5 +1,4 @@
 import pytest
-pytest.importorskip('cv2', reason='cv2 not installed')
 from types import SimpleNamespace
 from unittest.mock import patch
 

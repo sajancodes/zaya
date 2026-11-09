@@ -1,5 +1,4 @@
 import pytest
-pytest.importorskip('cv2', reason='cv2 not installed')
 from core.gesture.hand_tracker import HandTracker
 import pytest
 import time
@@ -23,7 +22,7 @@ def test_missing_mediapipe_isolated(tmp_path,monkeypatch):
     monkeypatch.setattr(builtins,'__import__',optional)
     model=tmp_path/'hand.task';model.write_bytes(b'fixture')
     received=[];tracker=HandTracker(received.append);tracker.start(str(model));tracker.worker.join(3)
-    assert tracker.state=='ERROR' and 'ImportError' in tracker.error
+    assert tracker.state=='ERROR' and any(e in tracker.error for e in ('ImportError', 'ModuleNotFoundError'))
     assert received==[()]
 
 

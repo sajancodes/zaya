@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
-pytest.importorskip("playwright", reason="playwright not installed")
 
 from core.execution_policy import set_trust, TRUST_LOCAL_OWNER, TRUST_UNKNOWN
 from core.pc_ecosystem import PCEcosystemBridge, _CRITICAL_SYSTEM_PROCESSES
