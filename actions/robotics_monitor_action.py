@@ -63,8 +63,9 @@ TOOL = {
     "name": "robotics_screen_monitor",
     "description": (
         "Continuous high-temporal screen monitoring using models/gemini-robotics-er-2-streaming-preview. "
-        "Perceives continuous UI state transitions, terminal compilation errors, stuck progress bars, "
-        "dialog prompts, and spatial affordances with automated fallback."
+        "Use when the owner says 'monitor mode active', 'activate monitor mode', 'monitor screen', "
+        "or during complex multi-step browser and desktop tasks alongside computer_control (e.g. going to Facebook, "
+        "posting updates, filling forms) to continuously observe screen state, locate elements, and verify actions."
     ),
     "handler": handle_robotics_screen_monitor,
     "parameters": {

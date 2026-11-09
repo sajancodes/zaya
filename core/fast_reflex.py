@@ -553,6 +553,25 @@ REFLEX_INTENTS: Dict[str, Dict[str, Any]] = {
         "args": {"action": "sleep_display"},
         "ack": "Display turned off, sir.",
     },
+    "MONITOR_MODE_START": {
+        "phrases": [
+            "monitor mode active", "activate monitor mode", "turn on monitor mode",
+            "start monitor mode", "enable monitor mode", "monitor my screen",
+            "monitor mode on", "monitor screen"
+        ],
+        "tool": "robotics_screen_monitor",
+        "args": {"action": "start", "task": "Continuous screen surveillance and spatial monitoring"},
+        "ack": "Monitor mode active, sir. Continuously observing your display.",
+    },
+    "MONITOR_MODE_STOP": {
+        "phrases": [
+            "monitor mode inactive", "deactivate monitor mode", "turn off monitor mode",
+            "stop monitor mode", "disable monitor mode", "monitor mode off"
+        ],
+        "tool": "robotics_screen_monitor",
+        "args": {"action": "stop"},
+        "ack": "Monitor mode deactivated, sir.",
+    },
     "DARK_MODE": {
         "phrases": [
             "toggle dark mode", "switch dark mode", "toggle theme", "toggle dark theme"
@@ -1469,6 +1488,22 @@ class FastReflexRouter:
                 matched=True,
                 intent=intent_name,
                 ack=intent_data.get("ack", "Done, sir."),
+                tool_name=tool,
+                arguments=args,
+                data=res,
+            )
+
+        if tool == "robotics_screen_monitor":
+            args = intent_data.get("args", {})
+            try:
+                from actions.robotics_monitor_action import handle_robotics_screen_monitor
+                res = handle_robotics_screen_monitor(**args)
+            except Exception as e:
+                res = str(e)
+            return FastReflexResult(
+                matched=True,
+                intent=intent_name,
+                ack=intent_data.get("ack", "Monitor mode active, sir."),
                 tool_name=tool,
                 arguments=args,
                 data=res,

@@ -232,3 +232,27 @@ def test_fast_reflex_negation_and_question_rejection():
     assert score >= 0.88
 
 
+def test_fast_reflex_monitor_mode():
+    from unittest.mock import patch
+    router = FastReflexRouter()
+
+    # Match monitor mode activation
+    intent, score = router.match("monitor mode active")
+    assert intent == "MONITOR_MODE_START"
+    assert score >= 0.88
+
+    intent_stop, score_stop = router.match("stop monitor mode")
+    assert intent_stop == "MONITOR_MODE_STOP"
+    assert score_stop >= 0.88
+
+    with patch("core.execution_policy.require_owner"), \
+         patch("actions.robotics_monitor_action.handle_robotics_screen_monitor") as mock_rm:
+        mock_rm.return_value = '{"status": "success"}'
+        res = router.handle("monitor mode active")
+        assert res is not None
+        assert res.matched is True
+        assert res.intent == "MONITOR_MODE_START"
+        assert "Monitor mode active" in res.ack
+        mock_rm.assert_called_once_with(action="start", task="Continuous screen surveillance and spatial monitoring")
+
+
