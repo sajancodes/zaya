@@ -304,6 +304,23 @@
 - `ece1176`: `docs: update progress report with cycles 55-57 and 877 passing tests`
 - `ef0bb07`: `feat(sandbox): implement dynamic scratch code evaluator and isolated runtime`
 - `9125363`: `feat(layout): implement spatial multi-window layout orchestrator and presets`
-- `bf224e8`: `feat(audio): implement real-time acoustic calibration and adaptive silence tuning`
+- `bf224e8`: `feat(audio): implement real-time acoustic calibration and adaptive silence tuning`
+- `22cdb21`: `feat(surveillance): Cycle 61 Screen Surveillance Monitor Mode`
+- `af11ca6`: `feat(terminal): Cycle 62 Visible OpenCode Terminal & Dynamic Task Modification`
+- `a7a8df7`: `test: harden optional desktop dependencies with pytest importorskip guards`
+- `a90376b`: `docs: update autonomous engineering progress report for cycles 61 and 62`
+- `b261940`: `feat(routing): Cycle 63 Intelligent Model Fallback & Routing Engine`
+- `2f262fd`: `feat(capability): Cycle 64 Runtime Self-Knowledge & Centralized Capability Registry`
+- `b2da05f`: `feat(platform): Cycle 65 Cross-Platform Desktop OS Abstraction & Adapters`
+- `fd0b071`: `feat(efficiency): Cycle 66 Small-Model Efficiency & Tool Budget Optimizer`
+- `1fd0b96`: `feat(travel): Cycle 67 Commercial Air Travel Intelligence & Flight Finder`
+- `247d880`: `docs: update autonomous progress report for cycles 63-67`
+- `765e6b0`: `fix(language): hardcode default English speech and forbid automatic language switching`
+- `0b1d36c`: `feat(habit): Cycle 68 Habit Learning & Routine Synthesis engine`
+- `8800724`: `feat(edge): Cycle 69 Hybrid Offline Edge Engine for zero-latency local execution`
+- `d217b27`: `feat(ui): Cycle 70 Visual UI Graph & Actionable Screen Click Anchors`
+- `a8a5995`: `feat(cache): Cycle 71 Predictive Workspace Pre-fetcher & Hot Diagnostic Cache`
+- `5bbc7b8`: `feat(swarm): Cycle 72 Parallel Sub-Worker Swarm & Multi-Agent Mesh`
+- `88cfd75`: `feat(ui): Cycle 73 Interactive Generative Dashboard Cards`
 
 All commits authored as `sajancodes <ab4290025@gmail.com>`.
