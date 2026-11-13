@@ -342,13 +342,15 @@ def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
 
 
 class _Reply:
-    """What a Live turn hands back, shaped like the REST response's `.text` so
-    every existing call site keeps working unchanged."""
+    """What a Live or processing turn hands back, shaped like the REST
+    response's `.text` so every existing call site keeps working unchanged.
+    `model` records which rung actually answered."""
 
-    __slots__ = ("text",)
+    __slots__ = ("text", "model")
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, model: str = ""):
         self.text = text
+        self.model = model
 
 
 def _live_model() -> str:
@@ -589,7 +591,7 @@ def _live_call(contents, config, timeout_ms: int, key: str):
     if "error" in box:
         raise box["error"]
     text = box.get("text")
-    return _Reply(text) if text else None
+    return _Reply(text, _live_model()) if text else None
 
 
 def _process_call(contents, config, timeout_ms: int, key: str):
@@ -666,7 +668,7 @@ def _process_call(contents, config, timeout_ms: int, key: str):
         cl.close()
 
     text = str(getattr(result, "output_text", "") or "").strip()
-    return _Reply(text) if text else None
+    return _Reply(text, PROCESS_MODEL) if text else None
 
 
 def call(contents, tier: str = FAST, config=None,

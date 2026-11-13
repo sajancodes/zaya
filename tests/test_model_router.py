@@ -11,6 +11,7 @@ os.environ.setdefault("TRUST_LOCAL_OWNER", "1")
 
 from core.model_router import (
     ComplexityTier,
+    DEFAULT_MODELS,
     ErrorCategory,
     ModelHealth,
     ModelRouter,
@@ -104,6 +105,11 @@ class TestModelRoutingAction:
         assert res.status == "success"
         assert "Model Router:" in res.summary
 
+    def test_action_list_includes_hydrogen(self):
+        res = model_routing_action({"action": "list"})
+        ids = [m["id"] for m in res.data["models"]]
+        assert "gemini-4-hydrogen" in ids
+
     def test_action_route_simulation(self):
         res = model_routing_action({"action": "route", "complexity": "reasoning"})
         assert res.status == "success"
@@ -117,3 +123,24 @@ class TestModelRoutingAction:
         res = model_routing_action({"action": "enable", "model_id": "gemini-2.5-flash"})
         assert res.status == "success"
         assert "enabled" in res.summary
+
+
+class TestDefaultModelCatalog:
+    def test_hydrogen_is_registered_for_zaya_to_see(self):
+        models = {m.id: m for m in DEFAULT_MODELS}
+        spec = models["gemini-4-hydrogen"]
+        assert spec.name == "Gemini 4 Hydrogen"
+        assert spec.provider == Provider.GEMINI
+        assert spec.supports_vision is True
+        assert spec.supports_tools is True
+        assert spec.complexity_rank == 4
+        assert spec.enabled is True
+
+    def test_reasoning_routes_to_hydrogen_but_standard_does_not(self):
+        router = ModelRouter()
+        reasoning = router.route(complexity=ComplexityTier.REASONING)
+        assert reasoning.selected_model.id == "gemini-4-hydrogen"
+
+        standard = router.route(complexity=ComplexityTier.STANDARD)
+        assert standard.selected_model.id != "gemini-4-hydrogen"
+

@@ -111,6 +111,21 @@ DEFAULT_MODELS: List[ModelSpec] = [
         cost_tier=1,
         priority=1,
     ),
+    # The processing model, not the realtime one: gemini-3.8-live still runs
+    # the spoken conversation. Registering hydrogen here is what lets Zaya see
+    # it through model_routing and pick the deep_process action when a request
+    # needs more reasoning than a spoken turn should spend.
+    ModelSpec(
+        id="gemini-4-hydrogen",
+        name="Gemini 4 Hydrogen",
+        provider=Provider.GEMINI,
+        context_window=2000000,
+        supports_vision=True,
+        supports_tools=True,
+        complexity_rank=4,
+        cost_tier=2,
+        priority=2,
+    ),
     ModelSpec(
         id="gemini-2.5-pro",
         name="Gemini 2.5 Pro",

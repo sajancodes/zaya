@@ -103,6 +103,7 @@ def test_process_call_maps_config(fake_client):
     reply = gemini._process_call("Return JSON.", config, 30_000, "test-key")
 
     assert reply.text == "answer"
+    assert reply.model == gemini.PROCESS_MODEL
     kwargs = fake_client.interactions.kwargs
     assert kwargs["model"] == gemini.PROCESS_MODEL
     assert kwargs["input"] == "Return JSON."
