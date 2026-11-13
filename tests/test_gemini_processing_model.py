@@ -116,6 +116,11 @@ def test_process_call_maps_config(fake_client):
     assert fake_client.closed
 
 
+def test_explicit_thinking_level_is_honoured(fake_client):
+    gemini._process_call("think", {"thinking_level": "xhigh"}, 30_000, "test-key")
+    assert fake_client.interactions.kwargs["generation_config"]["thinking_level"] == "xhigh"
+
+
 @pytest.mark.parametrize("budget,level", [(0, "low"), (512, "low"),
                                           (2048, "medium"), (-1, "high")])
 def test_thinking_budget_maps_to_supported_levels(fake_client, budget, level):

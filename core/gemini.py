@@ -610,6 +610,9 @@ def _process_call(contents, config, timeout_ms: int, key: str):
 
     system = str(setting("system_instruction") or "")
     gen = {"thinking_level": "high"}
+    explicit_level = setting("thinking_level")
+    if isinstance(explicit_level, str) and explicit_level.strip():
+        gen["thinking_level"] = explicit_level.strip()
     for field in ("temperature", "max_output_tokens", "top_p", "seed",
                   "stop_sequences"):
         value = setting(field)
