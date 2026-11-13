@@ -82,6 +82,7 @@ _KEY_FILE = _BASE / "config" / "api_keys.json"
 FAST = "fast"      # short classification, extraction, one-line decisions
 SMART = "smart"    # reasoning, generation, long documents, images
 SEARCH = "search"  # grounded search — REST only, see below
+PROCESS = "process"  # deep reasoning on the processing model, see below
 
 # A rung that means "ask the Live model instead", through a short throwaway
 # session rather than the REST text API.
@@ -133,7 +134,12 @@ _LADDERS = {
            "gemini-3.1-flash-lite", "gemini-flash-lite-latest",
            "gemini-2.5-flash", "gemini-3.5-flash",
            "gemini-3.6-flash", "gemini-3-flash-preview"),
-    SMART: (LIVE,
+    # Reasoning work goes to the processing model first. The Live model still
+    # leads FAST: those callers are latency-critical (screen grounding, short
+    # classifications) and hydrogen is a deliberate, slower thinker. Keeping
+    # the two ladders separate is what lets the conversation stay on
+    # gemini-3.8-live while background processing uses hydrogen.
+    SMART: (PROCESS, LIVE,
             "gemini-2.5-flash", "gemini-3.5-flash",
             "gemini-2.5-flash-lite", "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
@@ -164,6 +170,18 @@ LIVE_MODELS = (
     "models/gemini-3.1-flash-live-preview",
     "models/gemini-2.5-flash-native-audio-preview-12-2025",
 )
+
+# The model that does the reasoning work behind the assistant, through the
+# interactions endpoint. It is intentionally NOT in LIVE_MODELS: the realtime
+# conversation stays on gemini-3.8-live, and only the one-shot SMART ladder
+# reaches this. A failure here falls through to the existing Live/REST rungs,
+# so processing can degrade without ever touching the live session.
+PROCESS_MODEL = "gemini-4-hydrogen"
+
+# Below this deadline a reasoning call is latency-critical (screen grounding,
+# UI element lookup). Do not put a deliberately slow model in front of it: skip
+# straight to the fast ladder instead of paying for a guaranteed timeout.
+PROCESS_MIN_TIMEOUT_MS = 20_000
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
 # only the fallback for when this module is imported without it (tests).
@@ -367,6 +385,90 @@ def _to_live_parts(contents) -> list:
     return parts
 
 
+def _process_kind(mime: str) -> str:
+    mime = str(mime or "").lower()
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("audio/"):
+        return "audio"
+    if mime.startswith("video/"):
+        return "video"
+    return "document"
+
+
+def _process_blob(data, mime: str):
+    """One inline byte payload in the interactions content shape."""
+    import base64
+
+    if isinstance(data, bytes):
+        data = base64.b64encode(data).decode("ascii")
+    if not data:
+        return None
+    mime = str(mime or "application/octet-stream")
+    return {"type": _process_kind(mime), "data": data, "mime_type": mime}
+
+
+def _to_process_input(contents) -> list:
+    """REST/Live `contents` -> interactions content items.
+
+    The interactions endpoint takes typed text/image/document/audio/video
+    items. Zaya's call sites use strings, google.genai Part objects, plain
+    inline_data dicts, PIL images and types.Content — accept all of them so a
+    processing call looks the same to every existing caller.
+    """
+    import io
+
+    items = contents if isinstance(contents, (list, tuple)) else [contents]
+    out = []
+    for item in items:
+        if isinstance(item, str):
+            if item:
+                out.append({"type": "text", "text": item})
+            continue
+        if isinstance(item, dict):
+            inline = item.get("inline_data")
+            if isinstance(inline, dict):
+                blob = _process_blob(inline.get("data"), inline.get("mime_type"))
+                if blob:
+                    out.append(blob)
+            elif item.get("text"):
+                out.append({"type": "text", "text": str(item["text"])})
+            elif item.get("type") in {"text", "image", "document", "audio", "video"}:
+                out.append(item)
+            continue
+        blob = getattr(item, "inline_data", None)
+        if blob is not None:
+            converted = _process_blob(
+                getattr(blob, "data", None), getattr(blob, "mime_type", None))
+            if converted:
+                out.append(converted)
+            continue
+        file_data = getattr(item, "file_data", None)
+        if file_data is not None:
+            uri = getattr(file_data, "file_uri", None)
+            mime = getattr(file_data, "mime_type", None) or ""
+            if uri:
+                out.append({"type": _process_kind(mime), "uri": uri,
+                            "mime_type": mime})
+            continue
+        txt = getattr(item, "text", None)
+        if txt:
+            out.append({"type": "text", "text": str(txt)})
+            continue
+        parts = getattr(item, "parts", None)
+        if parts:
+            out.extend(_to_process_input(parts))
+            continue
+        # file_processor passes PIL images straight through.
+        if hasattr(item, "save") and hasattr(item, "mode"):
+            buf = io.BytesIO()
+            item.save(buf, format="PNG")
+            converted = _process_blob(buf.getvalue(), "image/png")
+            if converted:
+                out.append(converted)
+    return out
+
+
 async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> str:
     from google import genai
     from google.genai import types as gtypes
@@ -490,14 +592,89 @@ def _live_call(contents, config, timeout_ms: int, key: str):
     return _Reply(text) if text else None
 
 
+def _process_call(contents, config, timeout_ms: int, key: str):
+    """One reasoning request on the processing model.
+
+    Returns a _Reply so callers see the same `.text` shape as a REST response.
+    None means this rung should be skipped (tools were requested, or there was
+    no usable input); the caller then falls through to the Live/REST ladder.
+    """
+    items = _to_process_input(contents)
+    if not items:
+        return None
+
+    def setting(name, default=None):
+        if isinstance(config, dict):
+            return config.get(name, default)
+        return getattr(config, name, default)
+
+    system = str(setting("system_instruction") or "")
+    gen = {"thinking_level": "high"}
+    for field in ("temperature", "max_output_tokens", "top_p", "seed",
+                  "stop_sequences"):
+        value = setting(field)
+        if value is not None:
+            gen[field] = value
+
+    thinking = setting("thinking_config")
+    if thinking is not None:
+        budget = (thinking.get("thinking_budget") if isinstance(thinking, dict)
+                  else getattr(thinking, "thinking_budget", None))
+        if isinstance(budget, (int, float)):
+            # hydrogen rejects 'minimal'; low is its fastest supported level.
+            # A negative budget means "let the model decide".
+            gen["thinking_level"] = ("high" if budget < 0
+                                     else "low" if budget <= 512
+                                     else "medium" if budget <= 2048
+                                     else "high")
+
+    # Grounding and function declarations are part of the caller's contract;
+    # this rung cannot honour them faithfully, so let the REST rung do it.
+    if setting("tools"):
+        return None
+
+    kwargs = {
+        "model": PROCESS_MODEL,
+        "input": items if len(items) > 1 else items[0].get("text", items),
+        "generation_config": gen,
+        "timeout": max(10.0, timeout_ms / 1000.0),
+        "system_instruction": _ONE_SHOT_SYSTEM + (
+            "\n\n" + system if system else ""),
+    }
+
+    mime = str(setting("response_mime_type") or "")
+    if mime:
+        response_format = {"type": "text", "mime_type": mime}
+        schema = setting("response_schema")
+        if schema is not None:
+            if hasattr(schema, "model_dump"):
+                try:
+                    schema = schema.model_dump(exclude_none=True)
+                except Exception:
+                    schema = None
+            if isinstance(schema, dict):
+                response_format["schema"] = schema
+        kwargs["response_format"] = response_format
+
+    cl = client(timeout_ms=timeout_ms, key=key)
+    try:
+        result = cl.interactions.create(**kwargs)
+    finally:
+        cl.close()
+
+    text = str(getattr(result, "output_text", "") or "").strip()
+    return _Reply(text) if text else None
+
+
 def call(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
     """Run one generation, walking the ladder until one answers.
 
-    Returns the SDK's own response object, so callers that need more than the
-    text — grounding metadata, candidates, usage — still get it. Returns None
-    when every model on the ladder failed; the reason for each is printed, since
-    a silent None during a session nobody can debug is how the original problem
+    Returns the SDK's own response object (or a `.text`-shaped _Reply for the
+    Live and processing rungs), so callers that need more than the text —
+    grounding metadata, candidates, usage — still get it. Returns None when
+    every model on the ladder failed; the reason for each is printed, since a
+    silent None during a session nobody can debug is how the original problem
     stayed hidden.
     """
     # `tier` is normally FAST or SMART. Anything else is taken to be an explicit
@@ -514,7 +691,16 @@ def call(contents, tier: str = FAST, config=None,
     ladder = _LADDERS.get(tier)
     if ladder is None:
         if tier in _STREAMING_ONLY:
-            ladder = _LADDERS[SMART]
+            # The explicitly requested streaming model cannot serve a REST text
+            # turn. Keep that call on the Live rung instead of handing it to the
+            # processing model the caller did not ask for.
+            ladder = (LIVE,) + tuple(m for m in _LADDERS[SMART]
+                                     if m not in (LIVE, PROCESS))
+        elif tier in (PROCESS_MODEL, "models/" + PROCESS_MODEL):
+            # The processing model is not a REST generate_content model; route
+            # an explicit selection back through its own rung.
+            ladder = (PROCESS,) + tuple(m for m in _LADDERS[SMART]
+                                        if m != PROCESS)
         else:
             ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
 
@@ -525,6 +711,8 @@ def call(contents, tier: str = FAST, config=None,
         return None
     tried = [m for m in ladder if not _cooling(m)] or list(ladder)
     for model in tried:
+        if model == PROCESS and timeout_ms < PROCESS_MIN_TIMEOUT_MS:
+            continue
         resource = 'helper:' + model
         for _attempt in range(1 if key else len(pool.keys())):
             try:
@@ -533,6 +721,11 @@ def call(contents, tier: str = FAST, config=None,
                 break
             cl = None
             try:
+                if model == PROCESS:
+                    reply = _process_call(contents, config, timeout_ms, resolved_key)
+                    if reply is not None:
+                        return reply
+                    raise RuntimeError('the processing turn came back empty')
                 if model == LIVE:
                     reply = _live_call(contents, config, timeout_ms, resolved_key)
                     if reply is not None:
@@ -553,6 +746,10 @@ def call(contents, tier: str = FAST, config=None,
                     _cool(model)
                 elif is_gone_error(msg):
                     _cool(model, _GONE_SECONDS)
+                elif "timeout" in msg.lower() or "timed out" in msg.lower():
+                    # A slow reasoning rung that overran this call's deadline is
+                    # not gone; rest it briefly and let the next rung answer.
+                    _cool(model, 60)
                 elif is_unavailable_error(msg):
                     _cool(model, _UNAVAILABLE_SECONDS)
                 else:
