@@ -7,6 +7,7 @@ from core.runtime_paths import mutable_path
 import shutil
 import threading
 import time
+import uuid
 from dataclasses import replace
 from core.event_bus import bus
 from core.tool_result import ToolResult
@@ -240,10 +241,10 @@ class WhatsAppService:
             if not self.native_bridge or not self.native_bridge.ready:
                 return ToolResult('failed', 'WhatsApp live feed is unavailable; no message was submitted. Connection recovery is running.',
                                   {'transport_status': 'not_submitted', 'connection_error': self.bridge_error}, retryable=False)
-        # Compatibility callers have no tool-call ID. Same-day duplicate text
-        # is suppressed unless the owner explicitly supplies a new request ID.
+        # Explicit owner sends are each assigned a fresh unique request_id
+        # unless one was explicitly passed into send() or current_request context.
         from core.operator import current_request
-        request_id = request_id or current_request.get() or hashlib.sha256(f'{chat_id}|{time.strftime("%Y-%m-%d")}|{message}'.encode()).hexdigest()
+        request_id = request_id or current_request.get() or f'wa_{uuid.uuid4().hex}'
         through = time.time()
         result = self.adapter.send(chat_id, message, request_id)
         if result.status == 'success':
