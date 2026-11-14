@@ -127,3 +127,6 @@ memory/concept_mesh.tmp
 # ── Dynamic Toolsmith runtime files ──────────────────────────────────────────
 actions/custom/*
 !actions/custom/.gitkeep
+bridge/whatsapp/zaya-read-state-bridge.js
+bridge/whatsapp/node_modules/
+
