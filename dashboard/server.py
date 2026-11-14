@@ -167,87 +167,43 @@ def _ensure_network_access(port: int) -> None:
             except Exception:
                 return False
 
-        def _network_is_public() -> bool:
-            try:
-                r = subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                     "(Get-NetConnectionProfile | "
-                     "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                     "Measure-Object).Count"],
-                    capture_output=True, text=True, timeout=6,
-                )
-                return r.stdout.strip() not in ("", "0")
-            except Exception:
-                return False
+        need_port = not _netsh_rule_exists(port_rule)
+        if not need_port:
+            return  # already configured
 
-        need_port    = not _netsh_rule_exists(port_rule)
-        need_prog    = not _netsh_rule_exists(prog_rule)
-
-        if not need_port and not need_prog:
-            return  # already fully configured
-
-        # Build a .bat file — netsh runs fast when elevated
-        bat_lines = ["@echo off"]
-        if need_port:
-            bat_lines.append(
-                f'netsh advfirewall firewall add rule '
-                f'name="{port_rule}" protocol=TCP dir=in '
-                f'localport={port} action=allow'
-            )
-        if need_prog:
-            bat_lines.append(
-                f'netsh advfirewall firewall add rule '
-                f'name="{prog_rule}" dir=in action=allow '
-                f'program="{py_exe}" enable=yes'
-            )
-
-        bat_body = "\r\n".join(bat_lines) + "\r\n"
-        fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="zaya_fw_")
-        try:
-            os.write(fd, bat_body.encode("mbcs"))   # Windows cmd.exe expects ANSI
-            os.close(fd)
-        except Exception:
-            try:
-                os.close(fd)
-            except Exception:
-                pass
-            return
-
-        # ── Try running directly (succeeds when already admin) ────────────────
+        # Direct netsh execution with scoped private profile and localsubnet
+        netsh_args = f'advfirewall firewall add rule name="{port_rule}" protocol=TCP dir=in localport={port} action=allow profile=private remoteip=localsubnet'
+        
+        # ── Try running directly via netsh (succeeds when already admin) ──────
         try:
             r = subprocess.run(
-                [bat_path], capture_output=True, timeout=8, shell=True
+                ["netsh", "advfirewall", "firewall", "add", "rule", f"name={port_rule}", "protocol=TCP", "dir=in", f"localport={port}", "action=allow", "profile=private", "remoteip=localsubnet"],
+                capture_output=True, timeout=8, text=True
             )
             if r.returncode == 0:
-                print(f"[Dashboard] Firewall configured for port {port}.")
-                try:
-                    os.unlink(bat_path)
-                except Exception:
-                    pass
+                print(f"[Dashboard] Firewall configured for port {port} (private/localsubnet).")
                 return
         except Exception:
             pass
 
-        # ── ShellExecuteW: native UAC elevation (most reliable on Windows) ────
-        # ShellExecuteW with verb "runas" always shows the UAC dialog regardless
-        # of UAC level settings. Non-blocking — uvicorn is already running.
+        # ── ShellExecuteW: native UAC elevation directly invoking netsh.exe ───
         print("[Dashboard] One-time network setup required.")
         print("[Dashboard] >>> A Windows security dialog will appear — click 'Yes' <<<")
         try:
             ret = ctypes.windll.shell32.ShellExecuteW(
-                None,       # hwnd  (no parent window)
-                "runas",    # verb  (request elevation)
-                bat_path,   # file  (our .bat)
-                None,       # params
-                None,       # working dir
-                0,          # SW_HIDE (run without a visible cmd window)
+                None,           # hwnd
+                "runas",        # verb
+                "netsh.exe",    # direct executable (no temp .bat)
+                netsh_args,     # scoped arguments
+                None,           # working dir
+                0,              # SW_HIDE
             )
             if int(ret) > 32:
-                # ShellExecuteW returns immediately; bat finishes in ~1 second.
-                # Sleep briefly so the rules are in place before the first retry.
                 time.sleep(2)
-                print(f"[Dashboard] Network setup complete — port {port} is open.")
+                print(f"[Dashboard] Network setup complete — port {port} is open for local subnet.")
                 print("[Dashboard] Refresh your phone browser to connect.")
+        except Exception as e:
+            print(f"[Dashboard] Elevation request failed: {e}")
             else:
                 print("[Dashboard] Setup was not allowed.")
                 print("[Dashboard] Phone connections may fail until Zaya is run as Administrator.")
