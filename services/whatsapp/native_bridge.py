@@ -13,6 +13,7 @@ import threading
 import time
 import requests
 from core.shell_session import terminate_tree
+from services.whatsapp.bridge import get_bridge_script
 from services.whatsapp.connection import load_connection
 from services.whatsapp.models import Message, validate_chat_id
 
@@ -129,13 +130,10 @@ class NativeBridge:
                     raise RuntimeError('Hermes gateway is running; Zaya will use observation hooks without opening a second session.')
             except (ValueError, TypeError, KeyError):
                 raise RuntimeError('Hermes gateway ownership could not be established; bridge start refused.')
-        bridge = home / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js'
-        if not bridge.is_file():
-            candidates = [Path.home() / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js']
-            bridge = next((p for p in candidates if p.is_file()), bridge)
+        bridge = get_bridge_script(home)
         node = shutil.which('node')
         if not node or not bridge.is_file() or not (bridge.parent / 'node_modules').is_dir():
-            raise RuntimeError('Hermes WhatsApp bridge or its Node dependencies are unavailable.')
+            raise RuntimeError('WhatsApp bridge or its Node dependencies are unavailable.')
         if self.read_state_callback:
             from services.whatsapp.bridge_read_state import prepare_bridge
             try:

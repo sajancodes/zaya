@@ -81,6 +81,26 @@ class HookReceiver:
                 pass
 
 
+def get_bridge_script(home: Path | None = None) -> Path:
+    """Return the preferred WhatsApp bridge script.
+    
+    Prefers Zaya's bundled native bridge under bridge/whatsapp/bridge.js.
+    Falls back to Hermes profile or hermes-agent if bundled bridge is absent.
+    """
+    bundled = ROOT / 'bridge' / 'whatsapp' / 'bridge.js'
+    if bundled.is_file():
+        return bundled
+    h = home or hermes_home()
+    candidates = [
+        h / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js',
+        Path.home() / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js',
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return bundled
+
+
 def hermes_home() -> Path:
     if os.environ.get('HERMES_HOME'):
         return Path(os.environ['HERMES_HOME']).expanduser().resolve()

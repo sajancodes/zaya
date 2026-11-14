@@ -10,7 +10,7 @@ import threading
 import time
 from core.event_bus import bus
 from core.shell_session import terminate_tree
-from services.whatsapp.bridge import hermes_home
+from services.whatsapp.bridge import get_bridge_script, hermes_home
 from services.whatsapp.connection import CONNECTION_PATH, load_connection, normalize_account
 
 
@@ -41,12 +41,10 @@ class PairingManager:
         with self.lock:
             if self.status()['paired'] or (self.process and self.process.poll() is None):
                 return self.status()
-            bridge = self.home / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js'
-            if not bridge.is_file():
-                bridge = Path.home() / 'hermes-agent' / 'scripts' / 'whatsapp-bridge' / 'bridge.js'
+            bridge = get_bridge_script(self.home)
             node = shutil.which('node')
             if not node or not bridge.is_file() or not (bridge.parent / 'node_modules').is_dir():
-                raise RuntimeError('Install Hermes WhatsApp bridge dependencies before pairing.')
+                raise RuntimeError('Install WhatsApp bridge dependencies before pairing.')
             # Existing linked identity is preserved. Do not erase a session to
             # produce a new QR merely because the local pointer is missing.
             creds = self.session / 'creds.json'
