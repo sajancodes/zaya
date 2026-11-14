@@ -2,12 +2,16 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import logging
+import sqlite3
 import threading
 import time
 from core.event_bus import bus
 from core.execution_policy import trust_context, TRUST_EXTERNAL_MESSAGE
 from services.whatsapp.importance import classify
 from services.whatsapp.policy import generate_reply, may_reply
+
+logger = logging.getLogger('zaya.whatsapp.handler')
 
 
 class ReplyWorker:
@@ -46,7 +50,9 @@ class ReplyWorker:
         try:
             while True:
                 with self._condition:
-                    pending = self._pending[chat_id]
+                    pending = self._pending.get(chat_id)
+                    if pending is None:
+                        return
                     deadline = time.monotonic() + 8
                     while not self.closed:
                         delay = min(pending['updated'] + self.quiet_seconds, deadline) - time.monotonic()
@@ -58,18 +64,27 @@ class ReplyWorker:
                     messages = list(pending['messages'].values())
                     pending['messages'].clear()
                     pending['in_flight'] = len(messages)
-                fresh = self._process_messages(messages)
+                fresh = False
+                try:
+                    fresh = self._process_messages(messages)
+                except Exception as proc_err:
+                    logger.warning("WhatsApp reply processing error for chat %s: %s", chat_id, proc_err)
                 with self._condition:
                     # A new message arrived during generation. Reconsider the
                     # whole burst instead of sending an already stale answer.
-                    if not fresh:
+                    if not fresh and not self.closed:
                         pending['messages'] = {**{m.message_id: m for m in messages}, **pending['messages']}
                     pending['in_flight'] = 0
-                    if not pending['messages']:
-                        del self._pending[chat_id]
+                    if not pending['messages'] or self.closed:
+                        self._pending.pop(chat_id, None)
                         self._condition.notify_all()
                         return
+        except Exception as drain_err:
+            logger.error("Unhandled error in WhatsApp drain worker for %s: %s", chat_id, drain_err)
         finally:
+            with self._condition:
+                self._pending.pop(chat_id, None)
+                self._condition.notify_all()
             self.slots.release()
 
     def close(self) -> None:
@@ -96,8 +111,20 @@ class ReplyWorker:
             trust_context.reset(token)
 
     def _process(self, messages) -> bool:
-        messages = [m for m in messages if m.direction == 'incoming' and self.store.rows(
-            'SELECT m.message_id FROM wa_messages m JOIN wa_chats c ON c.chat_id=m.chat_id WHERE m.message_id=? AND m.handled=0 AND m.timestamp>c.read_through', (m.message_id,))]
+        # Retry initial filter query with bounded retry for transient sqlite lock errors
+        filtered_messages = []
+        for attempt in range(3):
+            try:
+                filtered_messages = [m for m in messages if m.direction == 'incoming' and self.store.rows(
+                    'SELECT m.message_id FROM wa_messages m JOIN wa_chats c ON c.chat_id=m.chat_id WHERE m.message_id=? AND m.handled=0 AND m.timestamp>c.read_through', (m.message_id,))]
+                break
+            except sqlite3.OperationalError as db_err:
+                if attempt == 2:
+                    logger.warning("WhatsApp initial filter query aborted after 3 sqlite lock attempts: %s", db_err)
+                    return True
+                time.sleep(0.05 * (2 ** attempt))
+
+        messages = filtered_messages
         if self.closed or not messages:
             return True
         message = messages[-1]
