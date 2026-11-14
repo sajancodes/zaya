@@ -1163,7 +1163,7 @@ class ZayaLive:
         cfg: dict[str, Any] = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
-            input_audio_transcription={},
+            input_audio_transcription={"language_hints": ["en-US", "en"]},
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": compact_tool_declarations(_all_decls)}],
             # Resume transient reconnects within this process only. A fresh
