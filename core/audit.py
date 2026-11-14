@@ -9,7 +9,10 @@ from core.runtime_paths import get_user_data_dir
 
 ROOT = get_user_data_dir()
 _lock = threading.Lock()
-_secret_name = re.compile(r'key|token|secret|password|authorization|cookie|credential', re.I)
+_secret_name = re.compile(
+    r'^(?:.*[_-])?(?:api[_-]?key|apikey|secret|token|password|authorization|cookie|credential|private[_-]?key)(?:[_-].*)?$',
+    re.I
+)
 
 
 def redact(value):

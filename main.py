@@ -1385,7 +1385,11 @@ class ZayaLive:
             if destination:
                 args.update(target='browser', browser=destination)
 
-        print(f"[Zaya] 🔧 {name}  {args}")
+        from core.audit import redact as _audit_redact
+        _safe_args = _audit_redact(args)
+        if isinstance(_safe_args, dict):
+            _safe_args = {k: ('[REDACTED]' if any(w in str(k).lower() for w in ('message', 'text', 'password', 'body', 'secret', 'token')) else v) for k, v in _safe_args.items()}
+        print(f"[Zaya] 🔧 {name}  {_safe_args}")
         self.ui.set_state("THINKING")
 
 
@@ -1601,7 +1605,11 @@ class ZayaLive:
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
 
-        print(f"[Zaya] 📤 {name} → {str(result)[:80]}")
+        from core.audit import redact as _audit_redact
+        _safe_res_str = str(_audit_redact(result))
+        if len(_safe_res_str) > 600:
+            _safe_res_str = _safe_res_str[:600] + "..."
+        print(f"[Zaya] 📤 {name} → {_safe_res_str}")
 
         # A tool that declared itself NON_BLOCKING also says when its answer may
         # re-enter the conversation. Without this the model finishes whatever it
