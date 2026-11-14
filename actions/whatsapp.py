@@ -72,8 +72,13 @@ def whatsapp(parameters: dict, player=None, **_kwargs) -> ToolResult:
             chat_id = service.resolve_chat(parameters.get('chat', ''))
             service.store.mark_read(chat_id)
             return ToolResult('success', 'Local unread count cleared; WhatsApp read receipts were not changed.', evidence=[{'chat_id': chat_id, 'unread_count': 0}], side_effect=True)
-        return service.query(action, parameters.get('chat', ''), parameters.get('query', ''), parameters.get('limit', 10))
-    except (ValueError, OSError, requests.RequestException, sqlite3.Error) as error:
+        raw_limit = parameters.get('limit', 10)
+        try:
+            limit = int(raw_limit) if raw_limit is not None else 10
+        except (ValueError, TypeError):
+            limit = 10
+        return service.query(action, parameters.get('chat', ''), parameters.get('query', ''), limit)
+    except (ValueError, TypeError, KeyError, OSError, requests.RequestException, sqlite3.Error) as error:
         return ToolResult('failed', str(error))
 
 
