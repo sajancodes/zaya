@@ -833,10 +833,13 @@ class ZayaLive:
                 "Run: pip install fastapi \"uvicorn[standard]\" cryptography"
             )
             return None
-        key    = self._dashboard.new_key()
+        if hasattr(self._dashboard, "new_pairing_keys"):
+            key, qr_key = self._dashboard.new_pairing_keys()
+        else:
+            key = qr_key = self._dashboard.new_key()
         url    = self._dashboard.get_url()
         manual = self._dashboard.get_manual_url()
-        return url, key, f"{url}/auto-login?key={key}", manual
+        return url, key, f"{url}/auto-login?key={qr_key}", manual
 
     def _on_text_command(self, text: str, *, trust: str | None = None):
         if not self._loop or not self.session:

@@ -171,38 +171,82 @@
       return fetch(url, opts);
     }
 
-    // ── AES-256-CBC encryption (CryptoJS) ────────────────────────────────────
-    const _AES_SALT = 'ZAYA-DASHBOARD-v1';
-    let _aesKey = null;
+    // ── AES-256-GCM encryption (Web Crypto API) ──────────────────────────────
+    const _sessionSalt = sessionStorage.getItem('zaya_salt') || sessionStorage.getItem('jarvis_salt') || '';
+    let _aesGcmKey = null;
 
-    function _initCrypto(key) {
-      if (typeof CryptoJS === 'undefined') return false;
-      _aesKey = CryptoJS.SHA256(key + _AES_SALT);
-      return true;
-    }
-
-    function _encrypt(plaintext) {
-      if (!_aesKey || typeof CryptoJS === 'undefined') return null;
+    async function _initCrypto(key, saltHex) {
+      if (!window.crypto || !window.crypto.subtle) return false;
       try {
-        const iv  = CryptoJS.lib.WordArray.random(16);
-        const enc = CryptoJS.AES.encrypt(
-          CryptoJS.enc.Utf8.parse(plaintext), _aesKey,
-          { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+        const enc = new TextEncoder();
+        let saltBytes;
+        if (saltHex && saltHex.length >= 16) {
+          saltBytes = new Uint8Array(saltHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else {
+          saltBytes = enc.encode('ZAYA-DASHBOARD-v1');
+        }
+        const keyMaterial = await window.crypto.subtle.importKey(
+          'raw',
+          enc.encode(key),
+          { name: 'PBKDF2' },
+          false,
+          ['deriveKey']
         );
-        const ivHex = iv.toString(CryptoJS.enc.Hex);
-        const ctHex = enc.ciphertext.toString(CryptoJS.enc.Hex);
-        const hex   = ivHex + ctHex;
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < bytes.length; i++)
-          bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-        return btoa(String.fromCharCode(...bytes));
-      } catch { return null; }
+        _aesGcmKey = await window.crypto.subtle.deriveKey(
+          {
+            name: 'PBKDF2',
+            salt: saltBytes,
+            iterations: 100000,
+            hash: 'SHA-256'
+          },
+          keyMaterial,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt']
+        );
+        return true;
+      } catch (e) {
+        return false;
+      }
     }
 
-    const _encReady = _sessionKey ? _initCrypto(_sessionKey) : false;
-    const encBadge  = document.getElementById('enc');
-    if (_encReady) { encBadge.className = 'enc-badge on'; }
-    else           { encBadge.className = 'enc-badge off'; encBadge.textContent = 'NO ENC'; }
+    async function _encrypt(plaintext) {
+      if (!_aesGcmKey || !window.crypto || !window.crypto.subtle) return null;
+      try {
+        const nonce = window.crypto.getRandomValues(new Uint8Array(12));
+        const ctBuf = await window.crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: nonce },
+          _aesGcmKey,
+          new TextEncoder().encode(plaintext)
+        );
+        const combined = new Uint8Array(nonce.length + ctBuf.byteLength);
+        combined.set(nonce, 0);
+        combined.set(new Uint8Array(ctBuf), nonce.length);
+        let binary = '';
+        for (let i = 0; i < combined.length; i++) {
+          binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    const encBadge = document.getElementById('enc');
+    if (_sessionKey) {
+      _initCrypto(_sessionKey, _sessionSalt).then(ok => {
+        if (ok) {
+          encBadge.className = 'enc-badge on';
+          encBadge.textContent = 'AES-GCM';
+        } else {
+          encBadge.className = 'enc-badge off';
+          encBadge.textContent = 'NO ENC';
+        }
+      });
+    } else {
+      encBadge.className = 'enc-badge off';
+      encBadge.textContent = 'NO ENC';
+    }
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
     const feed  = document.getElementById('feed');
@@ -376,13 +420,13 @@
     });
 
     // ── Commands ──────────────────────────────────────────────────────────────
-    function doSend() {
+    async function doSend() {
       const inp = document.getElementById('inp');
       const txt = inp.value.trim();
       if (!txt) return;
       inp.value = '';
       append('user', txt);
-      const enc  = _encrypt(txt);
+      const enc  = await _encrypt(txt);
       const body = enc ? { enc } : { text: txt };
       _authFetch('/api/command', {
         method: 'POST',

@@ -172,6 +172,10 @@
           sessionStorage.setItem('jarvis_key', d.key);
           sessionStorage.setItem('zaya_token', d.token);
           sessionStorage.setItem('jarvis_token', d.token);
+          if (d.salt) {
+            sessionStorage.setItem('zaya_salt', d.salt);
+            sessionStorage.setItem('jarvis_salt', d.salt);
+          }
           location.replace('/');
           return;
         }
@@ -211,6 +215,10 @@
         sessionStorage.setItem('jarvis_key', key);
         sessionStorage.setItem('zaya_token', data.token);
         sessionStorage.setItem('jarvis_token', data.token);
+        if (data.salt) {
+          sessionStorage.setItem('zaya_salt', data.salt);
+          sessionStorage.setItem('jarvis_salt', data.salt);
+        }
         location.href = '/';
       } else {
         inp.value = '';

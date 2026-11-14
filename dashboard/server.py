@@ -93,20 +93,22 @@ def _dashboard_https_setting() -> str:
 _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]
 
-# ── AES-256-CBC ───────────────────────────────────────────────────────────────
-# The salt must be the SAME string the browser derives its key with (see
-# dashboard/static/app.html). Server and client had drifted apart — the client
-# used 'ZAYA-DASHBOARD-v1' while the server still used the pre-rename
-# 'JARVIS-DASHBOARD-v1' — so every encrypted remote command failed to decrypt
-# and the dashboard silently fell back to plaintext. The current salt wins; the
-# old one stays only as a decrypt fallback for a page already open in a browser.
+# ── AES-256-GCM ───────────────────────────────────────────────────────────────
 _AES_SALT = b'ZAYA-DASHBOARD-v1'
 _AES_LEGACY_SALTS = (b'JARVIS-DASHBOARD-v1',)
 
 
-def _derive_key(session_key: str, salt: bytes = _AES_SALT) -> bytes:
-    """SHA-256(sessionKey‖salt) → 32-byte AES-256 key (microseconds, no PBKDF2 needed)."""
-    return hashlib.sha256(session_key.encode('utf-8') + salt).digest()
+def _derive_key(session_key: str, salt: bytes = _AES_SALT, iterations: int = 100_000) -> bytes:
+    """PBKDF2-HMAC-SHA256(sessionKey, salt, iterations) → 32-byte AES-256 key."""
+    return hashlib.pbkdf2_hmac('sha256', session_key.encode('utf-8'), salt, iterations)
+
+
+def _encrypt_gcm(aes_key: bytes, plaintext: str) -> str:
+    """Encrypt plaintext with AES-256-GCM → base64(nonce[12] ‖ ciphertext ‖ tag[16])."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = secrets.token_bytes(12)
+    ct_and_tag = AESGCM(aes_key).encrypt(nonce, plaintext.encode('utf-8'), None)
+    return base64.b64encode(nonce + ct_and_tag).decode('ascii')
 
 
 def _decrypt_gcm(aes_key: bytes, enc_b64: str) -> str:
@@ -117,18 +119,6 @@ def _decrypt_gcm(aes_key: bytes, enc_b64: str) -> str:
         raise ValueError("Invalid AES-GCM payload length")
     nonce, ct_and_tag = raw[:12], raw[12:]
     return AESGCM(aes_key).decrypt(nonce, ct_and_tag, None).decode('utf-8')
-
-
-def _decrypt_cbc(aes_key: bytes, enc_b64: str) -> str:
-    """Decrypt base64(IV[16] ‖ ciphertext) with AES-256-CBC + PKCS7."""
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives import padding as sym_pad
-    raw      = base64.b64decode(enc_b64)
-    iv, ct   = raw[:16], raw[16:]
-    dec      = Cipher(algorithms.AES(aes_key), modes.CBC(iv)).decryptor()
-    padded   = dec.update(ct) + dec.finalize()
-    unpadder = sym_pad.PKCS7(128).unpadder()
-    return (unpadder.update(padded) + unpadder.finalize()).decode('utf-8')
 
 
 # ── CryptoJS (auto-download once, served locally) ─────────────────────────────
@@ -202,22 +192,11 @@ def _ensure_network_access(port: int) -> None:
                 time.sleep(2)
                 print(f"[Dashboard] Network setup complete — port {port} is open for local subnet.")
                 print("[Dashboard] Refresh your phone browser to connect.")
-        except Exception as e:
-            print(f"[Dashboard] Elevation request failed: {e}")
             else:
                 print("[Dashboard] Setup was not allowed.")
                 print("[Dashboard] Phone connections may fail until Zaya is run as Administrator.")
         except Exception as e:
-            print(f"[Dashboard] Firewall setup error: {e}")
-        finally:
-            # Cleanup after the bat has had time to run
-            def _cleanup(path: str) -> None:
-                time.sleep(5)
-                try:
-                    os.unlink(path)
-                except Exception:
-                    pass
-            threading.Thread(target=_cleanup, args=(bat_path,), daemon=True).start()
+            print(f"[Dashboard] Elevation request failed: {e}")
         return
 
     # ── macOS ─────────────────────────────────────────────────────────────────
@@ -457,13 +436,16 @@ class DashboardServer:
         self._tokens: dict[str, float]    = {}   # tok -> expires_at
         self._login_limiter               = RateLimiter(limit=5, window=60.0)
         self._token_keys: dict[str, str]  = {}   # auth_token → session_key
-        self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
+        self._token_salts: dict[str, bytes] = {} # auth_token → per-session salt
+        self._token_aes_keys: dict[str, bytes] = {} # auth_token → derived AES key
+        self._aes_cache:  dict[str, bytes]= {}   # cache_key → AES bytes
         self._clients: set[WebSocket]     = set()
         self._history: list[dict]         = []
         self._command_queue               = asyncio.Queue(maxsize=64)
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
+        self._key_links: dict[str, str]   = {}   # pin <-> qr_key link for one-time invalidation
         self._device_sessions: dict[str, dict] = {}  # legacy in-memory device tokens
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self.assistant_ready: Callable[[], bool] | None = None
@@ -506,12 +488,35 @@ class DashboardServer:
 
     # ── one-time key management ───────────────────────────────────────────
 
-    def new_key(self, expiry_secs: int = 600) -> str:
+    def new_pairing_keys(self, expiry_secs: int = 600) -> tuple[str, str]:
+        """Generate a short typed PIN (for manual/Android entry) and a >=128-bit secret (for QR auto-login)."""
         now = time.time()
         self._pending_keys = {k: v for k, v in self._pending_keys.items() if v > now}
-        key = ''.join(secrets.choice(_KEY_CHARS) for _ in range(6))
-        self._pending_keys[key] = now + expiry_secs
-        return key
+        self._key_links = {k: v for k, v in self._key_links.items() if k in self._pending_keys}
+        pin = ''.join(secrets.choice(_KEY_CHARS) for _ in range(6))
+        # 32 urlsafe bytes = 256 bits entropy (>=128 bits required)
+        qr_secret = secrets.token_urlsafe(32)
+        expiry = now + expiry_secs
+        self._pending_keys[pin] = expiry
+        self._pending_keys[qr_secret] = expiry
+        self._key_links[pin] = qr_secret
+        self._key_links[qr_secret] = pin
+        return pin, qr_secret
+
+    def new_key(self, expiry_secs: int = 600) -> str:
+        pin, _ = self.new_pairing_keys(expiry_secs)
+        return pin
+
+    def _consume_key(self, key: str) -> bool:
+        now = time.time()
+        if not key or key not in self._pending_keys or self._pending_keys[key] <= now:
+            return False
+        self._pending_keys.pop(key, None)
+        linked = self._key_links.pop(key, None)
+        if linked:
+            self._pending_keys.pop(linked, None)
+            self._key_links.pop(linked, None)
+        return True
 
     @staticmethod
     def _ssl_enabled() -> bool:
@@ -530,26 +535,25 @@ class DashboardServer:
             return f"{self._ip}:{PORT + 1}"
         return f"{self._ip}:{PORT}"
 
-    def _aes_key(self, session_key: str) -> bytes:
-        if session_key not in self._aes_cache:
-            self._aes_cache[session_key] = _derive_key(session_key)
-        return self._aes_cache[session_key]
+    def _aes_key(self, session_key: str, salt: bytes = _AES_SALT) -> bytes:
+        cache_key = f"{session_key}:{salt.hex()}"
+        if cache_key not in self._aes_cache:
+            self._aes_cache[cache_key] = _derive_key(session_key, salt)
+        return self._aes_cache[cache_key]
 
     def _decrypt(self, token: str, enc_b64: str) -> str | None:
-        sk = self._token_keys.get(token)
-        if not sk:
+        aes_k = self._token_aes_keys.get(token)
+        if not aes_k:
+            sk = self._token_keys.get(token)
+            if not sk:
+                return None
+            salt = self._token_salts.get(token, _AES_SALT)
+            aes_k = self._aes_key(sk, salt)
+            self._token_aes_keys[token] = aes_k
+        try:
+            return _decrypt_gcm(aes_k, enc_b64)
+        except Exception:
             return None
-        for salt in (_AES_SALT, *_AES_LEGACY_SALTS):
-            aes_k = _derive_key(sk, salt)
-            try:
-                return _decrypt_gcm(aes_k, enc_b64)
-            except Exception:
-                pass
-            try:
-                return _decrypt_cbc(aes_k, enc_b64)
-            except Exception:
-                continue
-        return None
 
     # ── callbacks ────────────────────────────────────────────────────────
 
@@ -581,12 +585,14 @@ class DashboardServer:
         app = FastAPI(docs_url=None, redoc_url=None)
 
         def _valid_token(tok: str) -> bool:
-            if not _valid_token(tok):
+            if not tok:
                 return False
             exp = self._tokens.get(tok, 0.0)
             if exp < time.time():
                 self._tokens.pop(tok, None)
                 self._token_keys.pop(tok, None)
+                self._token_salts.pop(tok, None)
+                self._token_aes_keys.pop(tok, None)
                 return False
             return True
 
@@ -626,27 +632,41 @@ class DashboardServer:
             body    = await req.json()
             entered = str(body.get("pin", "")).strip().upper()
             now     = time.time()
-            if entered in self._pending_keys and self._pending_keys[entered] > now:
-                del self._pending_keys[entered]          # one-time use
+            if self._consume_key(entered):
                 tok = secrets.token_urlsafe(32)
+                salt = secrets.token_bytes(16)
                 self._tokens[tok] = now + 86400.0
                 self._token_keys[tok] = entered
-                self._aes_key(entered)                   # pre-derive & cache
+                self._token_salts[tok] = salt
+                self._token_aes_keys[tok] = _derive_key(entered, salt)
                 if self._connect_callback:
                     self._connect_callback()
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Remote connection established."}
                 ))
                 # Bearer token in response body — no cookies needed (works on any browser/HTTP)
-                return JSONResponse({"ok": True, "token": tok})
+                return JSONResponse({"ok": True, "token": tok, "salt": salt.hex()})
             return JSONResponse({"ok": False, "error": "Invalid or expired key"},
                                 status_code=401)
 
         @app.get("/auto-login")
-        async def auto_login(key: str = ""):
+        async def auto_login(req: Request, key: str = ""):
             """QR code target — validates one-time key, creates session, redirects phone."""
+            client_ip = req.client.host if req.client else "unknown"
+            if not self._login_limiter.allow(client_ip):
+                return HTMLResponse("""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
+<style>
+  body{background:#07090f;color:#dde3ed;font-family:sans-serif;
+       display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
+  h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
+</style></head>
+<body><div><h2>Too Many Requests</h2>
+<p>Too many login attempts. Please wait a minute.</p>
+</div></body></html>""", status_code=429)
+
             now = time.time()
-            if not key or key not in self._pending_keys or self._pending_keys[key] <= now:
+            if not key or not self._consume_key(key):
                 return HTMLResponse("""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
@@ -658,11 +678,13 @@ class DashboardServer:
 <p>Press <strong style="color:#dde3ed">Remote Control</strong> in Zaya to get a new QR code.</p>
 </div></body></html>""")
 
-            del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
+            salt    = secrets.token_bytes(16)
+            salt_hex = salt.hex()
             self._tokens[tok] = now + 86400.0
             self._token_keys[tok] = key
-            self._aes_key(key)
+            self._token_salts[tok] = salt
+            self._token_aes_keys[tok] = _derive_key(key, salt)
             dev_tok, device_id = self._pair_browser_device(key)
 
             if self._connect_callback:
@@ -684,6 +706,8 @@ class DashboardServer:
   sessionStorage.setItem('jarvis_token','{tok}');
   sessionStorage.setItem('zaya_key','{key}');
   sessionStorage.setItem('jarvis_key','{key}');
+  sessionStorage.setItem('zaya_salt','{salt_hex}');
+  sessionStorage.setItem('jarvis_salt','{salt_hex}');
   localStorage.setItem('zaya_device_token','{dev_tok}');
   localStorage.setItem('jarvis_device_token','{dev_tok}');
   localStorage.setItem('zaya_device_id','{device_id}');
@@ -700,6 +724,9 @@ class DashboardServer:
             Paired devices survive a Zaya restart (they are rows in the local
             SQLite store, not dict entries), so a phone or browser that was
             trusted yesterday reconnects by itself after the laptop reboots."""
+            client_ip = req.client.host if req.client else "unknown"
+            if not self._login_limiter.allow(client_ip):
+                return JSONResponse({"ok": False, "error": "Too many attempts. Please wait a minute."}, status_code=429)
             try:
                 body = await req.json()
             except Exception:
@@ -719,16 +746,18 @@ class DashboardServer:
                 return JSONResponse({"ok": False}, status_code=401)
 
             tok = secrets.token_urlsafe(32)
+            salt = secrets.token_bytes(16)
             self._tokens[tok] = time.time() + 86400.0
             self._token_keys[tok] = session_key
-            self._aes_key(session_key)
+            self._token_salts[tok] = salt
+            self._token_aes_keys[tok] = _derive_key(session_key, salt)
             if self._connect_callback:
                 self._connect_callback()
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Known device reconnected automatically."}
             ))
             return JSONResponse({"ok": True, "token": tok, "key": session_key,
-                                 "device_id": device_id})
+                                 "device_id": device_id, "salt": salt.hex()})
 
         def _pair_browser_device(session_key: str) -> tuple[str, str]:
             """Register this browser as a durable paired device.
@@ -753,6 +782,11 @@ class DashboardServer:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             count = len(self._device_sessions) + len(self._tokens)
             self._device_sessions.clear()
+            self._tokens.clear()
+            self._token_keys.clear()
+            self._token_salts.clear()
+            self._token_aes_keys.clear()
+            self._aes_cache.clear()
             self._tokens.clear()
             self._token_keys.clear()
             self._aes_cache.clear()

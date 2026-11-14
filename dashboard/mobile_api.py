@@ -268,14 +268,19 @@ class MobileApi:
                 return JSONResponse({'ok': False, 'error': 'Invalid request'}, status_code=400)
             key = str(body.get('key') or '').strip().upper()
             now = time.time()
-            pending = self.server._pending_keys.get(key)
-            if not key or pending is None or pending <= now:
+            if hasattr(self.server, '_consume_key'):
+                consumed = self.server._consume_key(key)
+            else:
+                pending = self.server._pending_keys.get(key)
+                consumed = pending is not None and pending > now
+                if consumed:
+                    del self.server._pending_keys[key]
+            if not consumed:
                 return JSONResponse({'ok': False, 'error': 'Invalid or expired pairing key'},
                                     status_code=401)
             if not self._registry_ready or self.devices is None:
                 return JSONResponse({'ok': False, 'error': 'Device storage unavailable'},
                                     status_code=503)
-            del self.server._pending_keys[key]        # one-time use, like the QR flow
             record, secret = self.devices.pair(
                 str(body.get('device_name') or 'Android device')[:80],
                 app_version=str(body.get('app_version') or '')[:40],
