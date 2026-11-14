@@ -1,5 +1,6 @@
 """Application facade: hook ingestion, structured inbox queries and delivery."""
 from __future__ import annotations
+import difflib
 import hashlib
 from pathlib import Path
 from core.runtime_paths import mutable_path
@@ -113,12 +114,69 @@ class WhatsAppService:
         return True
 
     def resolve_chat(self, value: str) -> str:
+        value = str(value or '').strip()
         if '@' in value:
             return self.store.canonical_chat(validate_chat_id(value))
-        matches = self.store.rows('SELECT chat_id FROM wa_chats WHERE title=? COLLATE NOCASE', (value,))
-        if len(matches) != 1:
-            raise ValueError('Contact name is unknown or ambiguous. Select an exact chat ID from recent conversations.')
-        return matches[0]['chat_id']
+        if not value:
+            raise ValueError('Contact name or chat ID is required.')
+
+        all_chats = self.store.rows('SELECT chat_id, title FROM wa_chats')
+        val_lower = value.lower()
+
+        # 1. Exact case-insensitive match
+        exact = [c for c in all_chats if (c['title'] or '').strip().lower() == val_lower]
+        if len(exact) == 1:
+            return exact[0]['chat_id']
+        if len(exact) > 1:
+            candidates = ', '.join(f"\"{c['title']}\" ({c['chat_id']})" for c in exact)
+            raise ValueError(f'Ambiguous contact: multiple chats match "{value}" exactly: {candidates}')
+
+        # 2. Case-insensitive prefix match
+        prefix = [c for c in all_chats if (c['title'] or '').strip().lower().startswith(val_lower)]
+        if len(prefix) == 1:
+            return prefix[0]['chat_id']
+        if len(prefix) > 1:
+            candidates = ', '.join(f"\"{c['title']}\" ({c['chat_id']})" for c in prefix)
+            raise ValueError(f'Ambiguous contact: multiple chats match prefix "{value}": {candidates}')
+
+        # 3. Case-insensitive substring match
+        substr = [c for c in all_chats if val_lower in (c['title'] or '').strip().lower()]
+        if len(substr) == 1:
+            return substr[0]['chat_id']
+        if len(substr) > 1:
+            candidates = ', '.join(f"\"{c['title']}\" ({c['chat_id']})" for c in substr)
+            raise ValueError(f'Ambiguous contact: multiple chats match substring "{value}": {candidates}')
+
+        # 4. Light fuzzy matching
+        # Score against full title as well as individual tokens in title
+        scored_chats = []
+        for c in all_chats:
+            t = (c['title'] or '').strip()
+            if not t:
+                continue
+            full_ratio = difflib.SequenceMatcher(None, val_lower, t.lower()).ratio()
+            token_ratios = [difflib.SequenceMatcher(None, val_lower, part.lower()).ratio() for part in t.split()]
+            best_score = max([full_ratio] + token_ratios)
+            if best_score >= 0.70:
+                scored_chats.append((best_score, c))
+
+        if scored_chats:
+            scored_chats.sort(key=lambda x: x[0], reverse=True)
+            top_score = scored_chats[0][0]
+            # If top match is clearly ahead (by >= 0.10), select it
+            top_tier = [c for score, c in scored_chats if (top_score - score) < 0.10]
+            if len(top_tier) == 1:
+                return top_tier[0]['chat_id']
+            candidates = ', '.join(f"\"{c['title']}\" ({c['chat_id']})" for c in top_tier)
+            raise ValueError(f'Ambiguous contact "{value}": multiple close matches found: {candidates}')
+
+        # 5. No matches
+        titles = [c['title'] for c in all_chats if c['title']]
+        suggestions = difflib.get_close_matches(value, titles, n=3, cutoff=0.4)
+        if suggestions:
+            suggest_str = ', '.join(f'"{s}"' for s in suggestions)
+            raise ValueError(f'No chat matches "{value}". Did you mean: {suggest_str}?')
+        raise ValueError(f'No chat matches "{value}".')
 
     def query(self, action: str, chat: str = '', query: str = '', limit: int = 10) -> ToolResult:
         limit = max(1, min(int(limit), 100))
@@ -149,7 +207,22 @@ class WhatsAppService:
         elif action == 'important':
             data = self.store.rows('SELECT * FROM wa_alerts WHERE acknowledged_at IS NULL ORDER BY score DESC,created_at DESC LIMIT ?', (limit,))
         elif action == 'search':
-            data = self.store.rows('SELECT * FROM wa_messages WHERE text LIKE ? ORDER BY timestamp DESC LIMIT ?', ('%' + query[:200] + '%', limit))
+            escaped = (query[:200]).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            pattern = f'%{escaped}%'
+            sql = '''
+                SELECT c.chat_id, c.title, m.message_id, m.text, m.timestamp
+                FROM wa_chats c
+                LEFT JOIN wa_messages m ON m.chat_id = c.chat_id
+                WHERE (c.title LIKE ? ESCAPE '\\' OR (m.text IS NOT NULL AND m.text LIKE ? ESCAPE '\\'))
+            '''
+            params = [pattern, pattern]
+            if chat:
+                resolved_chat_id = self.resolve_chat(chat)
+                sql += ' AND c.chat_id = ?'
+                params.append(resolved_chat_id)
+            sql += ' ORDER BY COALESCE(m.timestamp, c.last_message_at, 0) DESC LIMIT ?'
+            params.append(limit)
+            data = self.store.rows(sql, tuple(params))
         else:
             return ToolResult('failed', f'Unknown inbox query: {action}')
         ready = bool(self.native_bridge and self.native_bridge.ready)
