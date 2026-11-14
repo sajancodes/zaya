@@ -54,7 +54,8 @@ class WhatsAppService:
     def _connect_live(self) -> None:
         if self.closed.is_set():
             return
-        if self.native_bridge and self.native_bridge.process and self.native_bridge.process.poll() is None:
+        if (self.native_bridge and self.native_bridge.process and self.native_bridge.process.poll() is None
+                and hasattr(self.native_bridge, 'thread') and self.native_bridge.thread and self.native_bridge.thread.is_alive()):
             return
         if self.native_bridge:
             self.native_bridge.close()

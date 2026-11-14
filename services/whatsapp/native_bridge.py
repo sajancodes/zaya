@@ -181,46 +181,60 @@ class NativeBridge:
         self.thread.start()
 
     def _poll(self) -> None:
-        while not self.closed.wait(1):
-            if self.process.poll() is not None:
-                self.ready = False
-                self.error = f'Bridge exited with code {self.process.returncode}.'
-                return
-            try:
-                response = self.http.get(self.url + '/health', timeout=3)
-                response.raise_for_status()
-                health = response.json()
-                if not isinstance(health, dict):
-                    raise ValueError('Bridge returned invalid health data.')
-                self.ready = health.get('status') == 'connected'
-                if not self.ready:
-                    continue
-                response = self.http.get(self.url + '/messages', timeout=3)
-                response.raise_for_status()
-                events = response.json()
-                if not isinstance(events, list):
-                    raise ValueError('Bridge returned an invalid message batch.')
-                for event in events:
-                    try:
-                        if not isinstance(event, dict):
-                            raise ValueError('Invalid bridge event')
-                        if event.get('event') == 'chat.read_state':
-                            if self.read_state_callback:
-                                self.read_state_callback(event)
+        try:
+            while not self.closed.wait(1):
+                if self.process.poll() is not None:
+                    self.ready = False
+                    self.error = f'Bridge exited with code {self.process.returncode}.'
+                    return
+                try:
+                    response = self.http.get(self.url + '/health', timeout=3)
+                    response.raise_for_status()
+                    health = response.json()
+                    if not isinstance(health, dict):
+                        raise ValueError('Bridge returned invalid health data.')
+                    self.ready = health.get('status') == 'connected'
+                    if not self.ready:
+                        continue
+                    response = self.http.get(self.url + '/messages', timeout=3)
+                    response.raise_for_status()
+                    events = response.json()
+                    if not isinstance(events, list):
+                        raise ValueError('Bridge returned an invalid message batch.')
+                    for event in events:
+                        try:
+                            if not isinstance(event, dict):
+                                raise ValueError('Invalid bridge event')
+                            if event.get('event') == 'chat.read_state':
+                                if self.read_state_callback:
+                                    try:
+                                        self.read_state_callback(event)
+                                    except Exception as cb_err:
+                                        self.error = f'Read state callback error: {cb_err}'
+                                self.last_event_at = time.time()
+                                continue
+                            account = self.connection.get('account_id') or ''
+                            owner_id = account.split('@')[0].split(':')[0]
+                            owner_id = owner_id + '@s.whatsapp.net' if owner_id else ''
+                            message = normalize_event(event, owner_id)
+                            try:
+                                self.callback(message)
+                            except Exception as cb_err:
+                                self.error = f'Message callback error: {cb_err}'
                             self.last_event_at = time.time()
-                            continue
-                        account = self.connection.get('account_id') or ''
-                        owner_id = account.split('@')[0].split(':')[0]
-                        owner_id = owner_id + '@s.whatsapp.net' if owner_id else ''
-                        message = normalize_event(event, owner_id)
-                        self.callback(message)
-                        self.last_event_at = time.time()
-                    except (ValueError, KeyError, TypeError):
-                        self.error = 'One unsupported bridge event was skipped; no attachment paths were opened.'
-                self.error = None
-            except (requests.RequestException, ValueError) as error:
-                self.ready = False
-                self.error = f'Bridge feed unavailable: {type(error).__name__}'
+                        except (ValueError, KeyError, TypeError):
+                            self.error = 'One unsupported bridge event was skipped; no attachment paths were opened.'
+                        except Exception as ev_err:
+                            self.error = f'Bridge event processing error: {ev_err}'
+                except (requests.RequestException, ValueError) as error:
+                    self.ready = False
+                    self.error = f'Bridge feed unavailable: {type(error).__name__}'
+                except Exception as loop_err:
+                    self.error = f'Bridge polling loop error: {loop_err}'
+        finally:
+            self.ready = False
+            if not self.closed.is_set() and not self.error:
+                self.error = 'Bridge polling loop terminated unexpectedly.'
 
     def send(self, chat_id: str, message: str, reply_to_id: str | None = None) -> subprocess.CompletedProcess:
         validate_chat_id(chat_id)
