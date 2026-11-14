@@ -45,7 +45,7 @@ def get_resource_dir() -> Path:
 
 
 def get_user_data_dir() -> Path:
-    """Return mutable user data root directory.
+    r"""Return mutable user data root directory.
 
     In production/frozen builds and normal Windows development installs, the app
     stores user data in %LOCALAPPDATA%\Zaya. The repo root is only used as a
