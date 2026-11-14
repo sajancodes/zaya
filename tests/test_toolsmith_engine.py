@@ -73,7 +73,7 @@ class TestToolsmithEngine:
         # Ctypes import blocked
         ok1, reason1 = engine.validate_code_safety(UNSAFE_TOOL_CODE_CTYPES)
         assert ok1 is False
-        assert "Forbidden import 'ctypes'" in reason1
+        assert "not in the approved safe modules list" in reason1 or "Forbidden import 'ctypes'" in reason1
 
         # Eval call blocked
         ok2, reason2 = engine.validate_code_safety(UNSAFE_TOOL_CODE_EVAL)

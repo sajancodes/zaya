@@ -23,19 +23,46 @@ from core.runtime_paths import mutable_path
 
 logger = logging.getLogger(__name__)
 
-# Security: AST banlist for synthesized tools to prevent destructive local execution
-_FORBIDDEN_MODULES = {
-    "ctypes",
-    "_ctypes",
-    "win32api",
-    "win32con",
-    "subprocess_raw",
+# Security: strict import allowlist for synthesized tools
+_ALLOWED_MODULES = {
+    "math",
+    "datetime",
+    "time",
+    "json",
+    "re",
+    "string",
+    "collections",
+    "itertools",
+    "functools",
+    "dataclasses",
+    "typing",
+    "urllib.parse",
+    "hashlib",
+    "random",
+    "base64",
+    "uuid",
 }
 
 _FORBIDDEN_CALLS = {
     "eval",
     "exec",
     "__import__",
+    "compile",
+    "open",
+    "input",
+}
+
+_FORBIDDEN_ATTRS = {
+    "__subclasses__",
+    "__bases__",
+    "__mro__",
+    "__globals__",
+    "__code__",
+    "__builtins__",
+    "f_globals",
+    "f_locals",
+    "f_builtins",
+    "gi_frame",
 }
 
 
@@ -103,22 +130,30 @@ class ToolsmithEngine:
             return False, f"Syntax error in code: {e}"
 
         for node in ast.walk(tree):
-            # Check forbidden imports
+            # Enforce import allowlist
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     root = alias.name.split(".")[0]
-                    if root in _FORBIDDEN_MODULES:
-                        return False, f"Forbidden import '{root}' is not allowed in synthesized tools."
+                    if alias.name not in _ALLOWED_MODULES and root not in _ALLOWED_MODULES:
+                        return False, f"Import '{alias.name}' is not in the approved safe modules list."
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     root = node.module.split(".")[0]
-                    if root in _FORBIDDEN_MODULES:
-                        return False, f"Forbidden from-import '{root}' is not allowed in synthesized tools."
+                    if node.module not in _ALLOWED_MODULES and root not in _ALLOWED_MODULES:
+                        return False, f"From-import '{node.module}' is not in the approved safe modules list."
 
             # Check forbidden calls
             elif isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id in _FORBIDDEN_CALLS:
-                    return False, f"Forbidden built-in call '{node.func.id}()' is not allowed."
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in _FORBIDDEN_CALLS:
+                        return False, f"Forbidden built-in call '{node.func.id}()' is not allowed."
+                    if node.func.id == "getattr":
+                        return False, "Dynamic attribute inspection via getattr() is forbidden."
+
+            # Check forbidden attribute escapes
+            elif isinstance(node, ast.Attribute):
+                if node.attr in _FORBIDDEN_ATTRS or node.attr.startswith("__"):
+                    return False, f"Access to sensitive or dunder attribute '{node.attr}' is forbidden."
 
         # Verify TOOL dictionary declaration exists in AST
         tool_decl_found = False
